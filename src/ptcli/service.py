@@ -2375,13 +2375,17 @@ def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[st
 def _candidate_execution_context(candidate_job_id: str | None, candidate_item: dict[str, Any], digest: dict[str, Any] | None, submit_request: dict[str, Any], effective_request: dict[str, Any]) -> dict[str, Any]:
     effective_snapshot = {key: value for key, value in effective_request.items() if key not in {"candidate_submission", "check_submission"}}
     policy_execution_handoff = _candidate_item_policy_execution_handoff(candidate_item)
+    site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(candidate_item)
+    site_policy_summary = _candidate_item_site_policy_summary(candidate_item, site_policy_profile_handoff)
     policy_execution = _daily_candidate_submission_policy_execution({**candidate_item, "submit_request": submit_request})
     qbit_request = _candidate_qbit_options(effective_snapshot)
     material_options = _request_material_options(effective_snapshot)
     missing_user_inputs = _candidate_execution_missing_inputs(effective_snapshot)
-    blockers = list(dict.fromkeys(_string_list(candidate_item.get("blockers")) + _string_list(policy_execution_handoff.get("blockers")) + missing_user_inputs))
+    blockers = list(dict.fromkeys(_string_list(candidate_item.get("blockers")) + _string_list(policy_execution_handoff.get("blockers")) + _string_list(site_policy_profile_handoff.get("blockers")) + missing_user_inputs))
     if policy_execution_handoff and policy_execution_handoff.get("ready") is not True:
         blockers.append("policy_execution_handoff.ready=false")
+    if site_policy_profile_handoff and site_policy_profile_handoff.get("ready") is not True:
+        blockers.append("site_policy_profile_handoff.ready=false")
     if policy_execution and policy_execution.get("policy_coverage_ready") is False:
         blockers.append("policy_execution.ready=false")
     blockers = list(dict.fromkeys(blockers))
@@ -2411,9 +2415,11 @@ def _candidate_execution_context(candidate_job_id: str | None, candidate_item: d
         "qbit_request": qbit_request,
         "policy_execution": policy_execution,
         "policy_execution_handoff": policy_execution_handoff,
-        "read_before_submit": ["candidate_execution_context", "policy_execution_handoff", "policy_execution.qbit_limits", "policy_execution.seeding_requirements", "effective_retorrent_request"],
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
+        "read_before_submit": ["candidate_execution_context", "site_policy_profile_handoff", "policy_execution_handoff", "policy_execution.qbit_limits", "policy_execution.seeding_requirements", "effective_retorrent_request"],
         "continue_when": "user approves this candidate and missing_user_inputs is empty",
-        "stop_when": ["candidate_execution_context.blockers is not empty", "policy_execution_handoff.ready=false", "rule obligations are not ready"],
+        "stop_when": ["candidate_execution_context.blockers is not empty", "site_policy_profile_handoff.ready=false", "policy_execution_handoff.ready=false", "rule obligations are not ready"],
         "blockers": blockers,
         "next_actions": _candidate_execution_context_next_actions(blockers, missing_user_inputs),
     }
@@ -2453,6 +2459,48 @@ def _candidate_item_policy_execution_handoff(candidate_item: dict[str, Any]) -> 
     if isinstance(policy_execution.get("policy_execution_handoff"), dict):
         return policy_execution["policy_execution_handoff"]
     return {}
+
+
+def _candidate_item_site_policy_profile_handoff(candidate_item: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(candidate_item.get("site_policy_profile_handoff"), dict):
+        return candidate_item["site_policy_profile_handoff"]
+    policy_summary = candidate_item.get("policy_summary") if isinstance(candidate_item.get("policy_summary"), dict) else {}
+    if isinstance(policy_summary.get("site_policy_profile_handoff"), dict):
+        return policy_summary["site_policy_profile_handoff"]
+    publish_card = candidate_item.get("publish_card") if isinstance(candidate_item.get("publish_card"), dict) else {}
+    if isinstance(publish_card.get("site_policy_profile_handoff"), dict):
+        return publish_card["site_policy_profile_handoff"]
+    execution_context = candidate_item.get("candidate_execution_context") if isinstance(candidate_item.get("candidate_execution_context"), dict) else {}
+    if isinstance(execution_context.get("site_policy_profile_handoff"), dict):
+        return execution_context["site_policy_profile_handoff"]
+    return {}
+
+
+def _candidate_item_site_policy_summary(candidate_item: dict[str, Any], site_policy_profile_handoff: dict[str, Any] | None = None) -> dict[str, Any]:
+    if isinstance(candidate_item.get("site_policy_summary"), dict):
+        return candidate_item["site_policy_summary"]
+    policy_summary = candidate_item.get("policy_summary") if isinstance(candidate_item.get("policy_summary"), dict) else {}
+    if isinstance(policy_summary.get("site_policy_summary"), dict):
+        return policy_summary["site_policy_summary"]
+    publish_card = candidate_item.get("publish_card") if isinstance(candidate_item.get("publish_card"), dict) else {}
+    if isinstance(publish_card.get("site_policy_summary"), dict):
+        return publish_card["site_policy_summary"]
+    handoff = site_policy_profile_handoff if isinstance(site_policy_profile_handoff, dict) else {}
+    if not handoff:
+        return {}
+    return {
+        "ready": handoff.get("ready") is True,
+        "accepted_rules": handoff.get("accepted_rules") is True,
+        "source_tracker": handoff.get("source_tracker"),
+        "target_trackers": handoff.get("target_trackers"),
+        "source_ready": handoff.get("source_ready") is True,
+        "targets_ready": handoff.get("targets_ready") is True,
+        "rule_obligations_ready": handoff.get("rule_obligations_ready") is True,
+        "qbit_limits": handoff.get("qbit_limits") if isinstance(handoff.get("qbit_limits"), dict) else {},
+        "seeding_requirements": handoff.get("seeding_requirements") if isinstance(handoff.get("seeding_requirements"), dict) else {},
+        "transfer_rules": handoff.get("transfer_rules") if isinstance(handoff.get("transfer_rules"), dict) else {},
+        "blockers": _string_list(handoff.get("blockers")),
+    }
 
 
 def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, kind: str, mode: str) -> dict[str, Any]:
@@ -7510,10 +7558,14 @@ def _daily_candidate_schedule_approval_queue(approval_items: list[dict[str, Any]
 def _daily_candidate_schedule_approval_item(submission_item: dict[str, Any], source_item: dict[str, Any], schedule_item: dict[str, Any]) -> dict[str, Any]:
     policy_risk_summary = source_item.get("policy_risk_summary") if isinstance(source_item.get("policy_risk_summary"), dict) else {}
     decision_summary = source_item.get("decision_summary") if isinstance(source_item.get("decision_summary"), dict) else {}
+    site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff({**source_item, **submission_item})
+    site_policy_summary = _candidate_item_site_policy_summary({**source_item, **submission_item}, site_policy_profile_handoff)
     approval_prompt = source_item.get("approval_prompt") if isinstance(source_item.get("approval_prompt"), dict) else {}
     if approval_prompt:
         approval_prompt = {
             **approval_prompt,
+            "site_policy_profile_handoff": site_policy_profile_handoff,
+            "site_policy_summary": site_policy_summary,
             "submit_tool": submission_item.get("submit_tool"),
             "submit_endpoint": submission_item.get("submit_endpoint"),
             "submit_request": submission_item.get("request_template") if approval_prompt.get("ready") is not False else None,
@@ -7538,6 +7590,8 @@ def _daily_candidate_schedule_approval_item(submission_item: dict[str, Any], sou
         "duplicate_clear": source_item.get("duplicate_clear") if "duplicate_clear" in source_item else decision_summary.get("duplicate_clear"),
         "metadata": source_item.get("metadata") if isinstance(source_item.get("metadata"), dict) else {},
         "policy_risk_summary": policy_risk_summary,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "submit_tool": submission_item.get("submit_tool"),
         "submit_endpoint": submission_item.get("submit_endpoint"),
         "request_template": submission_item.get("request_template"),
@@ -7564,6 +7618,8 @@ def _daily_candidate_schedule_approval_prompt(
     risk_level = source_item.get("risk_level") or decision_summary.get("risk_level")
     policy_risk_level = source_item.get("policy_risk_level") or policy_risk_summary.get("risk_level")
     blockers = _string_list(source_item.get("blockers")) + _string_list(submission_item.get("blockers"))
+    site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff({**source_item, **submission_item})
+    site_policy_summary = _candidate_item_site_policy_summary({**source_item, **submission_item}, site_policy_profile_handoff)
     ready = bool(request_template and duplicate_clear is not False and policy_risk_level != "high" and not blockers)
     source_tracker = source_item.get("source_tracker") or schedule_item.get("source_tracker")
     source_id = source_item.get("source_id")
@@ -7585,6 +7641,8 @@ def _daily_candidate_schedule_approval_prompt(
         "duplicate_clear": duplicate_clear,
         "risk_level": risk_level,
         "policy_risk_level": policy_risk_level,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "approval_text": f"Approve daily PT retorrent candidate {label}: {source_item.get('title') or ''}".strip(),
         "confirm_phrase": f"Approve {source_tracker}-{source_id} to retorrent after rule review",
         "submit_tool": submission_item.get("submit_tool"),
@@ -8701,6 +8759,8 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
     source_url_retorrent_request = digest_item.get("request") if isinstance(digest_item.get("request"), dict) else digest_item.get("submit_request") if isinstance(digest_item.get("submit_request"), dict) else {}
     effective_retorrent_request = {**source_url_retorrent_request, **_candidate_submit_overrides(request_template)}
     execution_context = _candidate_execution_context(job_id or None, {**digest_item, **top_candidate}, None, source_url_retorrent_request, effective_retorrent_request)
+    site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff({**digest_item, **top_candidate, "candidate_execution_context": execution_context})
+    site_policy_summary = _candidate_item_site_policy_summary({**digest_item, **top_candidate}, site_policy_profile_handoff)
     return {
         "schedule_name": job.get("schedule_name"),
         "candidate_job_id": job_id,
@@ -8711,6 +8771,8 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         "request_template": request_template,
         "source_url_retorrent_request": source_url_retorrent_request,
         "candidate_execution_context": execution_context,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "identity_inherited_from_candidate": {
             "source_tracker": digest_item.get("source_tracker"),
             "target_trackers": digest_item.get("target_trackers"),
@@ -8738,7 +8800,7 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         ],
         "missing_confirmations": _string_list(digest_item.get("missing_confirmations")),
         "after_submit": {
-            "read_fields": ["job_handoff", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_request", "job_handoff.material_input_template", "candidate_submission_summary", "candidate_submission_summary.execution_state", "candidate_submission_summary.execution_handoff", "candidate_submission_handoff", "manual_retorrent_handoff", "materials_handoff", "agent_decision", "status_endpoint", "summary_endpoint"],
+            "read_fields": ["job_handoff", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_request", "job_handoff.material_input_template", "site_policy_profile_handoff", "candidate_submission_summary", "candidate_submission_summary.execution_state", "candidate_submission_summary.execution_handoff", "candidate_submission_handoff", "manual_retorrent_handoff", "materials_handoff", "agent_decision", "status_endpoint", "summary_endpoint"],
             "poll_with": "get_job_status",
             "summary_with": "get_job_summary",
             "stop_when": ["job_handoff.action=stop_duplicate", "job_handoff.action=collect_confirmations", "job_handoff.action=configure_policy"],
@@ -16453,6 +16515,8 @@ def _daily_candidate_batch_publish_status(tracking_report: dict[str, Any], final
 
 def _daily_candidate_publish_approval_card(item: dict[str, Any]) -> dict[str, Any]:
     request = item.get("submit_request") if isinstance(item.get("submit_request"), dict) else {}
+    site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(item)
+    site_policy_summary = _candidate_item_site_policy_summary(item, site_policy_profile_handoff)
     return {
         "kind": "ptcli.daily_candidate_publish_card",
         "type": "approval",
@@ -16467,6 +16531,8 @@ def _daily_candidate_publish_approval_card(item: dict[str, Any]) -> dict[str, An
         "request": request,
         "requires_user_approval": True,
         "required_overrides": item.get("required_overrides") if isinstance(item.get("required_overrides"), list) else ["confirm_upload=true", "save_path or path"],
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
     }
 
 
@@ -16616,6 +16682,8 @@ def _daily_candidate_approval_items(submission_plan: dict[str, Any]) -> list[dic
         request = submit_request.get("request") if isinstance(submit_request.get("request"), dict) else {}
         source_request = submit_request.get("source_url_retorrent_request") if isinstance(submit_request.get("source_url_retorrent_request"), dict) else request
         source_reference = _approval_source_reference(source_request)
+        site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(submit_request)
+        site_policy_summary = _candidate_item_site_policy_summary(submit_request, site_policy_profile_handoff)
         items.append(
             {
                 "index": index,
@@ -16629,6 +16697,8 @@ def _daily_candidate_approval_items(submission_plan: dict[str, Any]) -> list[dic
                 "method": submit_request.get("method") or "POST",
                 "submit_request": request,
                 "candidate_execution_context": submit_request.get("candidate_execution_context") if isinstance(submit_request.get("candidate_execution_context"), dict) else None,
+                "site_policy_profile_handoff": site_policy_profile_handoff,
+                "site_policy_summary": site_policy_summary,
                 "required_overrides": submit_request.get("required_overrides") or ["confirm_upload=true", "save_path or path"],
                 "approval_text": _daily_candidate_approval_item_text(index, submit_request, request),
                 "after_submit": submit_request.get("after_submit"),
@@ -16760,6 +16830,8 @@ def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jo
 def _daily_candidate_batch_item_submit_request(candidate_job_id: str, item: dict[str, Any]) -> dict[str, Any]:
     selector = item.get("selector") if isinstance(item.get("selector"), dict) else {}
     request = item.get("request_template") if isinstance(item.get("request_template"), dict) else {}
+    site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(item)
+    site_policy_summary = _candidate_item_site_policy_summary(item, site_policy_profile_handoff)
     return {
         "candidate_job_id": candidate_job_id or None,
         "rank": selector.get("rank"),
@@ -16770,6 +16842,8 @@ def _daily_candidate_batch_item_submit_request(candidate_job_id: str, item: dict
         "request": request,
         "source_url_retorrent_request": item.get("source_url_retorrent_request") if isinstance(item.get("source_url_retorrent_request"), dict) else None,
         "candidate_execution_context": item.get("candidate_execution_context") if isinstance(item.get("candidate_execution_context"), dict) else None,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "required_overrides": item.get("required_overrides") if isinstance(item.get("required_overrides"), list) else ["confirm_upload=true", "save_path or path"],
         "after_submit": item.get("after_submit") if isinstance(item.get("after_submit"), dict) else None,
     }
@@ -26559,11 +26633,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_delivery_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "notification", "submission", "safety", "audit", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "pending_job_count", "recommended_count", "items", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "submit_tool", "submit_endpoint_template", "requires_confirmation", "continue_when", "stop_when", "blockers", "next_actions"],
                 "execution_plan_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "selected_shortfall_count", "ready_shortfall_count", "recommended_submit_requests", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-                "approval_queue_item_fields": ["schedule_name", "candidate_job_id", "rank", "source_tracker", "target_trackers", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "submit_tool", "submit_endpoint", "request_template", "source_url_retorrent_request", "candidate_execution_context", "approval_prompt", "requires_confirmation", "after_submit"],
-                "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
+                "approval_queue_item_fields": ["schedule_name", "candidate_job_id", "rank", "source_tracker", "target_trackers", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "site_policy_profile_handoff", "site_policy_summary", "submit_tool", "submit_endpoint", "request_template", "source_url_retorrent_request", "candidate_execution_context", "approval_prompt", "requires_confirmation", "after_submit"],
+                "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "site_policy_profile_handoff", "site_policy_summary", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
                 "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "approval_queue", "top_safe_candidates", "execution_summary", "items"],
                 "execution_summary_fields": ["ready", "submit_count", "blocked_count", "counts", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_flow", "actions", "items", "blockers", "next_actions"],
-                "submission_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
+                "submission_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
                 "after_submit_fields": ["read_fields", "poll_with", "summary_with", "stop_when", "resume_when", "material_resume_request"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
@@ -27843,14 +27917,14 @@ def _job_response_contract() -> dict[str, Any]:
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "policy_runtime_ready", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "manual_retorrent_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "policy", "materials", "target_upload", "closure", "live", "control", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
-        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
+        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
         "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "candidate_execution_context", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "manual_retorrent_final_report", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "candidate_execution_context", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_enforcement_ready", "policy_runtime_ready", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
         "candidate_submit_followup_fields": ["ready", "action", "candidate_job_id", "candidate_rank", "candidate_source_id", "retorrent_job_id", "retorrent_status", "source_reference", "target_trackers", "status_endpoint", "summary_endpoint", "resume_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_control_summary_ref", "job_handoff_ref", "manual_retorrent_final_report", "manual_retorrent_verdict", "manual_report_allowed", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submit_sequence_fields": ["ready", "status", "action", "candidate_job_id", "candidate_rank", "candidate_source_id", "retorrent_job_id", "retorrent_status", "source_reference", "target_trackers", "manual_retorrent_final_report", "manual_retorrent_verdict", "manual_report_allowed", "steps", "next_step", "read_order", "complete_when", "stop_when", "blockers", "next_actions", "safety"],
         "candidate_submit_sequence_step_fields": ["name", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "agent_candidate_submission_fields": ["candidate_submission", "candidate_execution_context", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submit_followup", "candidate_submit_sequence", "manual_retorrent_final_report", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template"],
-        "candidate_execution_context_fields": ["ready", "requires_human_approval", "candidate_job_id", "candidate_rank", "candidate_source_id", "source_tracker", "source_url", "target_trackers", "submit_tool", "submit_endpoint", "retorrent_tool", "retorrent_endpoint", "effective_retorrent_request", "required_user_inputs", "missing_user_inputs", "material_options", "qbit_request", "policy_execution", "policy_execution_handoff", "read_before_submit", "continue_when", "stop_when", "blockers", "next_actions"],
+        "candidate_execution_context_fields": ["ready", "requires_human_approval", "candidate_job_id", "candidate_rank", "candidate_source_id", "source_tracker", "source_url", "target_trackers", "submit_tool", "submit_endpoint", "retorrent_tool", "retorrent_endpoint", "effective_retorrent_request", "required_user_inputs", "missing_user_inputs", "material_options", "qbit_request", "policy_execution", "policy_execution_handoff", "site_policy_profile_handoff", "site_policy_summary", "read_before_submit", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "material_input_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submission_material_input_template_fields": ["ready", "recommended_input_keys", "recommended_inputs", "missing", "next_item", "accepted_override_keys", "resume_request_template", "dry_run_request", "execute_request", "staged_requests", "examples_by_key", "continue_when", "stop_when"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
@@ -27936,11 +28010,11 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_refill_request_contract_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "scan_count", "scan_exhausted", "excluded_source_ids", "submitted_source_ids", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "ready_shortfall_count", "remaining_submit_count", "running_count", "blocked_count", "should_submit", "should_poll", "should_refill", "should_report", "refill_request_contract", "next_step", "after_step", "repeat_until", "read_order", "blockers", "next_actions"],
         "daily_candidate_batch_publish_payload_fields": ["ready", "status", "format", "title", "summary", "message", "counts", "items", "top_item", "completion_items", "top_completion", "approval_queue", "tracking", "completion_gate", "completion_report", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "publish_contract", "read_order", "blockers", "next_actions"],
-        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "title", "summary_text", "endpoint", "method", "request", "requires_user_approval", "required_overrides", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
-        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "required_overrides", "approval_text", "after_submit"],
+        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "title", "summary_text", "endpoint", "method", "request", "requires_user_approval", "required_overrides", "site_policy_profile_handoff", "site_policy_summary", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
+        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "approval_text", "after_submit"],
         "daily_candidate_batch_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
-        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "required_overrides", "after_submit"],
+        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "after_submit"],
         "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
@@ -28057,6 +28131,8 @@ def _candidate_response_contract() -> dict[str, Any]:
             "policy_risk_summary",
             "policy_coverage",
             "policy_execution_handoff",
+            "site_policy_profile_handoff",
+            "site_policy_summary",
             "ranking",
             "decision_summary",
             "audit_summary",
@@ -28091,6 +28167,8 @@ def _candidate_response_contract() -> dict[str, Any]:
             "policy_summary",
             "policy_risk_summary",
             "policy_execution_handoff",
+            "site_policy_profile_handoff",
+            "site_policy_summary",
             "approval_prompt",
             "blockers",
             "next_actions",
@@ -28101,16 +28179,16 @@ def _candidate_response_contract() -> dict[str, Any]:
             "submit_job_endpoint",
             "submit_tool",
         ],
-        "publish_card_fields": ["rank", "status", "source_tracker", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "downloadability", "recommendation", "risk", "action"],
+        "publish_card_fields": ["rank", "status", "source_tracker", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "downloadability", "site_policy_profile_handoff", "site_policy_summary", "recommendation", "risk", "action"],
         "downloadability_summary_fields": ["ready", "downloadable", "source_tracker", "source_id", "source_url", "source_download_adapter", "source_info_adapter", "candidate_discovery_adapter", "policy_allows_download", "policy_allows_retorrent", "rules_accepted", "manual_review_required", "cookie", "source_pull", "continue_when", "stop_when", "blockers", "next_actions"],
         "downloadability_cookie_fields": ["required", "path", "exists", "status", "note"],
         "downloadability_source_pull_fields": ["tool", "endpoint", "request", "direct_cli_tool", "direct_cli_args"],
         "publish_card_action_fields": ["decision", "can_submit", "tool", "endpoint", "request", "approval_prompt", "required_user_inputs", "next_actions"],
-        "policy_summary_fields": ["manual_review_ready", "automation", "policy_coverage", "policy_execution_handoff", "policy_risk_summary", "qbit_limits", "seeding_requirements", "transfer_rules", "rules"],
+        "policy_summary_fields": ["manual_review_ready", "automation", "policy_coverage", "policy_execution_handoff", "site_policy_profile_handoff", "site_policy_summary", "policy_risk_summary", "qbit_limits", "seeding_requirements", "transfer_rules", "rules"],
         "policy_risk_summary_fields": ["ready", "risk_level", "execution_priority", "qbit_limit_ready", "seeding_ready", "rule_obligations_ready", "manual_review_ready", "strict_transfer_rule_count", "strict_transfer_rules", "qbit_missing", "seeding_missing", "blockers", "next_actions"],
         "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "recommended_count", "items", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "guarded_source_ids", "blocked_source_ids", "submit_tool", "submit_endpoint", "requires_confirmation", "continue_when", "stop_when", "next_actions"],
-        "approval_queue_item_fields": ["rank", "source_tracker", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "submit_tool", "submit_endpoint", "request", "approval_prompt", "requires_confirmation"],
-        "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
+        "approval_queue_item_fields": ["rank", "source_tracker", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "site_policy_profile_handoff", "site_policy_summary", "submit_tool", "submit_endpoint", "request", "approval_prompt", "requires_confirmation"],
+        "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "site_policy_profile_handoff", "site_policy_summary", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
         "execution_plan_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "request_context", "recommended_submit_requests", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_control_summary_fields": ["ready", "action", "decision", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "ready_shortfall_count", "target_met", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "shortfall_recovery", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],

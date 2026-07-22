@@ -15712,6 +15712,40 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
                         "targets": [{"tracker": "MTEAM", "freeleech_required": False}],
                     },
                     "rules": {"source_fingerprint": "u2-review", "target_fingerprints": ["mteam-review"]},
+                    "site_policy_profile_handoff": {
+                        "kind": "ptcli.daily_candidate_site_policy_profile_handoff",
+                        "ready": True,
+                        "status": "ready",
+                        "accepted_rules": True,
+                        "source_tracker": "U2",
+                        "target_trackers": "MTEAM",
+                        "source_ready": True,
+                        "targets_ready": True,
+                        "rule_obligations_ready": True,
+                        "qbit_limits": {
+                            "source": {"download_limit": 20 * 1024 * 1024},
+                            "target": {"upload_limit": 2 * 1024 * 1024},
+                        },
+                        "seeding_requirements": {
+                            "source": {"tracker": "U2", "min_seed_time_hours": 72},
+                            "targets": [{"tracker": "MTEAM", "min_ratio": 1.0}],
+                        },
+                        "transfer_rules": {
+                            "source": {"tracker": "U2", "required_promotions": ["free"]},
+                            "targets": [{"tracker": "MTEAM", "freeleech_required": False}],
+                        },
+                        "blockers": [],
+                    },
+                    "site_policy_summary": {
+                        "ready": True,
+                        "accepted_rules": True,
+                        "source_tracker": "U2",
+                        "target_trackers": "MTEAM",
+                        "source_ready": True,
+                        "targets_ready": True,
+                        "rule_obligations_ready": True,
+                        "blockers": [],
+                    },
                     "policy_execution_handoff": {
                         "kind": "ptcli.daily_candidate_policy_execution_handoff",
                         "ready": True,
@@ -15806,6 +15840,10 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert execution_context["qbit_request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert execution_context["qbit_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert execution_context["policy_execution_handoff"]["ready"] is True
+    assert execution_context["site_policy_profile_handoff"]["ready"] is True
+    assert execution_context["site_policy_summary"]["source_tracker"] == "U2"
+    assert job["candidate_batch_handoff"]["items"][0]["site_policy_profile_handoff"]["ready"] is True
+    assert job["candidate_batch_handoff"]["items"][0]["site_policy_summary"]["target_trackers"] == "MTEAM"
     assert summary["candidate_digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["candidate_digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
@@ -15819,6 +15857,7 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert batch_summary["items"][0]["submit_requests"][0]["endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
     assert batch_summary["items"][0]["submit_requests"][0]["request"]["confirm_upload"] is True
     assert batch_summary["items"][0]["submit_requests"][0]["candidate_execution_context"] == execution_context
+    assert batch_summary["items"][0]["submit_requests"][0]["site_policy_profile_handoff"]["ready"] is True
     submission_plan = list_payload["daily_candidate_submission_plan"]
     assert submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
     assert submission_plan["ready"] is True
@@ -15829,6 +15868,7 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert submission_plan["recommended_tool"] == "submit_daily_candidate_job"
     assert submission_plan["recommended_endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
     assert submission_plan["recommended_request"]["source_id"] == "60635"
+    assert submission_plan["first_submit_request"]["site_policy_summary"]["rule_obligations_ready"] is True
     assert submission_plan["hard_blockers"] == []
     execution_summary = list_payload["daily_candidate_execution_summary"]
     assert execution_summary["kind"] == "ptcli.daily_candidate_execution_summary"
@@ -17137,6 +17177,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
         "job_handoff.recommended_tool",
         "job_handoff.recommended_request",
         "job_handoff.material_input_template",
+        "site_policy_profile_handoff",
         "candidate_submission_summary",
         "candidate_submission_summary.execution_state",
         "candidate_submission_summary.execution_handoff",
@@ -19372,6 +19413,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_enforcement_ready" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "qbit_execution_ready" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "uploaded_seeding_ready" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+    assert "site_policy_profile_handoff" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+    assert "site_policy_summary" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_item_fields"]
     assert "daily_candidate_approval_sequence_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "approval_items" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_sequence_fields"]
     assert "daily_candidate_batch_execution_context_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
@@ -20388,6 +20431,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_risk_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "site_policy_profile_handoff" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "site_policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
+    assert "site_policy_profile_handoff" in tool_by_name["daily_candidates"]["response_contract"]["approval_prompt_fields"]
+    assert "site_policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
@@ -21926,6 +21973,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_enforcement_ready" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "qbit_execution_ready" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "uploaded_seeding_ready" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
+        assert "site_policy_profile_handoff" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "completion_report" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_final_report_fields"]
         assert "daily_candidate_completion_report_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_completed_job_fields" in tools_by_name["list_jobs"]["response_contract"]
@@ -21952,6 +22000,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "publish_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
         assert "daily_candidate_publish_card_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "uploaded_seeding_ready" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+        assert "site_policy_summary" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_item_fields"]
         assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
         assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_runbook_fields"]
@@ -22042,6 +22091,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_risk_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "site_policy_profile_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "site_policy_profile_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_prompt_fields"]
+        assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]

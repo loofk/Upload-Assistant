@@ -217,6 +217,8 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     policy_summary = _candidate_policy_summary(source_policy, target_policies, execute_request, accept_rules=accept_rules)
     policy_risk_summary = _candidate_policy_risk_summary(policy_summary, blockers=blockers)
     policy_summary["policy_risk_summary"] = policy_risk_summary
+    site_policy_profile_handoff = policy_summary.get("site_policy_profile_handoff")
+    site_policy_summary = policy_summary.get("site_policy_summary")
     status = "ready" if not blockers else "blocked"
     ranking = _candidate_ranking(seed, source_info_payload, duplicate_check, blockers, downloadability_summary)
     return {
@@ -232,6 +234,8 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "policy_risk_summary": policy_risk_summary,
         "policy_coverage": policy_summary.get("policy_coverage"),
         "policy_execution_handoff": policy_summary.get("policy_execution_handoff"),
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "ranking": ranking,
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
         "decision_summary": _candidate_decision_summary(seed, source_info_payload, duplicate_check, blockers, ranking, policy_summary, status, downloadability_summary),
@@ -474,6 +478,8 @@ def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: li
         "policy_coverage": _candidate_policy_coverage_summary(source_coverage, target_coverages),
     }
     summary["policy_execution_handoff"] = _candidate_policy_execution_handoff(summary, execute_request)
+    summary["site_policy_profile_handoff"] = _candidate_site_policy_profile_handoff(summary, execute_request)
+    summary["site_policy_summary"] = _candidate_site_policy_summary(summary["site_policy_profile_handoff"])
     return summary
 
 
@@ -607,6 +613,75 @@ def _candidate_policy_execution_next_actions(ready: bool, blockers: list[str]) -
     if blockers:
         return ["Resolve policy_execution_handoff.blockers in PTCLI.SITE_POLICIES before submitting this candidate."]
     return ["Inspect policy_execution_handoff before deciding whether this candidate can be submitted."]
+
+
+def _candidate_site_policy_profile_handoff(policy_summary: dict[str, Any], execute_request: dict[str, Any]) -> dict[str, Any]:
+    execution = policy_summary.get("policy_execution_handoff") if isinstance(policy_summary.get("policy_execution_handoff"), dict) else {}
+    coverage = policy_summary.get("policy_coverage") if isinstance(policy_summary.get("policy_coverage"), dict) else {}
+    qbit_limits = policy_summary.get("qbit_limits") if isinstance(policy_summary.get("qbit_limits"), dict) else {}
+    seeding = policy_summary.get("seeding_requirements") if isinstance(policy_summary.get("seeding_requirements"), dict) else {}
+    transfer_rules = policy_summary.get("transfer_rules") if isinstance(policy_summary.get("transfer_rules"), dict) else {}
+    rules = policy_summary.get("rules") if isinstance(policy_summary.get("rules"), dict) else {}
+    source_coverage = coverage.get("source") if isinstance(coverage.get("source"), dict) else {}
+    target_coverages = coverage.get("targets") if isinstance(coverage.get("targets"), list) else []
+    source_tracker = execute_request.get("source_tracker") or source_coverage.get("tracker")
+    target_trackers = execute_request.get("target") or execute_request.get("target_trackers") or [target.get("tracker") for target in target_coverages if isinstance(target, dict)]
+    source_ready = bool(source_coverage.get("complete")) and bool((source_coverage.get("rule_obligations") or {}).get("ready")) if source_coverage else False
+    targets_ready = all(bool(target.get("complete")) and bool((target.get("rule_obligations") or {}).get("ready")) for target in target_coverages if isinstance(target, dict))
+    blockers = _string_list(execution.get("blockers"))
+    ready = bool(execution.get("ready") is True and coverage.get("ready") is True and source_ready and targets_ready and not blockers)
+    return {
+        "kind": "ptcli.daily_candidate_site_policy_profile_handoff",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "accepted_rules": bool(policy_summary.get("accept_rules")),
+        "source_tracker": source_tracker,
+        "target_trackers": target_trackers,
+        "source_ready": source_ready,
+        "targets_ready": targets_ready,
+        "qbit_limits": qbit_limits,
+        "seeding_requirements": seeding,
+        "transfer_rules": transfer_rules,
+        "rules": rules,
+        "rule_obligations_ready": coverage.get("rule_obligations_ready") is True,
+        "policy_coverage": coverage,
+        "policy_execution_handoff": execution,
+        "continue_when": "site_policy_profile_handoff.ready=true and the user explicitly approves this candidate",
+        "stop_when": [
+            "site_policy_profile_handoff.ready=false",
+            "site policy profile has missing rate limits, seeding requirements, or rule review fingerprint",
+            "rule_obligations_ready=false",
+        ],
+        "blockers": blockers,
+        "next_actions": _candidate_site_policy_profile_next_actions(ready, blockers),
+    }
+
+
+def _candidate_site_policy_profile_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Use site_policy_profile_handoff as the rule/rate-limit/seeding checklist before submitting this candidate."]
+    if blockers:
+        return ["Resolve site_policy_profile_handoff.blockers in PTCLI.SITE_POLICIES before approval or submission."]
+    return ["Review site_policy_profile_handoff.policy_coverage before deciding whether this candidate can be submitted."]
+
+
+def _candidate_site_policy_summary(site_policy_profile_handoff: dict[str, Any]) -> dict[str, Any]:
+    qbit_limits = site_policy_profile_handoff.get("qbit_limits") if isinstance(site_policy_profile_handoff.get("qbit_limits"), dict) else {}
+    seeding = site_policy_profile_handoff.get("seeding_requirements") if isinstance(site_policy_profile_handoff.get("seeding_requirements"), dict) else {}
+    transfer_rules = site_policy_profile_handoff.get("transfer_rules") if isinstance(site_policy_profile_handoff.get("transfer_rules"), dict) else {}
+    return {
+        "ready": site_policy_profile_handoff.get("ready") is True,
+        "accepted_rules": site_policy_profile_handoff.get("accepted_rules") is True,
+        "source_tracker": site_policy_profile_handoff.get("source_tracker"),
+        "target_trackers": site_policy_profile_handoff.get("target_trackers"),
+        "source_ready": site_policy_profile_handoff.get("source_ready") is True,
+        "targets_ready": site_policy_profile_handoff.get("targets_ready") is True,
+        "rule_obligations_ready": site_policy_profile_handoff.get("rule_obligations_ready") is True,
+        "qbit_limits": qbit_limits,
+        "seeding_requirements": seeding,
+        "transfer_rules": transfer_rules,
+        "blockers": _string_list(site_policy_profile_handoff.get("blockers")),
+    }
 
 
 def _candidate_policy_risk_summary(policy_summary: dict[str, Any], *, blockers: list[str] | None = None) -> dict[str, Any]:
@@ -1434,6 +1509,8 @@ def _candidate_item_safe_to_submit(item: dict[str, Any]) -> bool:
 def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
     decision_summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
     policy_risk_summary = item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+    site_policy_profile_handoff = item.get("site_policy_profile_handoff") if isinstance(item.get("site_policy_profile_handoff"), dict) else {}
+    site_policy_summary = item.get("site_policy_summary") if isinstance(item.get("site_policy_summary"), dict) else {}
     approval_prompt = _candidate_approval_prompt(
         rank=item.get("rank"),
         source_tracker=item.get("source_tracker"),
@@ -1448,6 +1525,8 @@ def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
         submit_tool=item.get("submit_tool") or SOURCE_URL_RETORRENT_JOB_TOOL,
         submit_endpoint=item.get("submit_job_endpoint") or item.get("action_endpoint") or SOURCE_URL_RETORRENT_JOB_ENDPOINT,
         submit_request=item.get("submit_request") if isinstance(item.get("submit_request"), dict) else None,
+        site_policy_profile_handoff=site_policy_profile_handoff,
+        site_policy_summary=site_policy_summary,
         blockers=_string_list(item.get("blockers")),
     )
     return {
@@ -1464,6 +1543,8 @@ def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
         "metadata": item.get("metadata"),
         "publish_card": item.get("publish_card"),
         "policy_risk_summary": policy_risk_summary,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "submit_tool": item.get("submit_tool") or SOURCE_URL_RETORRENT_JOB_TOOL,
         "submit_endpoint": item.get("submit_job_endpoint") or item.get("action_endpoint") or SOURCE_URL_RETORRENT_JOB_ENDPOINT,
         "request": item.get("submit_request"),
@@ -1488,6 +1569,8 @@ def _candidate_approval_prompt(
     submit_endpoint: Any,
     submit_request: dict[str, Any] | None,
     blockers: list[str],
+    site_policy_profile_handoff: dict[str, Any] | None = None,
+    site_policy_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ready = bool(submit_request and duplicate_clear is True and risk_level == "low" and policy_risk_level == "low" and not blockers)
     label = f"#{rank} {source_tracker}-{source_id}"
@@ -1512,6 +1595,8 @@ def _candidate_approval_prompt(
         "duplicate_clear": duplicate_clear,
         "risk_level": risk_level,
         "policy_risk_level": policy_risk_level,
+        "site_policy_profile_handoff": site_policy_profile_handoff if isinstance(site_policy_profile_handoff, dict) else {},
+        "site_policy_summary": site_policy_summary if isinstance(site_policy_summary, dict) else {},
         "approval_text": approval_text,
         "confirm_phrase": f"Approve {source_tracker}-{source_id} to retorrent after rule review",
         "submit_tool": submit_tool,
@@ -1560,6 +1645,8 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     }
     policy_digest = _candidate_digest_policy_summary(policy_summary)
     policy_execution_handoff = policy_digest.get("policy_execution_handoff") if isinstance(policy_digest.get("policy_execution_handoff"), dict) else {}
+    site_policy_profile_handoff = policy_digest.get("site_policy_profile_handoff") if isinstance(policy_digest.get("site_policy_profile_handoff"), dict) else {}
+    site_policy_summary = policy_digest.get("site_policy_summary") if isinstance(policy_digest.get("site_policy_summary"), dict) else {}
     approval_prompt = _candidate_approval_prompt(
         rank=rank,
         source_tracker=source.get("tracker"),
@@ -1574,6 +1661,8 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         submit_tool=candidate.get("submit_tool"),
         submit_endpoint=candidate.get("submit_job_endpoint"),
         submit_request=submit_request if can_submit else None,
+        site_policy_profile_handoff=site_policy_profile_handoff,
+        site_policy_summary=site_policy_summary,
         blockers=blockers,
     )
     publish_card = _candidate_publish_card(
@@ -1594,6 +1683,8 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         submit_tool=candidate.get("submit_tool"),
         approval_prompt=approval_prompt,
         downloadability_summary=downloadability_summary,
+        site_policy_profile_handoff=site_policy_profile_handoff,
+        site_policy_summary=site_policy_summary,
     )
     return {
         "rank": rank,
@@ -1643,6 +1734,8 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "policy_summary": policy_digest,
         "policy_risk_summary": policy_risk_summary,
         "policy_execution_handoff": policy_execution_handoff,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "approval_prompt": approval_prompt,
         "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
@@ -1669,6 +1762,8 @@ def _candidate_publish_card(
     submit_tool: Any,
     approval_prompt: dict[str, Any],
     downloadability_summary: dict[str, Any],
+    site_policy_profile_handoff: dict[str, Any],
+    site_policy_summary: dict[str, Any],
 ) -> dict[str, Any]:
     metadata_ready = bool([value for value in metadata.values() if value])
     duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
@@ -1703,6 +1798,8 @@ def _candidate_publish_card(
             "dupes": duplicate_check.get("dupes") if isinstance(duplicate_check.get("dupes"), list) else [],
         },
         "downloadability": downloadability_summary,
+        "site_policy_profile_handoff": site_policy_profile_handoff,
+        "site_policy_summary": site_policy_summary,
         "recommendation": {
             "recommended": recommendation.get("recommended"),
             "score": ranking.get("score"),
@@ -1980,6 +2077,8 @@ def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str
         "transfer_rules": policy_summary.get("transfer_rules"),
         "rules": policy_summary.get("rules"),
         "policy_execution_handoff": policy_summary.get("policy_execution_handoff") if isinstance(policy_summary.get("policy_execution_handoff"), dict) else {},
+        "site_policy_profile_handoff": policy_summary.get("site_policy_profile_handoff") if isinstance(policy_summary.get("site_policy_profile_handoff"), dict) else {},
+        "site_policy_summary": policy_summary.get("site_policy_summary") if isinstance(policy_summary.get("site_policy_summary"), dict) else {},
         "policy_risk_summary": policy_summary.get("policy_risk_summary") if isinstance(policy_summary.get("policy_risk_summary"), dict) else {},
     }
 
