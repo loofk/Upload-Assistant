@@ -21478,6 +21478,7 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
         "best": best,
         "completion_evidence": complete,
         "live_submission_package": best.get("live_submission_package") if isinstance(best, dict) and isinstance(best.get("live_submission_package"), dict) else None,
+        "live_submission_final_report": best.get("live_submission_final_report") if isinstance(best, dict) and isinstance(best.get("live_submission_final_report"), dict) else None,
         "live_validation_submission": best.get("live_validation_submission") if isinstance(best, dict) and isinstance(best.get("live_validation_submission"), dict) else None,
         "live_validation_followup": best.get("live_validation_followup") if isinstance(best, dict) and isinstance(best.get("live_validation_followup"), dict) else None,
         "next_step": best.get("next_step") if isinstance(best, dict) and isinstance(best.get("next_step"), dict) else None,
@@ -21523,15 +21524,19 @@ def _goal_progress_live_validation_from_summary_file(summary_file: str, *, sourc
     submission_evidence = _goal_progress_live_submission_from_summary_file(str(path))
     if submission_evidence:
         evidence["live_submission_package"] = submission_evidence
+        final_report = submission_evidence.get("final_report") if isinstance(submission_evidence.get("final_report"), dict) else {}
+        if final_report:
+            evidence["live_submission_final_report"] = final_report
         evidence["submission_ready"] = submission_evidence.get("ready") is True
         if evidence.get("ready") is not True and submission_evidence.get("ready") is True:
             evidence["status"] = "ready_to_submit"
-            evidence["next_step"] = submission_evidence.get("next_step")
-            evidence["recommended_tool"] = submission_evidence.get("recommended_tool")
-            evidence["recommended_endpoint"] = submission_evidence.get("recommended_endpoint")
-            evidence["recommended_method"] = submission_evidence.get("recommended_method")
-            evidence["recommended_request"] = submission_evidence.get("recommended_request")
-            evidence["blockers"] = _string_list(submission_evidence.get("blockers"))
+            final_next_step = final_report.get("next_step") if final_report and isinstance(final_report.get("next_step"), dict) else {}
+            evidence["next_step"] = final_report.get("next_step") if final_report else submission_evidence.get("next_step")
+            evidence["recommended_tool"] = final_report.get("recommended_tool") if final_report else submission_evidence.get("recommended_tool")
+            evidence["recommended_endpoint"] = final_report.get("recommended_endpoint") if final_report else submission_evidence.get("recommended_endpoint")
+            evidence["recommended_method"] = final_next_step.get("method") if final_report else submission_evidence.get("recommended_method")
+            evidence["recommended_request"] = final_report.get("recommended_request") if final_report else submission_evidence.get("recommended_request")
+            evidence["blockers"] = _string_list(final_report.get("blockers")) if final_report else _string_list(submission_evidence.get("blockers"))
     return evidence
 
 
@@ -21541,13 +21546,19 @@ def _goal_progress_live_submission_from_summary_file(summary_file: str) -> dict[
     except ServiceError:
         return None
     package = payload.get("live_submission_package") if isinstance(payload.get("live_submission_package"), dict) else {}
+    final_report = payload.get("live_submission_final_report") if isinstance(payload.get("live_submission_final_report"), dict) else {}
     submit = package.get("submit") if isinstance(package.get("submit"), dict) else {}
     if not package:
         return None
+    final_next_step = final_report.get("next_step") if isinstance(final_report.get("next_step"), dict) else {}
+    final_request = final_report.get("recommended_request") if isinstance(final_report.get("recommended_request"), dict) else None
+    next_step_request = final_next_step.get("request") if isinstance(final_next_step.get("request"), dict) else None
+    submit_request = submit.get("request") if isinstance(submit.get("request"), dict) else None
     return {
         "ready": package.get("ready") is True,
         "status": package.get("status"),
         "summary_file": package.get("summary_file"),
+        "final_report": final_report or None,
         "submit": {
             "tool": submit.get("tool"),
             "endpoint": submit.get("endpoint"),
@@ -21557,16 +21568,16 @@ def _goal_progress_live_submission_from_summary_file(summary_file: str) -> dict[
         "after_submit": package.get("after_submit") if isinstance(package.get("after_submit"), dict) else {},
         "report_contract": package.get("report_contract") if isinstance(package.get("report_contract"), dict) else {},
         "next_step": {
-            "tool": submit.get("tool") or "source_url_check_and_submit",
-            "endpoint": submit.get("endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
-            "method": submit.get("method") or "POST",
-            "request": submit.get("request") if isinstance(submit.get("request"), dict) else None,
-            "reason": "doctor_summary_ready_to_submit",
+            "tool": final_next_step.get("tool") or submit.get("tool") or "source_url_check_and_submit",
+            "endpoint": final_next_step.get("endpoint") or submit.get("endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": final_next_step.get("method") or submit.get("method") or "POST",
+            "request": next_step_request or submit_request,
+            "reason": final_next_step.get("reason") or "doctor_summary_ready_to_submit",
         },
-        "recommended_tool": submit.get("tool") or "source_url_check_and_submit",
-        "recommended_endpoint": submit.get("endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
-        "recommended_method": submit.get("method") or "POST",
-        "recommended_request": submit.get("request") if isinstance(submit.get("request"), dict) else None,
+        "recommended_tool": final_report.get("recommended_tool") or submit.get("tool") or "source_url_check_and_submit",
+        "recommended_endpoint": final_report.get("recommended_endpoint") or submit.get("endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
+        "recommended_method": final_next_step.get("method") or submit.get("method") or "POST",
+        "recommended_request": final_request or submit_request,
         "blockers": _string_list(package.get("blockers")),
         "next_actions": _string_list(package.get("next_actions")),
     }
@@ -21887,7 +21898,7 @@ def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]
     next_step = _goal_progress_next_step(items, blockers, live_validation_evidence, live_validation_preflight)
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
-        actions.append("Submit evidence.live_validation.live_submission_package.submit.request, then poll the returned job until live_user_report.report_allowed=true.")
+        actions.append("Submit evidence.live_validation.live_submission_final_report.submission.request, then poll the returned job until live_user_report.report_allowed=true.")
     elif any(item.get("id") == "seedbox_live_validation" and str(item.get("status") or "").startswith("submitted_") for item in items):
         actions.append("Follow evidence.live_validation.best.live_validation_followup, then rerun goal_progress with the same live job id after the job state changes.")
     elif any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
@@ -22605,7 +22616,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
-                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_validation_submission", "live_validation_followup", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },

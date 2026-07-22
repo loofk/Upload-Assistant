@@ -19314,6 +19314,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "completion_evidence" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "submission_ready" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+    assert "live_submission_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_preflight_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "live_execution_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
@@ -20078,6 +20079,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "ready_to_submit" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "submitted_needs_resume" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_preflight" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "live_validation_preflight_fields" in goal_progress_tool["response_contract"]
@@ -20121,6 +20123,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "ready_to_submit" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "submitted_running" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "live_submission_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
@@ -21681,13 +21684,17 @@ services:
     assert payload["evidence"]["live_validation"]["status"] == "ready_to_submit"
     assert payload["evidence"]["live_validation"]["submission_ready"] is True
     assert payload["evidence"]["live_validation"]["best"]["live_submission_package"]["ready"] is True
+    assert payload["evidence"]["live_validation"]["best"]["live_submission_final_report"]["ready"] is True
+    assert payload["evidence"]["live_validation"]["best"]["live_submission_final_report"]["verdict"] == "submit_check_and_submit"
+    assert payload["evidence"]["live_validation"]["live_submission_final_report"]["submission"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["evidence"]["live_validation"]["live_submission_final_report"]["safety"]["must_not_report_live_complete"] is True
     assert payload["evidence"]["live_validation"]["best"]["recommended_tool"] == "source_url_check_and_submit"
     assert payload["evidence"]["live_validation"]["best"]["recommended_request"]["accept_rules"] is True
     assert payload["evidence"]["live_validation"]["best"]["recommended_request"]["confirm_upload"] is True
     assert capabilities["seedbox_live_validation"]["status"] == "ready_to_submit"
     assert payload["next_step"]["tool"] == "source_url_check_and_submit"
     assert payload["next_step"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
-    assert payload["next_step"]["request"] == payload["evidence"]["live_validation"]["best"]["recommended_request"]
+    assert payload["next_step"]["request"] == payload["evidence"]["live_validation"]["live_submission_final_report"]["recommended_request"]
     assert payload["recommended_tool"] == "source_url_check_and_submit"
 
 

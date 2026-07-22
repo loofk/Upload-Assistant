@@ -28827,6 +28827,7 @@
           "best",
           "completion_evidence",
           "live_submission_package",
+          "live_submission_final_report",
           "live_validation_submission",
           "live_validation_followup",
           "next_step",
