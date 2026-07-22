@@ -19815,6 +19815,29 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
             "status": "queued",
             "ok": False,
             "request": job_request,
+            "material_chain_handoff": {
+                "kind": "ptcli.material_chain_handoff",
+                "ready_for_target_package": False,
+                "ready_for_target_upload": False,
+                "status": "blocked",
+                "next_step": {"domain": "metadata_ids"},
+                "recommended_call": {
+                    "tool": "metadata_prepare_job",
+                    "endpoint": "/v1/jobs/metadata/prepare",
+                    "method": "POST",
+                    "request": {"parent_job_id": "abc123", "source_info": {"tracker": "U2", "torrent_id": "60635"}, "target": "MTEAM", "fetch_ptgen": True},
+                    "safe_to_call_now": True,
+                },
+                "direct_calls": {
+                    "metadata_ids": {
+                        "tool": "metadata_prepare_job",
+                        "endpoint": "/v1/jobs/metadata/prepare",
+                        "method": "POST",
+                        "request": {"parent_job_id": "abc123", "source_info": {"tracker": "U2", "torrent_id": "60635"}, "target": "MTEAM", "fetch_ptgen": True},
+                        "safe_to_call_now": True,
+                    }
+                },
+            },
             "policy_qbit_defaults": {"applied": {"qbit_download_limit": 20 * 1024 * 1024, "uploaded_qbit_upload_limit": 2 * 1024 * 1024}, "sources": {"qbit_download_limit": "site_policy:U2", "uploaded_qbit_upload_limit": "site_policy:MTEAM"}},
             "policy_runtime_contract": {"kind": "ptcli.policy_runtime_contract", "ready": True},
             "policy_application_handoff": {"kind": "ptcli.job_policy_application_handoff", "ready": True, "missing_request_fields": []},
@@ -19908,10 +19931,17 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
     assert sequence["ready"] is True
     assert sequence["phase"] == "poll_job"
     assert sequence["job_id"] == "abc123"
+    assert sequence["material_chain"]["available"] is True
+    assert sequence["material_chain"]["next_domain"] == "metadata_ids"
+    assert sequence["material_chain"]["next_call"]["tool"] == "metadata_prepare_job"
+    assert sequence["material_chain"]["next_call"]["request"]["fetch_ptgen"] is True
+    assert "material_chain_handoff.direct_calls" in sequence["material_chain"]["read_fields"]
     assert sequence["duplicate_gate"]["clear"] is True
     assert sequence["recommended_tool"] == "get_job_status"
     assert sequence["recommended_endpoint"] == "/v1/jobs/abc123"
     assert [step["step"] for step in sequence["steps"]] == ["duplicate_gate", "poll_job", "resolve_materials", "prepare_target_package", "target_upload_closure", "final_summary"]
+    assert "material_chain_handoff.recommended_call" in sequence["steps"][1]["read"]
+    assert sequence["steps"][2]["direct_call_ref"] == "manual_retorrent_sequence.material_chain.next_call"
     assert sequence["steps"][4]["tool"] == "target_upload_job"
     assert "uploaded_seeding_ready=true" in sequence["steps"][4]["continue_when"]
     assert sequence["steps"][5]["endpoint"] == "/v1/jobs/abc123/summary"
@@ -20471,11 +20501,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "check_and_submit_followup_handoff" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_gate_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_sequence_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
+    assert "manual_retorrent_material_chain_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_policy_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_final_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_followup_handoff_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_step_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "action" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
+    assert "material_chain" in tool_by_name["source_url_check_and_submit"]["response_contract"]["manual_retorrent_sequence_fields"]
+    assert "next_call" in tool_by_name["source_url_check_and_submit"]["response_contract"]["manual_retorrent_material_chain_fields"]
     assert "applied_qbit_defaults" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_policy_report_fields"]
     assert "verdict" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
     assert "recommended_call" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_followup_handoff_fields"]

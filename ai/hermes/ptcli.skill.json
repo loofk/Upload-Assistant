@@ -13118,6 +13118,7 @@
           "phase",
           "job_id",
           "submit_request",
+          "material_chain",
           "duplicate_gate",
           "steps",
           "next_step",
@@ -13127,6 +13128,20 @@
           "continue_when",
           "stop_when",
           "blockers"
+        ],
+        "manual_retorrent_material_chain_fields": [
+          "available",
+          "ready_for_target_package",
+          "ready_for_target_upload",
+          "status",
+          "next_domain",
+          "next_call",
+          "direct_calls",
+          "read_from",
+          "summary_read_from",
+          "read_fields",
+          "continue_when",
+          "stop_when"
         ],
         "manual_retorrent_step_fields": [
           "step",

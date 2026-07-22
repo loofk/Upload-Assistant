@@ -2241,6 +2241,7 @@ def _source_url_check_and_submit_manual_sequence(
     job_id = submitted_job.get("job_id") if isinstance(submitted_job, dict) else None
     submit_request = handoff.get("request") if isinstance(handoff, dict) and isinstance(handoff.get("request"), dict) else None
     ready = bool(job_id and not blockers)
+    material_chain = _source_url_check_and_submit_material_chain(submitted_job, job_id)
     steps = [
         {
             "step": "duplicate_gate",
@@ -2254,7 +2255,7 @@ def _source_url_check_and_submit_manual_sequence(
             "tool": "get_job_status",
             "endpoint": f"/v1/jobs/{job_id}" if job_id else None,
             "request": {"job_id": job_id} if job_id else None,
-            "read": ["status", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_request", "closure_handoff", "target_upload_handoff", "blockers"],
+            "read": ["status", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_request", "material_chain_handoff", "material_chain_handoff.next_step", "material_chain_handoff.recommended_call", "material_chain_handoff.direct_calls", "closure_handoff", "target_upload_handoff", "blockers"],
             "continue_when": "status is terminal or job_handoff.action!=wait",
             "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
             "stop_when": "status=blocked or status=failed or duplicate_check.exists=true",
@@ -2263,19 +2264,21 @@ def _source_url_check_and_submit_manual_sequence(
             "step": "resolve_materials",
             "tool": "metadata_prepare_job or materials_prepare_job",
             "endpoint": "/v1/jobs/metadata/prepare or /v1/jobs/materials/prepare",
-            "request_from": "job_handoff.material_input_template or manual_retorrent_sequence.submit_request plus metadata/material overrides",
-            "read": ["metadata_prepare_handoff.material_options", "materials_prepare_handoff.material_options", "source_url_check_and_submit_request", "blockers"],
-            "continue_when": "material_options contains required metadata, description, MediaInfo/BDInfo, screenshots, and image-host evidence",
+            "request_from": "material_chain_handoff.recommended_call when next_step.domain is metadata_ids, ptgen_description, mediainfo_bdinfo, screenshots, or image_host; otherwise job_handoff.material_input_template or manual_retorrent_sequence.submit_request plus metadata/material overrides",
+            "read": ["material_chain_handoff.ready_for_target_package", "material_chain_handoff.next_step.domain", "material_chain_handoff.recommended_call", "material_chain_handoff.direct_calls.metadata_ids", "material_chain_handoff.direct_calls.ptgen_description", "material_chain_handoff.direct_calls.mediainfo_bdinfo", "material_chain_handoff.direct_calls.screenshots", "material_chain_handoff.direct_calls.image_host", "metadata_prepare_handoff.material_options", "materials_prepare_handoff.material_options", "source_url_check_and_submit_request", "blockers"],
+            "continue_when": "material_chain_handoff.ready_for_target_package=true or material_options contains required metadata, description, MediaInfo/BDInfo, screenshots, and image-host evidence",
             "stop_when": "metadata/material blockers remain or local content path is missing",
+            "direct_call_ref": "manual_retorrent_sequence.material_chain.next_call",
         },
         {
             "step": "prepare_target_package",
             "tool": "target_package_prepare_job",
             "endpoint": "/v1/jobs/target/package/prepare",
-            "request_from": "material_options plus source_info, duplicate_check, rule_check, and qBittorrent content evidence",
-            "read": ["target_package_handoff.ready", "target_package_handoff.target_upload_request", "target_package_handoff.blockers"],
+            "request_from": "material_chain_handoff.recommended_call when next_step.domain is target_description or target_package; otherwise material_options plus source_info, duplicate_check, rule_check, and qBittorrent content evidence",
+            "read": ["material_chain_handoff.ready_for_target_upload", "material_chain_handoff.direct_calls.target_package", "target_package_handoff.ready", "target_package_handoff.target_upload_request", "target_package_handoff.blockers"],
             "continue_when": "target_package_handoff.ready=true and target_upload_request is present",
             "stop_when": "target_package_handoff.blockers is not empty",
+            "direct_call_ref": "manual_retorrent_sequence.material_chain.direct_calls.target_package",
         },
         {
             "step": "target_upload_closure",
@@ -2303,6 +2306,7 @@ def _source_url_check_and_submit_manual_sequence(
         "phase": gate_summary.get("action") or ("poll_job" if ready else "blocked"),
         "job_id": job_id,
         "submit_request": submit_request,
+        "material_chain": material_chain,
         "duplicate_gate": {
             "searched": duplicate_check.get("searched") is True,
             "clear": duplicate_check.get("exists") is False and duplicate_check.get("searched") is True,
@@ -2317,6 +2321,29 @@ def _source_url_check_and_submit_manual_sequence(
         "continue_when": "final_summary.complete_when is satisfied",
         "stop_when": "duplicate exists, blockers are non-empty, policy/rule obligations are not ready, or uploaded seeding evidence is missing",
         "blockers": blockers,
+    }
+
+
+def _source_url_check_and_submit_material_chain(submitted_job: dict[str, Any] | None, job_id: str | None) -> dict[str, Any]:
+    chain = submitted_job.get("material_chain_handoff") if isinstance(submitted_job, dict) and isinstance(submitted_job.get("material_chain_handoff"), dict) else {}
+    next_step = chain.get("next_step") if isinstance(chain.get("next_step"), dict) else {}
+    recommended_call = chain.get("recommended_call") if isinstance(chain.get("recommended_call"), dict) else {}
+    direct_calls = chain.get("direct_calls") if isinstance(chain.get("direct_calls"), dict) else {}
+    has_chain = bool(chain)
+    next_call = recommended_call if recommended_call.get("tool") else None
+    return {
+        "available": has_chain,
+        "ready_for_target_package": chain.get("ready_for_target_package") is True if has_chain else False,
+        "ready_for_target_upload": chain.get("ready_for_target_upload") is True if has_chain else False,
+        "status": chain.get("status") if has_chain else "pending_poll",
+        "next_domain": next_step.get("domain") if isinstance(next_step, dict) else None,
+        "next_call": next_call,
+        "direct_calls": direct_calls,
+        "read_from": f"/v1/jobs/{job_id}" if job_id else None,
+        "summary_read_from": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "read_fields": ["material_chain_handoff.next_step", "material_chain_handoff.recommended_call", "material_chain_handoff.direct_calls", "material_chain_handoff.ready_for_target_package", "material_chain_handoff.ready_for_target_upload"],
+        "continue_when": "material_chain_handoff.recommended_call.safe_to_call_now=true for the next missing material step, or material_chain_handoff.ready_for_target_package=true",
+        "stop_when": ["material_chain_handoff.blockers is non-empty and recommended_call.safe_to_call_now=false", "target_upload still requires explicit confirm_upload"],
     }
 
 
@@ -32327,7 +32354,8 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
         "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
         "check_and_submit_gate_fields": ["ready", "action", "duplicate_searched", "duplicate_clear", "duplicate_exists", "duplicate_count", "submit_ready", "accept_rules", "confirm_upload", "job_created", "job_id", "status_endpoint", "summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
-        "manual_retorrent_sequence_fields": ["ready", "phase", "job_id", "submit_request", "duplicate_gate", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers"],
+        "manual_retorrent_sequence_fields": ["ready", "phase", "job_id", "submit_request", "material_chain", "duplicate_gate", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers"],
+        "manual_retorrent_material_chain_fields": ["available", "ready_for_target_package", "ready_for_target_upload", "status", "next_domain", "next_call", "direct_calls", "read_from", "summary_read_from", "read_fields", "continue_when", "stop_when"],
         "manual_retorrent_step_fields": ["step", "tool", "endpoint", "request", "request_from", "read", "continue_when", "repeat_when", "stop_when", "complete_when"],
         "check_and_submit_policy_report_fields": ["ready", "status", "job_id", "policy_application_ready", "policy_runtime_ready", "policy_qbit_defaults", "applied_qbit_defaults", "qbit_plan", "qbit_enforcement_summary", "qbit_execution_gate", "policy_application_handoff", "policy_application_report", "missing_request_fields", "pending_qbit_roles", "mismatch_qbit_roles", "request_fields", "next_step", "complete_when", "stop_when", "blockers", "next_actions"],
         "check_and_submit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "submission", "confirmations", "control", "policy", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
