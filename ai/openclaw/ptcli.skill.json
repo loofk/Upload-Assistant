@@ -187,7 +187,8 @@
     "deployment_or_seedbox_check": "deployment_check",
     "all_preflight_signals": "readiness_bundle",
     "rules_and_rate_limits": "site_policies",
-    "daily_candidates": "daily_candidates_schedule_job",
+    "daily_candidates": "daily_candidate_run_and_deliver",
+    "daily_candidates_step_by_step": "daily_candidates_schedule_job",
     "deliver_daily_candidate_digest": "daily_candidate_delivery",
     "submit_approved_daily_candidate": "submit_daily_candidate_job",
     "inspect_or_poll_job": "get_job_status",
@@ -603,18 +604,17 @@
     },
     {
       "name": "daily_candidates",
-      "tool": "daily_candidates_schedule_job",
-      "description": "Find up to 10 ranked source/target retorrent candidates, then submit approved candidates through the inherited-identity handoff.",
+      "tool": "daily_candidate_run_and_deliver",
+      "description": "Find up to 10 ranked source/target retorrent candidates, deliver the digest, then submit approved candidates through the inherited-identity handoff.",
       "required_fields": [
         "source_tracker",
         "target"
       ],
       "read_result": [
-        "schedule_digest",
-        "candidate_digest",
-        "digest",
-        "candidates",
-        "ready_count"
+        "run_and_deliver_report",
+        "daily_candidate_run_handoff",
+        "daily_candidate_delivery_final_report",
+        "delivery_result"
       ],
       "runbook": [
         {
@@ -633,27 +633,16 @@
           ]
         },
         {
-          "step": "create_candidate_jobs",
-          "tool": "daily_candidates_schedule_job",
+          "step": "run_and_deliver_digest",
+          "tool": "daily_candidate_run_and_deliver",
           "read": [
-            "schedule_digest.items",
-            "schedule_digest.push_items",
-            "schedule_digest.submission_handoff"
+            "run_and_deliver_report",
+            "delivery_result",
+            "daily_candidate_run_handoff",
+            "daily_candidate_delivery_final_report"
           ],
-          "continue_when": "schedule_digest.pending_job_count=0 and schedule_digest.submission_handoff.ready=true",
-          "repeat_when": "schedule_digest.pending_job_count>0"
-        },
-        {
-          "step": "deliver_candidate_digest",
-          "tool": "daily_candidate_delivery",
-          "request_from": "notification_payload or daily_candidate_batch_publish_payload",
-          "read": [
-            "file_delivery",
-            "webhook_delivery",
-            "payload_fingerprint",
-            "evidence_contract"
-          ],
-          "continue_when": "ok=true",
+          "continue_when": "run_and_deliver_report.notification_delivered=true and daily_candidate_run_handoff.pending_job_count=0",
+          "repeat_when": "daily_candidate_run_handoff.pending_job_count>0",
           "stop_when": [
             "blockers is non-empty"
           ]
@@ -16065,6 +16054,199 @@
         "mutates_state": false,
         "live_upload": false,
         "requires_confirmation": []
+      }
+    },
+    {
+      "name": "daily_candidate_run_and_deliver",
+      "method": "POST",
+      "path": "/v1/jobs/candidates/daily/run-and-deliver",
+      "description": "Run enabled daily candidate schedules and deliver the resulting digest to local files or webhook in one AI-callable step. This creates candidate scan jobs but never submits candidates or uploads torrents.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_tracker",
+                "target"
+              ],
+              "properties": {
+                "source_tracker": {
+                  "type": "string",
+                  "description": "Source tracker code, e.g. U2 or CHD."
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "maximum": 10
+                },
+                "accept_rules": {
+                  "type": "boolean",
+                  "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
+                },
+                "check_dupes": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "exclude_source_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
+                },
+                "base_dir": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "time": {
+                  "type": "string",
+                  "default": "09:00"
+                },
+                "timezone": {
+                  "type": "string",
+                  "default": "Asia/Shanghai"
+                }
+              }
+            }
+          },
+          "deliver": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, deliver the produced daily digest after schedule jobs finish inline or expose a publish request."
+          },
+          "delivery_request": {
+            "type": "object",
+            "description": "Optional explicit daily_candidate_delivery request. When omitted, the schedule publish_request is used."
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "Local handoff directory. Defaults to PTCLI_DAILY_CANDIDATE_OUTPUT_DIR or /Upload-Assistant/tmp/daily-candidates."
+          },
+          "write_files": {
+            "type": "boolean",
+            "default": true
+          },
+          "webhook_url": {
+            "type": "string",
+            "description": "Optional webhook URL. Only used when explicitly supplied."
+          },
+          "use_env_webhook": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true and webhook_url is missing, use PTCLI_DAILY_CANDIDATE_WEBHOOK_URL."
+          },
+          "webhook_timeout": {
+            "type": "number",
+            "default": 10
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "delivery_requested",
+          "delivery_performed",
+          "job_count",
+          "jobs",
+          "schedule_result",
+          "delivery_request",
+          "delivery_result",
+          "run_and_deliver_report",
+          "daily_candidate_run_handoff",
+          "daily_candidate_delivery_final_report",
+          "notification_payload",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "run_and_deliver_report_fields": [
+          "ready",
+          "action",
+          "schedule_status",
+          "schedule_job_count",
+          "delivery_requested",
+          "delivery_status",
+          "delivery_ok",
+          "notification_delivered",
+          "file_delivery",
+          "webhook_delivery",
+          "payload_fingerprint",
+          "daily_candidate_run_handoff",
+          "daily_candidate_delivery_final_report",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers"
+        ],
+        "delivery_result_fields": [
+          "kind",
+          "status",
+          "ok",
+          "ready",
+          "dry_run",
+          "mutates_state",
+          "uploads",
+          "contacts_trackers",
+          "contacts_qbittorrent",
+          "payload_fingerprint",
+          "notification_payload",
+          "daily_candidate_batch_publish_payload",
+          "delivery_handoff",
+          "file_delivery",
+          "webhook_delivery",
+          "evidence_contract",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "handoff_fields": [
+          "daily_candidate_run_handoff",
+          "daily_candidate_delivery_final_report",
+          "schedule_result.schedule_digest",
+          "delivery_result.payload_fingerprint"
+        ]
+      },
+      "workflow_hints": {
+        "preferred_for": "daily_candidates",
+        "submit_with": "submit_daily_candidate_job only after explicit user approval",
+        "step_by_step_alternative": "daily_candidates_schedule_job then daily_candidate_delivery"
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "submits_candidates": false,
+        "uploads_torrents": false
       }
     },
     {
@@ -34861,7 +35043,7 @@
       }
     }
   ],
-  "tool_count": 45,
+  "tool_count": 46,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

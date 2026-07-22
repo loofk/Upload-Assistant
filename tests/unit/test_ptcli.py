@@ -17493,6 +17493,88 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert "Poll each jobs[].status_endpoint" in payload["next_actions"][0]
 
 
+def test_daily_candidate_run_and_deliver_runs_schedule_and_writes_digest(monkeypatch, tmp_path) -> None:
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "recommendation": "submit_top_candidate_when_confirmed",
+        "ready_count": 1,
+        "top_candidate": {"source_tracker": "U2", "source_id": "60635", "title": "Example"},
+        "top_submit_request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+        "top_submit_tool": "source_url_retorrent_job",
+        "approval_queue": {
+            "kind": "ptcli.daily_candidate_approval_queue",
+            "ready": True,
+            "safe_count": 1,
+            "items": [
+                {
+                    "rank": 1,
+                    "source_tracker": "U2",
+                    "source_id": "60635",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "title": "Example",
+                    "score": 95,
+                    "risk_level": "low",
+                    "policy_risk_level": "low",
+                    "execution_priority": "preferred",
+                    "duplicate_clear": True,
+                    "request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
+                    "policy_risk_summary": {"risk_level": "low", "execution_priority": "preferred"},
+                }
+            ],
+        },
+        "push_items": [
+            {
+                "rank": 1,
+                "source_id": "60635",
+                "can_submit": True,
+                "submit_request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
+            }
+        ],
+    }
+
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "digest": digest,
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    store = ptcli_service.JobStore(tmp_path / "jobs", run_inline=True)
+    output_dir = tmp_path / "daily"
+
+    payload = ptcli_service.create_daily_candidate_run_and_deliver(
+        store,
+        {
+            "schedules": [{"name": "u2-to-mteam", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True}],
+            "output_dir": str(output_dir),
+            "use_env_webhook": False,
+        },
+    )
+
+    assert payload["kind"] == "ptcli.daily_candidate_run_and_deliver"
+    assert payload["status"] == "delivered"
+    assert payload["ok"] is True
+    assert payload["delivery_performed"] is True
+    assert payload["job_count"] == 1
+    assert payload["delivery_result"]["ok"] is True
+    assert payload["delivery_result"]["file_delivery"]["ok"] is True
+    assert (output_dir / "ptcli-daily-candidates-notification.json").exists()
+    assert (output_dir / "ptcli-daily-candidates-notification.txt").exists()
+    report = payload["run_and_deliver_report"]
+    assert report["kind"] == "ptcli.daily_candidate_run_and_deliver_report"
+    assert report["notification_delivered"] is True
+    assert report["recommended_tool"] == "submit_daily_candidate_job"
+    assert report["safety"]["does_not_submit_candidates"] is True
+    assert payload["safety"]["uploads_torrents"] is False
+    assert "explicit approval" in payload["next_actions"][0]
+
+
 def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, capsys) -> None:
     digest = {
         "kind": "ptcli.daily_candidates_digest",
@@ -21091,10 +21173,12 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert daily_ready["status"] == "ok"
     assert daily_ready["request_template"]["source_tracker"] == "U2"
     assert daily_ready["request_template"]["submission_overrides"]["confirm_upload"] is True
-    assert [step["tool"] for step in daily_ready["steps"]] == ["readiness_bundle", "daily_candidates_schedule_job", "daily_candidate_delivery", "submit_daily_candidate_job"]
+    assert [step["tool"] for step in daily_ready["steps"]] == ["readiness_bundle", "daily_candidate_run_and_deliver", "submit_daily_candidate_job"]
+    assert daily_ready["steps"][1]["request"]["use_env_webhook"] is True
+    assert "run_and_deliver_report" in daily_ready["steps"][1]["read"]
     assert daily_ready["steps"][1]["request"]["schedules"][0]["source_tracker"] == "U2"
-    assert daily_ready["steps"][3]["request"]["overrides"]["save_path"] == "/downloads"
-    assert "Create daily candidate schedule jobs" in daily_ready["next_actions"][0]
+    assert daily_ready["steps"][2]["request"]["overrides"]["save_path"] == "/downloads"
+    assert "Run and deliver the daily candidate digest" in daily_ready["next_actions"][0]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -21200,11 +21284,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
     daily_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "daily_candidates")
-    assert daily_workflow["tool"] == "daily_candidates_schedule_job"
-    assert daily_workflow["runbook"][2]["tool"] == "daily_candidate_delivery"
-    assert "payload_fingerprint" in daily_workflow["runbook"][2]["read"]
-    assert daily_workflow["runbook"][3]["tool"] == "submit_daily_candidate_job"
-    assert "policy_application_handoff" in daily_workflow["runbook"][3]["read"]
+    assert daily_workflow["tool"] == "daily_candidate_run_and_deliver"
+    assert daily_workflow["runbook"][1]["tool"] == "daily_candidate_run_and_deliver"
+    assert "run_and_deliver_report" in daily_workflow["runbook"][1]["read"]
+    assert daily_workflow["runbook"][2]["tool"] == "submit_daily_candidate_job"
+    assert "policy_application_handoff" in daily_workflow["runbook"][2]["read"]
     retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
     assert retorrent_tool["input_schema"]["required"] == ["source", "target"]
     assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
@@ -21266,7 +21350,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in payload["skill_contract"]["completion_evidence"]
         assert "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes." in payload["agent_instructions"]["must"]
         assert "Do not assume rule_review_fingerprint placeholders satisfy manual review." in payload["agent_instructions"]["must_not"]
-        assert payload["tool_selection"]["daily_candidates"] == "daily_candidates_schedule_job"
+        assert payload["tool_selection"]["daily_candidates"] == "daily_candidate_run_and_deliver"
+        assert payload["tool_selection"]["daily_candidates_step_by_step"] == "daily_candidates_schedule_job"
         assert payload["closure_contract"]["primary_field"] == "closure_handoff"
         assert "collect_confirmations" in payload["closure_contract"]["actions"]
         assert payload["discovery"]["openapi"].endswith("/openapi.json")

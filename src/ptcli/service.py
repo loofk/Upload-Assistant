@@ -818,6 +818,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/refill": lambda payload: create_daily_candidate_refill_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
+                "/v1/jobs/candidates/daily/run-and-deliver": lambda payload: create_daily_candidate_run_and_deliver(job_store, payload),
             }
             if path.startswith("/v1/jobs/candidates/") and path.endswith("/submit"):
                 try:
@@ -2712,6 +2713,126 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_run_next_actions(jobs, skipped, blockers),
     }
+
+
+def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Run daily candidate schedules and deliver the digest; never submits or uploads torrents."""
+    schedule_result = create_daily_candidate_schedule_jobs(job_store, request)
+    delivery_requested = request.get("deliver") is not False
+    delivery_request = _daily_candidate_run_and_deliver_delivery_request(schedule_result, request)
+    delivery_result: dict[str, Any] | None = None
+    blockers = _string_list(schedule_result.get("blockers"))
+    if delivery_requested:
+        if delivery_request:
+            delivery_result = daily_candidate_delivery_payload(delivery_request)
+            blockers.extend(_string_list(delivery_result.get("blockers")))
+        else:
+            blockers.append("daily_candidate_delivery_plan.publish_request is unavailable; poll pending jobs or inspect daily_candidate_run_handoff before delivery.")
+    blockers = list(dict.fromkeys(blockers))
+    report = _daily_candidate_run_and_deliver_report(schedule_result, delivery_result, delivery_requested, blockers)
+    ok = bool(schedule_result.get("ok")) and (not delivery_requested or bool(delivery_result and delivery_result.get("ok"))) and not blockers
+    return {
+        "kind": "ptcli.daily_candidate_run_and_deliver",
+        "status": "delivered" if ok and delivery_result else "scheduled" if bool(schedule_result.get("ok")) and not delivery_requested else "blocked" if blockers else str(schedule_result.get("status") or "partial"),
+        "ok": ok,
+        "delivery_requested": delivery_requested,
+        "delivery_performed": bool(delivery_result),
+        "job_count": schedule_result.get("job_count"),
+        "jobs": schedule_result.get("jobs") if isinstance(schedule_result.get("jobs"), list) else [],
+        "schedule_result": schedule_result,
+        "delivery_request": delivery_request,
+        "delivery_result": delivery_result,
+        "run_and_deliver_report": report,
+        "daily_candidate_run_handoff": schedule_result.get("daily_candidate_run_handoff"),
+        "daily_candidate_delivery_final_report": schedule_result.get("daily_candidate_delivery_final_report"),
+        "notification_payload": schedule_result.get("notification_payload"),
+        "blockers": blockers,
+        "next_actions": _daily_candidate_run_and_deliver_next_actions(report, blockers),
+        "safety": {
+            "mutates_state": True,
+            "submits_candidates": False,
+            "uploads_torrents": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "delivery_only_after_candidate_scan": True,
+            "submit_requires_human_approval": True,
+        },
+    }
+
+
+def _daily_candidate_run_and_deliver_delivery_request(schedule_result: dict[str, Any], request: dict[str, Any]) -> dict[str, Any] | None:
+    explicit = request.get("delivery_request") if isinstance(request.get("delivery_request"), dict) else {}
+    if explicit:
+        delivery_request = dict(explicit)
+    else:
+        delivery_plan = schedule_result.get("daily_candidate_delivery_plan") if isinstance(schedule_result.get("daily_candidate_delivery_plan"), dict) else {}
+        delivery_handoff = schedule_result.get("delivery_handoff") if isinstance(schedule_result.get("delivery_handoff"), dict) else {}
+        delivery_request = (
+            dict(delivery_plan.get("publish_request"))
+            if isinstance(delivery_plan.get("publish_request"), dict)
+            else dict(delivery_handoff.get("delivery_request"))
+            if isinstance(delivery_handoff.get("delivery_request"), dict)
+            else {}
+        )
+        if not delivery_request:
+            notification_payload = schedule_result.get("notification_payload") if isinstance(schedule_result.get("notification_payload"), dict) else {}
+            delivery_request = _daily_candidate_delivery_request(notification_payload) or {}
+    if not delivery_request:
+        return None
+    for key in ("output_dir", "write_files", "webhook_url", "use_env_webhook", "webhook_timeout", "dry_run"):
+        if key in request:
+            delivery_request[key] = request[key]
+    delivery_request.setdefault("write_files", True)
+    delivery_request.setdefault("use_env_webhook", True)
+    return delivery_request
+
+
+def _daily_candidate_run_and_deliver_report(schedule_result: dict[str, Any], delivery_result: dict[str, Any] | None, delivery_requested: bool, blockers: list[str]) -> dict[str, Any]:
+    run_handoff = schedule_result.get("daily_candidate_run_handoff") if isinstance(schedule_result.get("daily_candidate_run_handoff"), dict) else {}
+    delivery_final = schedule_result.get("daily_candidate_delivery_final_report") if isinstance(schedule_result.get("daily_candidate_delivery_final_report"), dict) else {}
+    delivery_ok = bool(delivery_result and delivery_result.get("ok"))
+    delivery_status = delivery_result.get("status") if isinstance(delivery_result, dict) else "not_requested" if not delivery_requested else "not_performed"
+    action = "submit_after_user_approval" if str(run_handoff.get("action")) == "submit_candidate" and delivery_ok else "publish_only" if delivery_ok else "poll_or_repair"
+    return {
+        "kind": "ptcli.daily_candidate_run_and_deliver_report",
+        "ready": bool(schedule_result.get("ok")) and (not delivery_requested or delivery_ok) and not blockers,
+        "action": action,
+        "schedule_status": schedule_result.get("status"),
+        "schedule_job_count": int(schedule_result.get("job_count") or 0),
+        "delivery_requested": delivery_requested,
+        "delivery_status": delivery_status,
+        "delivery_ok": delivery_ok,
+        "notification_delivered": delivery_ok,
+        "file_delivery": delivery_result.get("file_delivery") if isinstance(delivery_result, dict) else None,
+        "webhook_delivery": delivery_result.get("webhook_delivery") if isinstance(delivery_result, dict) else None,
+        "payload_fingerprint": delivery_result.get("payload_fingerprint") if isinstance(delivery_result, dict) else None,
+        "daily_candidate_run_handoff": run_handoff or None,
+        "daily_candidate_delivery_final_report": delivery_final or None,
+        "next_step": run_handoff.get("next_step") if isinstance(run_handoff.get("next_step"), dict) else None,
+        "recommended_tool": run_handoff.get("recommended_tool"),
+        "recommended_endpoint": run_handoff.get("recommended_endpoint"),
+        "recommended_request": run_handoff.get("recommended_request"),
+        "read_order": ["run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "schedule_result.schedule_digest"],
+        "complete_when": ["run_and_deliver_report.notification_delivered=true", "daily_candidate_delivery_final_report.report_allowed=true"],
+        "stop_when": ["blockers is non-empty", "daily_candidate_run_handoff.action='submit_candidate' and explicit user approval is missing"],
+        "safety": {
+            "does_not_submit_candidates": True,
+            "does_not_upload_torrents": True,
+            "submit_requires_human_approval": True,
+            "publish_notification_is_not_live_upload": True,
+        },
+        "blockers": blockers,
+    }
+
+
+def _daily_candidate_run_and_deliver_next_actions(report: dict[str, Any], blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve run_and_deliver_report.blockers, or poll pending daily candidate jobs before retrying delivery."]
+    if report.get("notification_delivered") is True and report.get("recommended_tool") == "submit_daily_candidate_job":
+        return ["Show the delivered daily candidate digest to the user and wait for explicit approval before calling submit_daily_candidate_job."]
+    if report.get("notification_delivered") is True:
+        return ["Read run_and_deliver_report and daily_candidate_delivery_final_report before choosing the next daily candidate action."]
+    return ["Inspect schedule_result.daily_candidate_run_handoff, then retry delivery when publish.request is available."]
 
 
 def _daily_candidate_refill_job_result(
@@ -26739,6 +26860,8 @@ def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> 
         return {"job_id": "<job_id from closure_handoff.next_step>", "overrides": "<allowlisted overrides only>"}
     if tool == "daily_candidates_schedule_job":
         return {"schedules": [request_template]}
+    if tool == "daily_candidate_run_and_deliver":
+        return {"schedules": [request_template], "write_files": True, "use_env_webhook": True}
     if tool == "daily_candidate_delivery":
         return {"daily_candidate_batch_publish_payload": "<daily_candidate_batch_publish_payload or notification_payload>", "write_files": True, "dry_run": True}
     if tool == "submit_daily_candidate_job":
@@ -26758,7 +26881,7 @@ def _agent_preview_next_actions(workflow: str, blockers: list[str], closure_cont
     if blockers:
         return ["Resolve preview blockers before submitting live-capable jobs. This preview does not contact trackers or qBittorrent."]
     if workflow == "daily_candidates":
-        return [f"Create daily candidate schedule jobs, read schedule_digest.submission_handoff, submit one approved candidate, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
+        return [f"Run and deliver the daily candidate digest, read daily_candidate_run_handoff, submit one approved candidate, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
     return [f"Submit one_call_handoff.request to source_url_check_and_submit, poll get_job_status when job_id is returned, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
 
 
@@ -26770,6 +26893,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_request_schema = _daily_candidate_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_delivery_request_schema = _daily_candidate_delivery_tool_request_schema()
+    candidate_run_and_deliver_request_schema = _daily_candidate_run_and_deliver_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     retorrent_check_submit_request_schema = _retorrent_check_submit_tool_request_schema()
     sites_request_schema = _sites_tool_request_schema()
@@ -26957,6 +27081,21 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": _daily_candidate_delivery_response_contract(),
             "workflow_hints": {"after": "daily_candidate_batch_status or daily_candidates_schedule_job", "submit_with": "submit_daily_candidate_job only after user approval"},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "daily_candidate_run_and_deliver",
+            "method": "POST",
+            "path": "/v1/jobs/candidates/daily/run-and-deliver",
+            "description": "Run enabled daily candidate schedules and deliver the resulting digest to local files or webhook in one AI-callable step. This creates candidate scan jobs but never submits candidates or uploads torrents.",
+            "input_schema": candidate_run_and_deliver_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "notification_payload", "blockers", "next_actions", "safety"],
+                "run_and_deliver_report_fields": ["ready", "action", "schedule_status", "schedule_job_count", "delivery_requested", "delivery_status", "delivery_ok", "notification_delivered", "file_delivery", "webhook_delivery", "payload_fingerprint", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers"],
+                "delivery_result_fields": _daily_candidate_delivery_response_contract()["required_fields"],
+                "handoff_fields": ["daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "schedule_result.schedule_digest", "delivery_result.payload_fingerprint"],
+            },
+            "workflow_hints": {"preferred_for": "daily_candidates", "submit_with": "submit_daily_candidate_job only after explicit user approval", "step_by_step_alternative": "daily_candidates_schedule_job then daily_candidate_delivery"},
+            "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": [], "submits_candidates": False, "uploads_torrents": False},
         },
         {
             "name": "daily_candidates_schedule_job",
@@ -27510,6 +27649,20 @@ def _daily_candidate_delivery_tool_request_schema() -> dict[str, Any]:
             "dry_run": {"type": "boolean", "default": False},
         },
     }
+
+
+def _daily_candidate_run_and_deliver_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_daily_candidate_schedule_tool_request_schema()))
+    properties = schema.setdefault("properties", {})
+    delivery_properties = _daily_candidate_delivery_tool_request_schema()["properties"]
+    properties.update(
+        {
+            "deliver": {"type": "boolean", "default": True, "description": "When true, deliver the produced daily digest after schedule jobs finish inline or expose a publish request."},
+            "delivery_request": {"type": "object", "description": "Optional explicit daily_candidate_delivery request. When omitted, the schedule publish_request is used."},
+            **{key: value for key, value in delivery_properties.items() if key not in {"notification_payload", "daily_candidate_batch_publish_payload", "publish_payload", "delivery_handoff", "daily_candidate_delivery_handoff"}},
+        }
+    )
+    return schema
 
 
 def _candidate_submit_tool_request_schema() -> dict[str, Any]:
@@ -28706,7 +28859,8 @@ def _agent_tool_selection() -> dict[str, Any]:
         "deployment_or_seedbox_check": "deployment_check",
         "all_preflight_signals": "readiness_bundle",
         "rules_and_rate_limits": "site_policies",
-        "daily_candidates": "daily_candidates_schedule_job",
+        "daily_candidates": "daily_candidate_run_and_deliver",
+        "daily_candidates_step_by_step": "daily_candidates_schedule_job",
         "deliver_daily_candidate_digest": "daily_candidate_delivery",
         "submit_approved_daily_candidate": "submit_daily_candidate_job",
         "inspect_or_poll_job": "get_job_status",
@@ -28840,10 +28994,10 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
         },
         {
             "name": "daily_candidates",
-            "tool": "daily_candidates_schedule_job",
-            "description": "Find up to 10 ranked source/target retorrent candidates, then submit approved candidates through the inherited-identity handoff.",
+            "tool": "daily_candidate_run_and_deliver",
+            "description": "Find up to 10 ranked source/target retorrent candidates, deliver the digest, then submit approved candidates through the inherited-identity handoff.",
             "required_fields": ["source_tracker", "target"],
-            "read_result": ["schedule_digest", "candidate_digest", "digest", "candidates", "ready_count"],
+            "read_result": ["run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
             "runbook": [
                 {
                     "step": "preflight",
@@ -28853,18 +29007,11 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "stop_when": ["deployment.ready=false", "daily schedule missing", "site policy not ready"],
                 },
                 {
-                    "step": "create_candidate_jobs",
-                    "tool": "daily_candidates_schedule_job",
-                    "read": ["schedule_digest.items", "schedule_digest.push_items", "schedule_digest.submission_handoff"],
-                    "continue_when": "schedule_digest.pending_job_count=0 and schedule_digest.submission_handoff.ready=true",
-                    "repeat_when": "schedule_digest.pending_job_count>0",
-                },
-                {
-                    "step": "deliver_candidate_digest",
-                    "tool": "daily_candidate_delivery",
-                    "request_from": "notification_payload or daily_candidate_batch_publish_payload",
-                    "read": ["file_delivery", "webhook_delivery", "payload_fingerprint", "evidence_contract"],
-                    "continue_when": "ok=true",
+                    "step": "run_and_deliver_digest",
+                    "tool": "daily_candidate_run_and_deliver",
+                    "read": ["run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
+                    "continue_when": "run_and_deliver_report.notification_delivered=true and daily_candidate_run_handoff.pending_job_count=0",
+                    "repeat_when": "daily_candidate_run_handoff.pending_job_count>0",
                     "stop_when": ["blockers is non-empty"],
                 },
                 {
@@ -29330,6 +29477,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     daily_candidate_batch_schema = _daily_candidate_batch_status_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_delivery_request_schema = _daily_candidate_delivery_tool_request_schema()
+    candidate_run_and_deliver_request_schema = _daily_candidate_run_and_deliver_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     retorrent_check_submit_request_schema = _retorrent_check_submit_tool_request_schema()
@@ -29422,6 +29570,28 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    candidate_run_and_deliver_response_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "delivery_requested": {"type": "boolean"},
+            "delivery_performed": {"type": "boolean"},
+            "job_count": {"type": "integer"},
+            "jobs": {"type": "array", "items": {"type": "object"}},
+            "schedule_result": {"type": "object"},
+            "delivery_request": {"type": ["object", "null"]},
+            "delivery_result": {"type": ["object", "null"]},
+            "run_and_deliver_report": {"type": "object"},
+            "daily_candidate_run_handoff": {"type": ["object", "null"]},
+            "daily_candidate_delivery_final_report": {"type": ["object", "null"]},
+            "notification_payload": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
         },
     }
     site_policy_request_schema = _site_policy_tool_request_schema()
@@ -30356,6 +30526,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_schedule_request_schema}}},
                     "responses": {"200": {"description": "Queued daily-candidate jobs for each enabled schedule.", "content": {"application/json": {"schema": candidate_schedule_jobs_response_schema}}}},
+                }
+            },
+            "/v1/jobs/candidates/daily/run-and-deliver": {
+                "post": {
+                    "operationId": "runAndDeliverDailyRetorrentCandidates",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_run_and_deliver_request_schema}}},
+                    "responses": {"200": {"description": "Run daily-candidate schedules and deliver the digest without submitting or uploading torrents.", "content": {"application/json": {"schema": candidate_run_and_deliver_response_schema}}}},
                 }
             },
             "/v1/jobs/candidates/daily/batch": {
