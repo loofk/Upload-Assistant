@@ -17872,6 +17872,10 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["allowed_actions"]["upload"] is True
     assert matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert "uploaded_wait.complete=true" in matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["evidence_required"]
+    assert payload["site_policy_profiles"]["U2"] == matrix_by_tracker["U2"]["policy_profile"]
+    assert payload["site_policy_profiles"]["MTEAM"] == matrix_by_tracker["MTEAM"]["policy_profile"]
+    assert payload["site_policy_execution_profiles"]["U2"] == matrix_by_tracker["U2"]["execution_profile"]
+    assert payload["site_policy_execution_profiles"]["MTEAM"] == matrix_by_tracker["MTEAM"]["execution_profile"]
     assert payload["policy_execution_profiles"]["U2"] == matrix_by_tracker["U2"]["execution_profile"]
     assert payload["policy_execution_profiles"]["MTEAM"] == matrix_by_tracker["MTEAM"]["execution_profile"]
     assert payload["execution_readiness"]["ready"] is True
@@ -18165,6 +18169,8 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert matrix_by_tracker["U2"]["ready_for_mteam_target_flow"] is True
     assert matrix_by_tracker["U2"]["adapter_profile"]["adapter_contract"]["done_when"][0] == "adapter_profile.extension_checklist all ready for requested roles"
     assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20 MiB/s"
+    assert payload["site_policy_profiles"]["U2"] == matrix_by_tracker["U2"]["policy_profile"]
+    assert payload["site_policy_execution_profiles"]["U2"] == payload["policy_matrix"][0]["execution_profile"]
     assert matrix_by_tracker["MTEAM"]["ready_as_target"] is True
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2 MiB/s"
     assert payload["agent_summary"]["source_download_count"] == 2
@@ -19887,6 +19893,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_update_plan" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "site_policy_profiles" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "site_policy_execution_profiles" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "rule_obligation_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "scopes" in tool_by_name["site_policies"]["response_contract"]["rule_obligation_fields"]
@@ -20189,6 +20197,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "summary_file" in tool_by_name["goal_progress"]["input_schema"]["properties"]
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "site_policy_profiles" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "site_policy_execution_profiles" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "adapter_coverage_summary" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
@@ -20489,6 +20499,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in site_policy_schema["properties"]
     assert "policy_runtime_contract" in site_policy_schema["properties"]
     assert "policy_application_handoff" in site_policy_schema["properties"]
+    assert "site_policy_profiles" in site_policy_schema["properties"]
+    assert "site_policy_execution_profiles" in site_policy_schema["properties"]
+    assert "policy_execution_profiles" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     assert "config_update_plan" in site_policy_schema["properties"]
     rule_review_schema = openapi["paths"]["/v1/site-policies/rule-review"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -20499,6 +20512,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
     assert "adapter_profiles" in site_profiles_schema["properties"]
+    assert "site_policy_profiles" in site_profiles_schema["properties"]
+    assert "site_policy_execution_profiles" in site_profiles_schema["properties"]
     assert "adapter_coverage_summary" in site_profiles_schema["properties"]
     assert "extension_plan" in site_profiles_schema["properties"]
     assert "extension_validation_matrix" in site_profiles_schema["properties"]
@@ -21264,6 +21279,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][10]["stop_when"]
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "config_audit" in tools_by_name["site_profiles"]["response_contract"]["policy_profile_fields"]
+        assert "site_policy_profiles" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "site_policy_execution_profiles" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "adapter_coverage_summary" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
@@ -21305,6 +21322,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "config_template_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "structured_trackers" in tools_by_name["site_policies"]["response_contract"]["config_template_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "site_policy_profiles" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "site_policy_execution_profiles" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_setup_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_readiness_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]

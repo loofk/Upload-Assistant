@@ -3079,6 +3079,8 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
         "all_sites": base.get("sites", []),
         "capability_matrix": capability_matrix,
         "adapter_profiles": {str(item["tracker"]): item["adapter_profile"] for item in capability_matrix if item.get("tracker")},
+        "site_policy_profiles": {str(item.get("tracker")): item.get("policy_profile") for item in policy_matrix if item.get("tracker")},
+        "site_policy_execution_profiles": {str(item.get("tracker")): item.get("execution_profile") for item in policy_matrix if item.get("tracker")},
         "policy_matrix": policy_matrix,
         "policy_gap_summary": policy_gap_summary,
         "policy_execution_summary": _site_policy_execution_summary(policy_matrix, policy_gap_summary, execution_readiness, policy_handoff, report),
@@ -3288,7 +3290,8 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     policy_config_apply_handoff = _site_policy_config_apply_handoff(policy_config_handoff, policy_config_repair_handoff, config_update_plan, context)
     overall_ready = bool(report.get("ready")) and bool(policy_setup_summary.get("ready"))
     rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
-    policy_execution_profiles = {str(item.get("tracker")): item.get("execution_profile") for item in matrix if item.get("tracker")}
+    site_policy_profiles = {str(item.get("tracker")): item.get("policy_profile") for item in matrix if item.get("tracker")}
+    site_policy_execution_profiles = {str(item.get("tracker")): item.get("execution_profile") for item in matrix if item.get("tracker")}
     return {
         "kind": "ptcli.site_policies",
         "status": "ok" if overall_ready else "blocked",
@@ -3297,7 +3300,9 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "request": context,
         "policy_matrix": matrix,
         "rule_obligations": rule_obligations,
-        "policy_execution_profiles": policy_execution_profiles,
+        "site_policy_profiles": site_policy_profiles,
+        "site_policy_execution_profiles": site_policy_execution_profiles,
+        "policy_execution_profiles": site_policy_execution_profiles,
         "config_templates": _site_policy_config_templates(matrix),
         "site_policies": report.get("site_policies", []),
         "qbit_limits": report.get("qbit_limits", {}),
@@ -26688,7 +26693,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -27475,7 +27480,7 @@ def _summary_check_response_contract() -> dict[str, Any]:
 
 def _sites_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "adapter_coverage_summary", "extension_plan", "extension_validation_matrix", "extension_handoff", "tracker_rollout_handoff", "adapter_extension_final_report", "flow_matrix", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "site_policy_profiles", "site_policy_execution_profiles", "policy_matrix", "policy_execution_summary", "adapter_coverage_summary", "extension_plan", "extension_validation_matrix", "extension_handoff", "tracker_rollout_handoff", "adapter_extension_final_report", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
         "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist", "adapter_contract"],
         "adapter_contract_fields": ["reference_adapters", "source_info_contract", "source_download_contract", "target_upload_contract", "policy_contract", "validation_contract", "done_when"],
@@ -28793,6 +28798,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "all_sites": {"type": "array", "items": {"type": "string"}},
             "capability_matrix": {"type": "array", "items": {"type": "object"}},
             "adapter_profiles": {"type": "object"},
+            "site_policy_profiles": {"type": "object"},
+            "site_policy_execution_profiles": {"type": "object"},
             "policy_matrix": {"type": "array", "items": {"type": "object"}},
             "policy_gap_summary": {"type": "object"},
             "policy_execution_summary": {"type": "object"},
@@ -29029,6 +29036,10 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ready": {"type": "boolean"},
             "request": {"type": "object"},
             "policy_matrix": {"type": "array", "items": {"type": "object"}},
+            "rule_obligations": {"type": "object"},
+            "site_policy_profiles": {"type": "object"},
+            "site_policy_execution_profiles": {"type": "object"},
+            "policy_execution_profiles": {"type": "object"},
             "config_templates": {"type": "object"},
             "config_update_plan": {"type": "object"},
             "site_policies": {"type": "array", "items": {"type": "object"}},
