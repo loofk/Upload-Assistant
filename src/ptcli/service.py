@@ -7511,37 +7511,60 @@ def _daily_candidate_schedule_shortfall_recovery(schedule_digest: dict[str, Any]
         for item in items
         if max(0, int(item.get("target_count") or 0) - int(item.get("ready_count") or 0)) > 0
     ]
-    schedules = [
-        {
-            key: value
-            for key, value in {
-                "name": item.get("schedule_name"),
-                "source_tracker": (item.get("request_context") or {}).get("source_tracker") if isinstance(item.get("request_context"), dict) else item.get("source_tracker"),
-                "target": ",".join((item.get("request_context") or {}).get("target_trackers") or []) if isinstance((item.get("request_context") or {}).get("target_trackers"), list) else item.get("target_trackers"),
-                "limit": int((item.get("request_context") or {}).get("limit") or item.get("target_count") or DEFAULT_CANDIDATE_LIMIT) if isinstance(item.get("request_context"), dict) else int(item.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
-                "accept_rules": (item.get("request_context") or {}).get("accept_rules") if isinstance(item.get("request_context"), dict) else None,
-                "check_dupes": True,
-                "base_dir": (item.get("request_context") or {}).get("base_dir") if isinstance(item.get("request_context"), dict) else None,
-            }.items()
-            if value is not None and value != ""
-        }
-        for item in items
-        if max(0, int(item.get("target_count") or 0) - int(item.get("ready_count") or 0)) > 0
-    ]
+    refill_requests = [_daily_candidate_schedule_refill_request(item) for item in items if max(0, int(item.get("target_count") or 0) - int(item.get("ready_count") or 0)) > 0]
+    refill_requests = [request for request in refill_requests if request]
+    schedules = [_daily_candidate_schedule_rerun_request(item) for item in items if max(0, int(item.get("target_count") or 0) - int(item.get("ready_count") or 0)) > 0]
+    schedules = [schedule for schedule in schedules if schedule]
+    first_refill_request = refill_requests[0] if refill_requests else None
     return {
         "kind": "ptcli.daily_candidate_schedule_shortfall_recovery",
-        "action": "rerun_daily_candidate_schedules" if ready_shortfall else "none",
+        "action": "refill_daily_candidate_batch" if ready_shortfall else "none",
         "reason": "fewer than target_count schedule candidates are ready" if ready_shortfall else "ready target met",
         "target_count": target_count,
         "selected_shortfall_count": selected_shortfall,
         "ready_shortfall_count": ready_shortfall,
         "shortfall_items": shortfall_items,
-        "recommended_tool": "daily_candidates_schedule_job" if ready_shortfall else None,
-        "recommended_endpoint": "/v1/jobs/candidates/daily/schedule" if ready_shortfall else None,
+        "refill_requests": refill_requests,
+        "fallback_schedule_request": {"schedules": schedules} if ready_shortfall else None,
+        "recommended_tool": "daily_candidate_refill_job" if ready_shortfall else None,
+        "recommended_endpoint": "/v1/jobs/candidates/daily/refill" if ready_shortfall else None,
         "recommended_method": "POST" if ready_shortfall else None,
-        "recommended_request": {"schedules": schedules} if ready_shortfall else None,
-        "continue_when": "schedule_digest.daily_candidate_batch_report.ready=true or ready_shortfall_count=0",
-        "stop_when": ["pending_job_count=0 and ready_shortfall_count>0 after rerun", "schedule or policy blockers remain"],
+        "recommended_request": first_refill_request,
+        "recommended_overrides": {"fallback_tool": "daily_candidates_schedule_job", "fallback_endpoint": "/v1/jobs/candidates/daily/schedule", "fallback_request": {"schedules": schedules} if ready_shortfall else None},
+        "continue_when": "daily_candidate_refill_job.after_batch.daily_candidate_batch_publish_payload is ready, or ready_shortfall_count becomes 0",
+        "stop_when": ["daily_candidate_refill_job.blockers is non-empty", "progress.candidate_job_count_delta=0 after refill", "schedule or policy blockers remain"],
+    }
+
+
+def _daily_candidate_schedule_refill_request(item: dict[str, Any]) -> dict[str, Any]:
+    context = item.get("request_context") if isinstance(item.get("request_context"), dict) else {}
+    target = context.get("target_trackers") if context.get("target_trackers") is not None else item.get("target_trackers")
+    return {
+        key: value
+        for key, value in {
+            "source_tracker": context.get("source_tracker") or item.get("source_tracker"),
+            "target": target,
+            "limit": int(context.get("limit") or item.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+        }.items()
+        if value is not None and value != ""
+    }
+
+
+def _daily_candidate_schedule_rerun_request(item: dict[str, Any]) -> dict[str, Any]:
+    context = item.get("request_context") if isinstance(item.get("request_context"), dict) else {}
+    target = ",".join(context.get("target_trackers") or []) if isinstance(context.get("target_trackers"), list) else item.get("target_trackers")
+    return {
+        key: value
+        for key, value in {
+            "name": item.get("schedule_name"),
+            "source_tracker": context.get("source_tracker") or item.get("source_tracker"),
+            "target": target,
+            "limit": int(context.get("limit") or item.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+            "accept_rules": context.get("accept_rules"),
+            "check_dupes": True,
+            "base_dir": context.get("base_dir"),
+        }.items()
+        if value is not None and value != ""
     }
 
 
@@ -8805,14 +8828,19 @@ def _daily_candidate_run_poll_step(schedule_digest: dict[str, Any]) -> dict[str,
 
 def _daily_candidate_run_shortfall_step(delivery_final: dict[str, Any], delivery_plan: dict[str, Any], execution_context: dict[str, Any], schedule_digest: dict[str, Any]) -> dict[str, Any]:
     shortfall = delivery_final.get("shortfall_recovery") if isinstance(delivery_final.get("shortfall_recovery"), dict) else delivery_plan.get("shortfall_recovery") if isinstance(delivery_plan.get("shortfall_recovery"), dict) else execution_context.get("shortfall_recovery") if isinstance(execution_context.get("shortfall_recovery"), dict) else schedule_digest.get("daily_candidate_batch_report", {}).get("shortfall_recovery") if isinstance(schedule_digest.get("daily_candidate_batch_report"), dict) else {}
+    fallback = shortfall.get("recommended_overrides", {}).get("fallback_request") if isinstance(shortfall.get("recommended_overrides"), dict) else None
     return {
         "ready": bool(shortfall),
-        "tool": shortfall.get("recommended_tool"),
-        "endpoint": shortfall.get("recommended_endpoint"),
-        "method": shortfall.get("recommended_method"),
+        "tool": shortfall.get("recommended_tool") or "daily_candidate_refill_job",
+        "endpoint": shortfall.get("recommended_endpoint") or "/v1/jobs/candidates/daily/refill",
+        "method": shortfall.get("recommended_method") or "POST",
         "request": shortfall.get("recommended_request"),
+        "refill_requests": shortfall.get("refill_requests") if isinstance(shortfall.get("refill_requests"), list) else [],
         "recommended_overrides": shortfall.get("recommended_overrides"),
-        "continue_when": "shortfall_recovery returns more safe candidates or scan is exhausted",
+        "fallback": {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": fallback} if isinstance(fallback, dict) else None,
+        "read_after": ["after_batch.daily_candidate_batch_publish_payload", "after_batch.daily_candidate_tracking_report", "progress"],
+        "continue_when": "daily_candidate_refill_job.after_batch adds ready candidates, reaches ready_shortfall_count=0, or exposes blockers",
+        "stop_when": ["daily_candidate_refill_job.blockers is non-empty", "progress.candidate_job_count_delta=0 after refill"],
     }
 
 
@@ -26944,7 +26972,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "pending_job_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "candidate_control_summary_fields": _candidate_response_contract()["candidate_control_summary_fields"],
-                "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
+                "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
                 "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
                 "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "delivery_tool", "delivery_endpoint", "delivery_method", "delivery_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_schedule_gate_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "pending_job_count", "publish_ready", "submission_ready", "notification_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
@@ -28515,7 +28543,7 @@ def _candidate_response_contract() -> dict[str, Any]:
         "candidate_control_summary_fields": ["ready", "action", "decision", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "ready_shortfall_count", "target_met", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "shortfall_recovery", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
+        "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
         "policy_execution_handoff_fields": ["ready", "accepted_rules", "phase", "qbit", "seeding", "transfer_rules", "rule_obligations", "missing_by_category", "continue_when", "stop_when", "blockers", "next_actions"],
         "policy_coverage_fields": ["ready", "rule_obligations_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "recommendations"],
         "rule_fields": ["source_rules_url", "target_rules_urls", "source_fingerprint", "target_fingerprints", "fingerprint_status"],
