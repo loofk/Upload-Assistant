@@ -44417,6 +44417,7 @@
           "patch_source",
           "preferred_patch",
           "fallback_patch",
+          "copyable_config",
           "apply_order",
           "manual_steps",
           "verification",
@@ -44430,6 +44431,18 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "copyable_config_fields": [
+          "ready",
+          "config_path",
+          "preferred_shape",
+          "trackers",
+          "patch_sha256",
+          "python_update_snippet",
+          "json_patch",
+          "manual_apply_note",
+          "verify_after_apply",
+          "safety"
         ],
         "config_apply_verification_fields": [
           "tool",

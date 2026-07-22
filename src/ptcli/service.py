@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import os
+import pprint
 import re
 import shutil
 import subprocess
@@ -4931,6 +4932,9 @@ def _site_policy_rule_review_config_apply_final_report(
     rerun_request: dict[str, Any],
 ) -> dict[str, Any]:
     patch_trackers = _string_list((merged_config_patch or {}).get("apply_order")) or _string_list(context.get("trackers"))
+    preferred_patch = (merged_config_patch or {}).get("structured_patch") if isinstance((merged_config_patch or {}).get("structured_patch"), dict) else None
+    fallback_patch = (merged_config_patch or {}).get("flat_patch") if isinstance((merged_config_patch or {}).get("flat_patch"), dict) else None
+    copyable_config = _site_policy_copyable_config(preferred_patch, fallback_patch, patch_trackers)
     verification_call = {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request}
     return {
         "kind": "ptcli.site_policy_config_apply_final_report",
@@ -4940,8 +4944,9 @@ def _site_policy_rule_review_config_apply_final_report(
         "action": "edit_config_then_verify" if ready else "collect_manual_rule_review_evidence",
         "config_path": 'config["PTCLI"]["SITE_POLICIES"]',
         "patch_source": "site_policy_rule_review.merged_config_patch",
-        "preferred_patch": (merged_config_patch or {}).get("structured_patch") if isinstance((merged_config_patch or {}).get("structured_patch"), dict) else None,
-        "fallback_patch": (merged_config_patch or {}).get("flat_patch") if isinstance((merged_config_patch or {}).get("flat_patch"), dict) else None,
+        "preferred_patch": preferred_patch,
+        "fallback_patch": fallback_patch,
+        "copyable_config": copyable_config,
         "apply_order": patch_trackers,
         "manual_steps": _site_policy_rule_review_config_apply_steps(ready, patch_trackers),
         "verification": {
@@ -4978,7 +4983,7 @@ def _site_policy_rule_review_config_apply_final_report(
             "site_policies still reports missing or placeholder rule_review_fingerprint",
             "site_policies still reports missing qBittorrent rate limits or seeding requirements",
         ],
-        "read_order": ["config_apply_final_report", "preferred_patch", "manual_steps", "verification", "next_step", "blockers"],
+        "read_order": ["config_apply_final_report", "copyable_config", "preferred_patch", "manual_steps", "verification", "next_step", "blockers"],
         "safety": {
             "does_not_edit_config": True,
             "requires_human_config_edit": True,
@@ -5025,6 +5030,27 @@ def _site_policy_rule_review_config_apply_steps(ready: bool, trackers: list[str]
             "continue_when": "policy_config_apply_handoff.ready=true and policy_execution_handoff.ready=true",
         },
     ]
+
+
+def _site_policy_copyable_config(preferred_patch: dict[str, Any] | None, fallback_patch: dict[str, Any] | None, trackers: list[str]) -> dict[str, Any]:
+    patch = preferred_patch if isinstance(preferred_patch, dict) else fallback_patch if isinstance(fallback_patch, dict) else {}
+    patch_json = json.dumps(patch, ensure_ascii=False, sort_keys=True, indent=2)
+    patch_hash = hashlib.sha256(patch_json.encode("utf-8")).hexdigest() if patch else None
+    python_patch = pprint.pformat(patch, width=120, sort_dicts=True) if patch else "{}"
+    python_update_snippet = f'config.setdefault("PTCLI", {{}}).setdefault("SITE_POLICIES", {{}}).update({python_patch})'
+    return {
+        "kind": "ptcli.site_policy_copyable_config",
+        "ready": bool(patch),
+        "config_path": 'config["PTCLI"]["SITE_POLICIES"]',
+        "preferred_shape": "structured" if isinstance(preferred_patch, dict) else "flat" if isinstance(fallback_patch, dict) else None,
+        "trackers": trackers,
+        "patch_sha256": patch_hash,
+        "python_update_snippet": python_update_snippet,
+        "json_patch": patch_json,
+        "manual_apply_note": "Paste python_update_snippet into data/config.py after the config dict is defined, or merge json_patch into config['PTCLI']['SITE_POLICIES']; keep stricter local limits if already configured.",
+        "verify_after_apply": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST"},
+        "safety": {"does_not_edit_config": True, "safe_to_auto_apply": False, "requires_human_config_edit": True},
+    }
 
 
 def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -33274,7 +33300,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "review_fields": ["tracker", "roles", "rules_url", "reviewer", "reviewed_at", "rule_review_fingerprint", "fingerprint_algorithm", "acknowledged_scopes", "structured_patch", "flat_patch", "manual_steps"],
                 "config_patch_fields": ["config_path", "preferred_shape", "structured_patch", "flat_patch", "safe_to_auto_apply", "mutates_state", "apply_order"],
                 "rule_review_final_report_fields": ["ready", "report_allowed", "verdict", "action", "requested_trackers", "requested_roles", "review_items", "config_patch", "merged_config_patch", "merge_plan", "after_edit", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-                "config_apply_final_report_fields": ["ready", "report_allowed", "verdict", "action", "config_path", "patch_source", "preferred_patch", "fallback_patch", "apply_order", "manual_steps", "verification", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "config_apply_final_report_fields": ["ready", "report_allowed", "verdict", "action", "config_path", "patch_source", "preferred_patch", "fallback_patch", "copyable_config", "apply_order", "manual_steps", "verification", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "copyable_config_fields": ["ready", "config_path", "preferred_shape", "trackers", "patch_sha256", "python_update_snippet", "json_patch", "manual_apply_note", "verify_after_apply", "safety"],
                 "config_apply_verification_fields": ["tool", "endpoint", "method", "request", "read", "continue_when", "stop_when"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "after_edit"],
             },
