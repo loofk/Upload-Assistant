@@ -23372,6 +23372,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_discovery_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "candidate_discovery_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "candidate_discovery_profile_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "candidate_discovery_dedupe_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "excluded_count" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
+        assert "dedupe" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
         assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "site_policy_profile_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_prompt_fields"]
         assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
@@ -23388,6 +23391,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "source_pull" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
         assert "candidate_discovery_profile" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
         assert "safe_to_submit_when" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
+        assert "applied_before_scoring" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_dedupe_fields"]
         assert "required_seed_outputs" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_profile_fields"]
         assert "downloadability_cookie_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "status" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_cookie_fields"]
@@ -25943,6 +25947,103 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["execute_request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert candidate["execute_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent/from-url"
+
+
+async def test_daily_candidates_filters_excluded_source_ids_before_scoring(monkeypatch) -> None:
+    seeds = [
+        ptcli_candidates.CandidateSeed("U2", "60635", "Already.Covered", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", promotion="free"),
+        ptcli_candidates.CandidateSeed("U2", "60636", "Fresh.Release", "https://u2.dmhy.org/details.php?id=60636", size="24 GiB", promotion="free"),
+    ]
+    fetched_source_ids: list[str] = []
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+        return seeds
+
+    async def fake_fetch_source_info(_config, tracker, source_id, **_kwargs):
+        fetched_source_ids.append(str(source_id))
+        return source_info_from_tuple(tracker, str(source_id), (1234567, 999, f"Release.{source_id}", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "count": 0, "dupes": [], "query": {"imdb": f"tt{source_info['imdb_id']}"}}
+
+    monkeypatch.setattr(ptcli_candidates, "fetch_recent_candidate_seeds", fake_fetch_recent_candidate_seeds)
+    monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
+
+    config = {
+        "TRACKERS": {"MTEAM": {"api_key": "fake"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "MTEAM": {"upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+                "U2": {"download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+            }
+        },
+    }
+
+    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=10, accept_rules=True, exclude_source_ids=["60635", "60635"])
+
+    assert fetched_source_ids == ["60636"]
+    assert result["status"] == "partial"
+    assert result["discovered_count"] == 2
+    assert result["scan_count"] == 2
+    assert result["eligible_count"] == 1
+    assert result["excluded_count"] == 1
+    assert result["exclude_source_ids"] == ["60635"]
+    assert result["skipped_source_ids"] == ["60635"]
+    assert result["candidates"][0]["source"]["torrent_id"] == "60636"
+    assert result["source_capability"]["scan"]["exclude_source_ids"] == ["60635"]
+    handoff = result["candidate_discovery_handoff"]
+    assert handoff["dedupe"]["dedupe_key"] == "source_tracker,target,source_id"
+    assert handoff["dedupe"]["exclude_source_ids"] == ["60635"]
+    assert handoff["dedupe"]["excluded_count"] == 1
+    assert handoff["dedupe"]["applied_before_scoring"] is True
+    assert result["digest"]["request_context"]["exclude_source_ids"] == ["60635"]
+    assert result["digest"]["candidate_discovery_handoff"] == handoff
+
+
+async def test_daily_candidates_service_passes_excluded_source_ids(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_build_daily_candidates(_config, source_tracker, target_trackers_raw, **kwargs):
+        captured.update({"source_tracker": source_tracker, "target_trackers_raw": target_trackers_raw, **kwargs})
+        return {
+            "kind": "ptcli.daily_candidates",
+            "status": "partial",
+            "ok": True,
+            "target_count": 10,
+            "scan_count": 2,
+            "discovered_count": 2,
+            "eligible_count": 1,
+            "excluded_count": 1,
+            "exclude_source_ids": ["60635"],
+            "skipped_source_ids": ["60635"],
+            "count": 1,
+            "ready_count": 1,
+            "shortfall_count": 9,
+            "target_met": False,
+            "target_summary": {"target_count": 10, "scan_count": 2, "selected_count": 1, "ready_count": 1},
+            "source_capability": {"ready": True},
+            "candidate_discovery_handoff": {"kind": "ptcli.daily_candidate_discovery_handoff", "dedupe": {"exclude_source_ids": ["60635"]}},
+            "site_policy": {"ready": True},
+            "ranking": {"scan_count": 2, "selected_count": 1},
+            "digest": {"kind": "ptcli.daily_candidates_digest", "candidate_control_summary": None},
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {})
+    monkeypatch.setattr(ptcli_service, "build_daily_candidates", fake_build_daily_candidates)
+
+    payload = await ptcli_service.daily_candidates({"source_tracker": "U2", "target": "MTEAM", "exclude_source_ids": ["60635", "60635"], "accept_rules": True})
+
+    assert captured["source_tracker"] == "U2"
+    assert captured["target_trackers_raw"] == "MTEAM"
+    assert captured["exclude_source_ids"] == ["60635"]
+    assert payload["request"]["exclude_source_ids"] == ["60635"]
+    assert payload["excluded_count"] == 1
+    assert payload["skipped_source_ids"] == ["60635"]
+    assert payload["candidate_discovery_handoff"]["dedupe"]["exclude_source_ids"] == ["60635"]
 
 
 async def test_daily_candidates_execution_plan_reports_ready_shortfall(monkeypatch) -> None:

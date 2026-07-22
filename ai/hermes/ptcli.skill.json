@@ -13046,11 +13046,18 @@
           "ok",
           "target_count",
           "scan_count",
+          "discovered_count",
+          "eligible_count",
+          "excluded_count",
+          "exclude_source_ids",
+          "skipped_source_ids",
           "count",
           "ready_count",
           "shortfall_count",
           "target_met",
           "target_summary",
+          "source_capability",
+          "candidate_discovery_handoff",
           "site_policy",
           "ranking",
           "digest",
@@ -13298,6 +13305,7 @@
           "implementation",
           "network_mode",
           "scan",
+          "dedupe",
           "credentials",
           "required_seed_outputs",
           "required_enrichment_outputs",
@@ -13323,6 +13331,12 @@
           "required_enrichment_outputs",
           "safety",
           "blockers"
+        ],
+        "candidate_discovery_dedupe_fields": [
+          "dedupe_key",
+          "exclude_source_ids",
+          "excluded_count",
+          "applied_before_scoring"
         ],
         "downloadability_cookie_fields": [
           "required",
@@ -15628,6 +15642,13 @@
           "ranking",
           "digest",
           "candidates",
+          "target_count",
+          "scan_count",
+          "discovered_count",
+          "eligible_count",
+          "excluded_count",
+          "exclude_source_ids",
+          "skipped_source_ids",
           "ready_count"
         ],
         "digest_fields": [
@@ -15890,6 +15911,7 @@
           "implementation",
           "network_mode",
           "scan",
+          "dedupe",
           "credentials",
           "required_seed_outputs",
           "required_enrichment_outputs",
@@ -15915,6 +15937,12 @@
           "required_enrichment_outputs",
           "safety",
           "blockers"
+        ],
+        "candidate_discovery_dedupe_fields": [
+          "dedupe_key",
+          "exclude_source_ids",
+          "excluded_count",
+          "applied_before_scoring"
         ],
         "downloadability_cookie_fields": [
           "required",

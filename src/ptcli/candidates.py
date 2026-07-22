@@ -62,25 +62,32 @@ async def build_daily_candidates(
     base_dir: str | None = None,
     accept_rules: bool = False,
     check_dupes: bool = True,
+    exclude_source_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     source = normalize_tracker(source_tracker)
     targets = parse_tracker_list(target_trackers_raw)
     limit = max(1, min(int(limit or DEFAULT_CANDIDATE_LIMIT), DEFAULT_CANDIDATE_LIMIT))
+    excluded_source_ids = _normalize_source_ids(exclude_source_ids)
     invalid = unsupported_trackers([source, *targets])
     if invalid:
-        return _blocked_payload(source, targets, limit, [f"Unsupported tracker(s) for focused candidate scope: {', '.join(invalid)}"])
+        return _blocked_payload(source, targets, limit, [f"Unsupported tracker(s) for focused candidate scope: {', '.join(invalid)}"], exclude_source_ids=excluded_source_ids)
     if source in targets:
-        return _blocked_payload(source, targets, limit, ["Source tracker cannot also be a target tracker."])
+        return _blocked_payload(source, targets, limit, ["Source tracker cannot also be a target tracker."], exclude_source_ids=excluded_source_ids)
 
     rule_check = build_rule_check(source, targets, accept_rules=accept_rules)
     site_policy = build_site_policy_report(config, [source, *targets], accept_rules=accept_rules)
-    source_capability = _source_candidate_capability(source, base_dir=base_dir, limit=limit)
-    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit)
+    source_capability = _source_candidate_capability(source, base_dir=base_dir, limit=limit, exclude_source_ids=excluded_source_ids)
+    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit, exclude_source_ids=excluded_source_ids)
     scored_candidates: list[dict[str, Any]] = []
     blockers: list[str] = []
     next_actions: list[str] = []
+    discovered_seeds: list[CandidateSeed] = []
+    skipped_source_ids: list[str] = []
     try:
-        seeds = await fetch_recent_candidate_seeds(source, base_dir=base_dir, limit=MAX_CANDIDATE_SCAN)
+        discovered_seeds = await fetch_recent_candidate_seeds(source, base_dir=base_dir, limit=MAX_CANDIDATE_SCAN)
+        seeds = _filter_excluded_candidate_seeds(discovered_seeds, excluded_source_ids)
+        excluded_lookup = set(excluded_source_ids)
+        skipped_source_ids = [seed.torrent_id for seed in discovered_seeds if str(seed.torrent_id) in excluded_lookup]
     except Exception as exc:
         seeds = []
         blockers.append(str(exc))
@@ -99,7 +106,10 @@ async def build_daily_candidates(
     partial = bool(blockers or len(candidates) < limit)
     status = "ok" if candidates and not partial else "blocked" if not candidates else "partial"
     if not candidates and not blockers:
-        blockers.append("No source candidates were found.")
+        if skipped_source_ids:
+            blockers.append("All discovered source candidates were excluded by exclude_source_ids.")
+        else:
+            blockers.append("No source candidates were found.")
     payload_blockers = list(blockers)
     if not rule_check.get("ready"):
         payload_blockers.extend(f"rule-check: {blocker}" for blocker in _rule_blockers(rule_check))
@@ -110,15 +120,16 @@ async def build_daily_candidates(
         payload_blockers,
         next_actions,
         limit=limit,
-        scan_count=len(seeds),
+        scan_count=len(discovered_seeds),
         source_tracker=source,
         target_trackers=targets,
         accept_rules=accept_rules,
         check_dupes=check_dupes,
         base_dir=base_dir,
+        exclude_source_ids=excluded_source_ids,
         discovery_handoff=discovery_handoff,
     )
-    target_summary = _candidate_target_summary(limit, scan_count=len(seeds), selected_count=len(candidates), ready_count=ready_count)
+    target_summary = _candidate_target_summary(limit, scan_count=len(discovered_seeds), selected_count=len(candidates), ready_count=ready_count)
     return {
         "kind": "ptcli.daily_candidates",
         "status": status,
@@ -128,6 +139,11 @@ async def build_daily_candidates(
         "limit": limit,
         "target_count": target_summary["target_count"],
         "scan_count": target_summary["scan_count"],
+        "discovered_count": len(discovered_seeds),
+        "eligible_count": len(seeds),
+        "excluded_count": len(skipped_source_ids),
+        "exclude_source_ids": excluded_source_ids,
+        "skipped_source_ids": skipped_source_ids,
         "count": len(candidates),
         "ready_count": ready_count,
         "shortfall_count": target_summary["shortfall_count"],
@@ -947,6 +963,7 @@ def _candidate_digest(
     accept_rules: bool = False,
     check_dupes: bool = True,
     base_dir: str | None = None,
+    exclude_source_ids: list[str] | None = None,
     discovery_handoff: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ready_candidates = [candidate for candidate in candidates if candidate.get("status") == "ready"]
@@ -963,8 +980,8 @@ def _candidate_digest(
     approval_queue = _candidate_approval_queue(push_items)
     target_summary = _candidate_target_summary(limit, scan_count=scan_count, selected_count=len(candidates), ready_count=len(ready_candidates))
     push_summary = _candidate_push_summary(target_summary, review_count, blocked_count, recommendation)
-    request_context = _candidate_discovery_request_context(source_tracker, target_trackers, limit, accept_rules=accept_rules, check_dupes=check_dupes, base_dir=base_dir)
-    discovery_handoff = discovery_handoff or _candidate_discovery_handoff(_source_candidate_capability(str(source_tracker or ""), base_dir=base_dir, limit=limit), target_trackers or [], limit=limit)
+    request_context = _candidate_discovery_request_context(source_tracker, target_trackers, limit, accept_rules=accept_rules, check_dupes=check_dupes, base_dir=base_dir, exclude_source_ids=exclude_source_ids)
+    discovery_handoff = discovery_handoff or _candidate_discovery_handoff(_source_candidate_capability(str(source_tracker or ""), base_dir=base_dir, limit=limit, exclude_source_ids=exclude_source_ids), target_trackers or [], limit=limit, exclude_source_ids=exclude_source_ids)
     execution_plan = _candidate_execution_plan(push_items, approval_queue, target_summary, blockers, next_actions, recommendation=recommendation, request_context=request_context)
     daily_candidate_report = _candidate_daily_report(push_items, approval_queue, execution_plan, target_summary, blockers, recommendation=recommendation)
     daily_candidate_batch_report = _candidate_batch_report(push_items, approval_queue, execution_plan, daily_candidate_report, target_summary, blockers)
@@ -1601,6 +1618,7 @@ def _candidate_discovery_request_context(
     accept_rules: bool,
     check_dupes: bool,
     base_dir: str | None,
+    exclude_source_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     request: dict[str, Any] = {
         "source_tracker": source_tracker,
@@ -1612,6 +1630,9 @@ def _candidate_discovery_request_context(
     }
     if base_dir:
         request["base_dir"] = base_dir
+    excluded = _normalize_source_ids(exclude_source_ids)
+    if excluded:
+        request["exclude_source_ids"] = excluded
     return request
 
 
@@ -2319,9 +2340,10 @@ def _candidate_tier(candidate: dict[str, Any]) -> str:
     return str(ranking.get("tier") or candidate.get("status") or "")
 
 
-def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str]) -> dict[str, Any]:
-    source_capability = _source_candidate_capability(source, limit=limit)
-    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit)
+def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str], *, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
+    excluded_source_ids = _normalize_source_ids(exclude_source_ids)
+    source_capability = _source_candidate_capability(source, limit=limit, exclude_source_ids=excluded_source_ids)
+    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit, exclude_source_ids=excluded_source_ids)
     return {
         "kind": "ptcli.daily_candidates",
         "status": "blocked",
@@ -2339,19 +2361,24 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
         },
         "target_count": limit,
         "scan_count": 0,
+        "discovered_count": 0,
+        "eligible_count": 0,
+        "excluded_count": 0,
+        "exclude_source_ids": excluded_source_ids,
+        "skipped_source_ids": [],
         "shortfall_count": limit,
         "target_met": False,
         "target_summary": _candidate_target_summary(limit, scan_count=0, selected_count=0, ready_count=0),
         "source_capability": source_capability,
         "candidate_discovery_handoff": discovery_handoff,
-        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0, source_tracker=source, target_trackers=targets, discovery_handoff=discovery_handoff),
+        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0, source_tracker=source, target_trackers=targets, exclude_source_ids=excluded_source_ids, discovery_handoff=discovery_handoff),
         "candidates": [],
         "blockers": blockers,
         "next_actions": [],
     }
 
 
-def _source_candidate_capability(source: str, *, base_dir: str | None = None, limit: int = MAX_CANDIDATE_SCAN) -> dict[str, Any]:
+def _source_candidate_capability(source: str, *, base_dir: str | None = None, limit: int = MAX_CANDIDATE_SCAN, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
     normalized = normalize_tracker(source) if source else source
     adapter = _candidate_discovery_adapter(normalized)
     info_adapter = source_info_adapter(normalized)
@@ -2377,6 +2404,7 @@ def _source_candidate_capability(source: str, *, base_dir: str | None = None, li
             "max_limit": MAX_CANDIDATE_SCAN,
             "recent_url": _recent_url(normalized) if normalized in GENERIC_DETAILS_BASE_URLS else None,
             "pagination": "first_recent_page",
+            "exclude_source_ids": _normalize_source_ids(exclude_source_ids),
         },
         "credentials": {
             "cookie_required": normalized in GENERIC_DETAILS_BASE_URLS and normalized not in MTEAM_API_TRACKERS,
@@ -2403,9 +2431,10 @@ def _candidate_discovery_adapter(source: str) -> str | None:
     return None
 
 
-def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: list[str], *, limit: int) -> dict[str, Any]:
+def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: list[str], *, limit: int, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
     ready = bool(source_capability.get("ready"))
     blockers = _string_list(source_capability.get("blockers"))
+    excluded = _normalize_source_ids(exclude_source_ids)
     return {
         "kind": "ptcli.daily_candidate_discovery_handoff",
         "ready": ready,
@@ -2416,6 +2445,12 @@ def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: lis
         "implementation": source_capability.get("implementation"),
         "network_mode": source_capability.get("network_mode"),
         "scan": source_capability.get("scan"),
+        "dedupe": {
+            "dedupe_key": "source_tracker,target,source_id",
+            "exclude_source_ids": excluded,
+            "excluded_count": len(excluded),
+            "applied_before_scoring": True,
+        },
         "credentials": source_capability.get("credentials"),
         "required_seed_outputs": source_capability.get("required_seed_outputs"),
         "required_enrichment_outputs": source_capability.get("required_enrichment_outputs"),
@@ -2442,6 +2477,17 @@ def _candidate_discovery_next_actions(ready: bool, blockers: list[str], source_c
     if cookie_path:
         actions.append(f"Refresh the source cookie at {cookie_path}.")
     return actions
+
+
+def _normalize_source_ids(source_ids: list[str] | None) -> list[str]:
+    return list(dict.fromkeys(str(item).strip() for item in source_ids or [] if str(item).strip()))
+
+
+def _filter_excluded_candidate_seeds(seeds: list[CandidateSeed], excluded_source_ids: list[str]) -> list[CandidateSeed]:
+    if not excluded_source_ids:
+        return seeds
+    excluded = set(excluded_source_ids)
+    return [seed for seed in seeds if str(seed.torrent_id) not in excluded]
 
 
 def _source_fetch_next_actions(source: str, base_dir: str | None) -> list[str]:

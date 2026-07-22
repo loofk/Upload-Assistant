@@ -3507,6 +3507,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         base_dir=context.get("base_dir"),
         accept_rules=bool(context.get("accept_rules")),
         check_dupes=bool(context.get("check_dupes")),
+        exclude_source_ids=_string_list(context.get("exclude_source_ids")),
     )
     return {
         "kind": "ptcli.service.daily_candidates",
@@ -3517,6 +3518,8 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "next_actions": _string_list(result.get("next_actions")),
         "elapsed_seconds": round(time.time() - started_at, 3),
         "result": result,
+        "source_capability": result.get("source_capability"),
+        "candidate_discovery_handoff": result.get("candidate_discovery_handoff"),
         "site_policy": result.get("site_policy"),
         "ranking": result.get("ranking"),
         "digest": result.get("digest"),
@@ -3525,6 +3528,11 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "count": result.get("count", 0),
         "target_count": result.get("target_count"),
         "scan_count": result.get("scan_count"),
+        "discovered_count": result.get("discovered_count"),
+        "eligible_count": result.get("eligible_count"),
+        "excluded_count": result.get("excluded_count"),
+        "exclude_source_ids": result.get("exclude_source_ids"),
+        "skipped_source_ids": result.get("skipped_source_ids"),
         "ready_count": result.get("ready_count", 0),
         "shortfall_count": result.get("shortfall_count"),
         "target_met": result.get("target_met"),
@@ -6341,7 +6349,7 @@ def _candidate_request_context(request: dict[str, Any]) -> dict[str, Any]:
         "base_dir": request.get("base_dir"),
         "accept_rules": bool(request.get("accept_rules")),
         "check_dupes": request.get("check_dupes", True) is not False,
-        "exclude_source_ids": _string_list(request.get("exclude_source_ids") or request.get("exclude_source_ids_hint")),
+        "exclude_source_ids": list(dict.fromkeys(_string_list(request.get("exclude_source_ids") or request.get("exclude_source_ids_hint")))),
     }
 
 
@@ -31780,7 +31788,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
     candidate_contract = _candidate_response_contract()
     contract.update(
         {
-            "result_fields": ["ranking", "digest", "candidates", "ready_count"],
+            "result_fields": ["ranking", "digest", "candidates", "target_count", "scan_count", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "ready_count"],
             "digest_fields": candidate_contract["digest_fields"],
             "candidate_fields": candidate_contract["candidate_fields"],
             "push_item_fields": candidate_contract["push_item_fields"],
@@ -31793,6 +31801,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
             "downloadability_summary_fields": candidate_contract["downloadability_summary_fields"],
             "candidate_discovery_handoff_fields": candidate_contract["candidate_discovery_handoff_fields"],
             "candidate_discovery_profile_fields": candidate_contract["candidate_discovery_profile_fields"],
+            "candidate_discovery_dedupe_fields": candidate_contract["candidate_discovery_dedupe_fields"],
             "downloadability_cookie_fields": candidate_contract["downloadability_cookie_fields"],
             "downloadability_source_pull_fields": candidate_contract["downloadability_source_pull_fields"],
             "publish_card_action_fields": candidate_contract["publish_card_action_fields"],
@@ -31907,7 +31916,7 @@ def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
 
 def _candidate_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "target_count", "scan_count", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "site_policy", "ranking", "digest", "candidate_control_summary", "candidates", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "target_count", "scan_count", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "source_capability", "candidate_discovery_handoff", "site_policy", "ranking", "digest", "candidate_control_summary", "candidates", "blockers", "next_actions"],
         "digest_fields": [
             "recommendation",
             "recommended_action",
@@ -32045,8 +32054,9 @@ def _candidate_response_contract() -> dict[str, Any]:
         "candidate_executability_item_fields": ["rank", "source_tracker", "source_id", "source_url", "target", "title", "ready", "can_submit_after_approval", "requires_human_approval", "status", "first_blocked_phase", "first_blocked_check", "checks", "missing_checks", "submit_tool", "submit_endpoint", "submit_request", "required_user_inputs", "blockers"],
         "candidate_executability_check_fields": ["name", "phase", "ready", "status", "required_fields", "blocking"],
         "downloadability_summary_fields": ["ready", "downloadable", "source_tracker", "source_id", "source_url", "source_download_adapter", "source_info_adapter", "candidate_discovery_adapter", "candidate_discovery_profile", "policy_allows_download", "policy_allows_retorrent", "rules_accepted", "manual_review_required", "cookie", "source_pull", "continue_when", "stop_when", "blockers", "next_actions"],
-        "candidate_discovery_handoff_fields": ["ready", "source_tracker", "target_trackers", "target_count", "adapter", "implementation", "network_mode", "scan", "credentials", "required_seed_outputs", "required_enrichment_outputs", "candidate_filters", "safe_to_push_when", "safe_to_submit_when", "extension_contract", "safety", "blockers", "next_actions"],
+        "candidate_discovery_handoff_fields": ["ready", "source_tracker", "target_trackers", "target_count", "adapter", "implementation", "network_mode", "scan", "dedupe", "credentials", "required_seed_outputs", "required_enrichment_outputs", "candidate_filters", "safe_to_push_when", "safe_to_submit_when", "extension_contract", "safety", "blockers", "next_actions"],
         "candidate_discovery_profile_fields": ["ready", "source_tracker", "source_info_adapter", "source_download_adapter", "candidate_discovery_adapter", "implementation", "network_mode", "scan", "credentials", "required_seed_outputs", "required_enrichment_outputs", "safety", "blockers"],
+        "candidate_discovery_dedupe_fields": ["dedupe_key", "exclude_source_ids", "excluded_count", "applied_before_scoring"],
         "downloadability_cookie_fields": ["required", "path", "exists", "status", "note"],
         "downloadability_source_pull_fields": ["tool", "endpoint", "request", "direct_cli_tool", "direct_cli_args"],
         "publish_card_action_fields": ["decision", "can_submit", "tool", "endpoint", "request", "approval_prompt", "required_user_inputs", "next_actions"],
