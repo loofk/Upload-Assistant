@@ -2168,6 +2168,7 @@ def _source_url_check_and_submit_response(
     policy_report = _source_url_check_and_submit_policy_report(submitted_job, handoff, blockers)
     final_report = _source_url_check_and_submit_final_report(gate_summary, duplicate_check, handoff, submitted_job, manual_sequence, policy_report, blockers)
     followup_handoff = _source_url_check_and_submit_followup_handoff(gate_summary, policy_report, final_report, blockers)
+    next_call = _source_url_check_and_submit_next_call(gate_summary, manual_sequence, policy_report, final_report, followup_handoff, blockers)
     return {
         "kind": "ptcli.source_url_check_and_submit",
         "status": "ok" if ready else "blocked",
@@ -2186,6 +2187,7 @@ def _source_url_check_and_submit_response(
         "check_and_submit_policy_report": policy_report,
         "check_and_submit_final_report": final_report,
         "check_and_submit_followup_handoff": followup_handoff,
+        "next_call": next_call,
         "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers, manual_sequence),
         "blockers": blockers,
         "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
@@ -2622,6 +2624,118 @@ def _source_url_check_and_submit_followup_next_actions(action: str, job_id: str 
     if blockers:
         return ["Resolve check_and_submit_followup_handoff.blockers before retrying the one-call source URL retorrent workflow."]
     return ["Inspect check_and_submit_followup_handoff.next_step before retrying."]
+
+
+def _source_url_check_and_submit_next_call(
+    gate_summary: dict[str, Any],
+    manual_sequence: dict[str, Any],
+    policy_report: dict[str, Any],
+    final_report: dict[str, Any],
+    followup_handoff: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    action = str(followup_handoff.get("action") or gate_summary.get("action") or "resolve_blockers")
+    recommended_call = followup_handoff.get("recommended_call") if isinstance(followup_handoff.get("recommended_call"), dict) else {}
+    next_step = followup_handoff.get("next_step") if isinstance(followup_handoff.get("next_step"), dict) else {}
+    duplicate = followup_handoff.get("duplicate") if isinstance(followup_handoff.get("duplicate"), dict) else {}
+    tool = recommended_call.get("tool") or next_step.get("tool")
+    endpoint = recommended_call.get("endpoint") or next_step.get("endpoint")
+    method = recommended_call.get("method") or next_step.get("method") or ("GET" if action == "poll_job" else "POST")
+    request = recommended_call.get("request") if "request" in recommended_call else next_step.get("request")
+    safe_to_call_now = action == "poll_job" and bool(tool and endpoint) and not blockers
+    requires_user_review = action in {"resolve_blockers", "stop_duplicate"} or not safe_to_call_now
+    return {
+        "kind": "ptcli.source_url_check_and_submit_next_call",
+        "ready": (action == "poll_job" and not blockers) or action == "stop_duplicate",
+        "action": action,
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method,
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "mutates_state": False,
+        "uploads": False,
+        "contacts_trackers": False,
+        "contacts_qbittorrent": False,
+        "job_id": followup_handoff.get("job_id"),
+        "status_endpoint": followup_handoff.get("status_endpoint"),
+        "summary_endpoint": followup_handoff.get("summary_endpoint"),
+        "reason": _source_url_check_and_submit_next_call_reason(action, duplicate, blockers),
+        "read_before_call": _source_url_check_and_submit_next_call_read_before(action),
+        "after_call": _source_url_check_and_submit_next_call_after_call(action, followup_handoff),
+        "progress": {
+            "duplicate_searched": gate_summary.get("duplicate_searched") is True,
+            "duplicate_clear": gate_summary.get("duplicate_clear") is True,
+            "duplicate_exists": duplicate.get("exists"),
+            "job_created": gate_summary.get("job_created") is True,
+            "policy_ready": policy_report.get("ready") is True,
+            "sequence_phase": manual_sequence.get("phase"),
+            "final_verdict": final_report.get("verdict"),
+        },
+        "approval": {
+            "required": requires_user_review,
+            "reason": "duplicate_or_blocked_manual_review" if requires_user_review else None,
+            "do_not_upload_when_duplicate_exists": duplicate.get("exists") is True,
+        },
+        "safety": {
+            "safe_to_call_now": safe_to_call_now,
+            "read_only_next_call": action == "poll_job",
+            "does_not_create_second_job": True,
+            "does_not_upload": True,
+            "live_upload_already_gated_by_check_and_submit": True,
+        },
+        "blockers": blockers,
+        "next_actions": _source_url_check_and_submit_next_call_next_actions(action, blockers),
+    }
+
+
+def _source_url_check_and_submit_next_call_reason(action: str, duplicate: dict[str, Any], blockers: list[str]) -> str:
+    if action == "poll_job":
+        return "retorrent_job_created_poll_status"
+    if action == "stop_duplicate" or duplicate.get("exists") is True:
+        return "target_duplicate_exists_stop"
+    if blockers:
+        return "check_and_submit_blocked"
+    return "inspect_check_and_submit_followup"
+
+
+def _source_url_check_and_submit_next_call_read_before(action: str) -> list[str]:
+    if action == "poll_job":
+        return ["next_call", "check_and_submit_final_report", "check_and_submit_policy_report", "check_and_submit_followup_handoff"]
+    if action == "stop_duplicate":
+        return ["next_call", "duplicate_check.dupes", "check_and_submit_final_report", "blockers"]
+    return ["next_call", "check_and_submit_gate", "check_and_submit_policy_report", "check_and_submit_followup_handoff", "blockers"]
+
+
+def _source_url_check_and_submit_next_call_after_call(action: str, followup_handoff: dict[str, Any]) -> dict[str, Any]:
+    if action == "poll_job":
+        return {
+            "read": _string_list(followup_handoff.get("read_after_call")),
+            "repeat_when": "job_handoff.action=wait and runtime.should_poll=true",
+            "complete_when": _string_list(followup_handoff.get("complete_when")),
+            "stop_when": _string_list(followup_handoff.get("stop_when")),
+        }
+    if action == "stop_duplicate":
+        return {
+            "report": "duplicate.dupes",
+            "complete_when": ["user has been told the target already has an existing torrent"],
+            "stop_when": ["do not create or resume a live upload job for this source/target pair"],
+        }
+    return {
+        "read": ["check_and_submit_gate", "check_and_submit_policy_report", "blockers"],
+        "stop_when": ["recommended_call.safe_to_call_now=false until blockers are resolved"],
+    }
+
+
+def _source_url_check_and_submit_next_call_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if action == "poll_job":
+        return ["Call next_call.endpoint with next_call.request, then follow job_handoff or job_resume_handoff until the job reaches a terminal status."]
+    if action == "stop_duplicate":
+        return ["Report duplicate_check.dupes and stop; do not create another retorrent job for this target."]
+    if blockers:
+        return ["Resolve next_call.blockers, then retry source_url_check_and_submit only after duplicate/rule/confirmation gates are ready."]
+    return ["Inspect next_call and check_and_submit_followup_handoff before continuing."]
 
 
 def _source_url_check_and_submit_sequence_next_step(gate_summary: dict[str, Any], steps: list[dict[str, Any]]) -> dict[str, Any]:
@@ -32971,7 +33085,7 @@ def _source_url_preflight_response_contract() -> dict[str, Any]:
 
 def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "check_and_submit_policy_report", "check_and_submit_final_report", "check_and_submit_followup_handoff", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "check_and_submit_policy_report", "check_and_submit_final_report", "check_and_submit_followup_handoff", "next_call", "agent_summary", "blockers", "next_actions"],
         "status_values": ["ok", "blocked"],
         "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
@@ -32982,6 +33096,7 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
         "check_and_submit_policy_report_fields": ["ready", "status", "job_id", "policy_application_ready", "policy_runtime_ready", "policy_qbit_defaults", "applied_qbit_defaults", "qbit_plan", "qbit_enforcement_summary", "qbit_execution_gate", "policy_application_handoff", "policy_application_report", "missing_request_fields", "pending_qbit_roles", "mismatch_qbit_roles", "request_fields", "next_step", "complete_when", "stop_when", "blockers", "next_actions"],
         "check_and_submit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "submission", "confirmations", "control", "policy", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "check_and_submit_followup_handoff_fields": ["ready", "status", "action", "job_id", "status_endpoint", "summary_endpoint", "resume_endpoint", "duplicate", "policy", "recommended_call", "next_step", "read_after_call", "complete_when", "stop_when", "blockers", "next_actions"],
+        "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "job_id", "status_endpoint", "summary_endpoint", "reason", "read_before_call", "after_call", "progress", "approval", "safety", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "sequence_phase", "sequence_next_tool", "blocker_count"],
         "safety": ["runs_duplicate_check_before_job_creation", "stops_when_duplicate_exists", "live_upload_requires_accept_rules_and_confirm_upload"],
     }
@@ -34130,6 +34245,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "manual_retorrent_sequence": {"type": "object"},
             "check_and_submit_policy_report": {"type": "object"},
             "check_and_submit_final_report": {"type": "object"},
+            "check_and_submit_followup_handoff": {"type": "object"},
+            "next_call": {"type": "object"},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
