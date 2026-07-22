@@ -15930,6 +15930,46 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
                 },
             }
         ],
+        "candidate_executability_matrix": {
+            "kind": "ptcli.daily_candidate_executability_matrix",
+            "ready": True,
+            "status": "ready_for_approval",
+            "item_count": 1,
+            "safe_to_submit_count": 1,
+            "blocked_count": 0,
+            "ready_count": 1,
+            "next_source_id": "60635",
+            "next_phase": None,
+            "next_evidence": None,
+            "items": [
+                {
+                    "rank": 1,
+                    "source_tracker": "U2",
+                    "source_id": "60635",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "target": "MTEAM",
+                    "title": "Example.Release",
+                    "ready": True,
+                    "can_submit_after_approval": True,
+                    "requires_human_approval": True,
+                    "status": "ready_for_approval",
+                    "first_blocked_phase": None,
+                    "first_blocked_check": None,
+                    "checks": [{"name": "duplicate_clear", "phase": "duplicate", "ready": True, "status": "ready", "required_fields": ["duplicate_check.clear=true"], "blocking": False}],
+                    "missing_checks": [],
+                    "submit_tool": "submit_daily_candidate_job",
+                    "submit_endpoint": "/v1/jobs/candidates/{candidate_job_id}/submit",
+                    "submit_request": {"rank": 1, "source_id": "60635", "confirm_upload": True, "save_path": "/downloads"},
+                    "required_user_inputs": ["explicit approval", "confirm_upload=true", "save_path or path"],
+                    "blockers": [],
+                }
+            ],
+            "phase_summary": {"duplicate": {"ready": True, "item_count": 1, "blocked_count": 0, "blocked_source_ids": []}},
+            "blockers": [],
+            "continue_when": "candidate_executability_matrix.safe_to_submit_count>0 and user explicitly approves one candidate with confirm_upload=true",
+            "stop_when": ["candidate_executability_matrix.blockers is non-empty", "candidate_executability_matrix.safe_to_submit_count=0"],
+            "next_actions": ["Ask the user to approve candidate_executability_matrix.items[0].submit_request with confirm_upload=true, then call submit_daily_candidate_job."],
+        },
         "blockers": [],
         "next_actions": [],
     }
@@ -15980,6 +16020,8 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert job["candidate_batch_handoff"]["recommended_request"]["save_path"] == "/downloads"
     assert job["candidate_batch_handoff"]["items"][0]["identity_inherited_from_candidate"]["source_tracker"] == "U2"
     assert job["candidate_batch_handoff"]["items"][0]["identity_inherited_from_candidate"]["target_trackers"] == "MTEAM"
+    assert job["candidate_batch_handoff"]["items"][0]["candidate_executability"]["can_submit_after_approval"] is True
+    assert job["candidate_batch_handoff"]["items"][0]["first_blocked_phase"] is None
     policy_execution = job["candidate_batch_handoff"]["items"][0]["policy_execution"]
     assert policy_execution["ready"] is True
     assert policy_execution["rule_obligations_ready"] is True
@@ -16016,10 +16058,13 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert listed["candidate_batch_handoff"] == job["candidate_batch_handoff"]
     batch_summary = list_payload["daily_candidate_batch_summary"]
     assert batch_summary["items"][0]["submit_requests"][0]["candidate_job_id"] == job["job_id"]
+    assert batch_summary["items"][0]["candidate_executability_matrix"]["safe_to_submit_count"] == 1
     assert batch_summary["items"][0]["submit_requests"][0]["source_id"] == "60635"
     assert batch_summary["items"][0]["submit_requests"][0]["endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
     assert batch_summary["items"][0]["submit_requests"][0]["request"]["confirm_upload"] is True
     assert batch_summary["items"][0]["submit_requests"][0]["candidate_execution_context"] == execution_context
+    assert batch_summary["items"][0]["submit_requests"][0]["candidate_executability"]["source_id"] == "60635"
+    assert batch_summary["items"][0]["submit_requests"][0]["can_submit_after_approval"] is True
     assert batch_summary["items"][0]["submit_requests"][0]["site_policy_profile_handoff"]["ready"] is True
     submission_plan = list_payload["daily_candidate_submission_plan"]
     assert submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
@@ -16028,6 +16073,7 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert submission_plan["target_count"] == 1
     assert submission_plan["safe_to_submit_count"] == 1
     assert submission_plan["first_submit_request"]["source_id"] == "60635"
+    assert submission_plan["first_submit_request"]["candidate_executability"]["status"] == "ready_for_approval"
     assert submission_plan["recommended_tool"] == "submit_daily_candidate_job"
     assert submission_plan["recommended_endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
     assert submission_plan["recommended_request"]["source_id"] == "60635"
@@ -16071,6 +16117,8 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert approval_sequence["approval_items"][0]["target"] == "MTEAM"
     assert approval_sequence["approval_items"][0]["submit_request"]["confirm_upload"] is True
     assert approval_sequence["approval_items"][0]["candidate_execution_context"] == execution_context
+    assert approval_sequence["approval_items"][0]["candidate_executability"]["ready"] is True
+    assert approval_sequence["approval_items"][0]["can_submit_after_approval"] is True
     assert approval_sequence["steps"][0]["action"] == "ask_user"
     assert approval_sequence["steps"][1]["tool"] == "submit_daily_candidate_job"
     assert approval_sequence["steps"][1]["request"]["source_id"] == "60635"
@@ -16130,6 +16178,10 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert publish_payload["ready"] is True
     assert publish_payload["items"][0]["source_id"] == "60635"
     assert publish_payload["items"][0]["requires_user_approval"] is True
+    assert publish_payload["items"][0]["candidate_executability"]["can_submit_after_approval"] is True
+    assert publish_payload["candidate_executability_matrix"]["ready"] is True
+    assert publish_payload["candidate_executability_matrix"]["safe_to_submit_count"] == 1
+    assert publish_payload["candidate_executability_matrix"]["items"][0]["source_id"] == "60635"
     assert publish_payload["top_item"] == publish_payload["items"][0]
     assert publish_payload["tracking"]["recommended_tool"] == "submit_daily_candidate_job"
     assert publish_payload["completion_gate"] == completion_gate

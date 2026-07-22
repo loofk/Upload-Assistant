@@ -9907,6 +9907,7 @@ def _job_candidate_batch_handoff(job: dict[str, Any], summary_payload: dict[str,
     digest = _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")) or {}
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
+    executability_by_source_id = _daily_candidate_executability_by_source_id(digest)
     blockers = list(dict.fromkeys([*_string_list(job.get("blockers")), *_string_list(digest.get("blockers"))]))
     if status in {"queued", "running"}:
         blockers.append(f"Candidate job {job_id} is still {status}; poll before submitting candidates.")
@@ -9918,6 +9919,7 @@ def _job_candidate_batch_handoff(job: dict[str, Any], summary_payload: dict[str,
             "source_tracker": request.get("source_tracker"),
             "target_trackers": request.get("target_trackers") or request.get("target"),
             **item,
+            "candidate_executability": item.get("candidate_executability") if isinstance(item.get("candidate_executability"), dict) else executability_by_source_id.get(str(item.get("source_id") or "")),
         }
         submission_items.append(_daily_candidate_schedule_submission_item(_job_submission_stub(job), request, enriched_item, enriched_item))
     next_step = _daily_candidate_submission_next_step(submission_items, blockers)
@@ -9966,6 +9968,7 @@ def _job_candidate_batch_next_actions(status: str, submission_items: list[dict[s
 
 def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict[str, Any], top_candidate: dict[str, Any], digest_item: dict[str, Any]) -> dict[str, Any]:
     job_id = str(job.get("job_id") or "")
+    candidate_executability = digest_item.get("candidate_executability") if isinstance(digest_item.get("candidate_executability"), dict) else top_candidate.get("candidate_executability") if isinstance(top_candidate.get("candidate_executability"), dict) else {}
     selector = {
         "rank": top_candidate.get("rank"),
         "source_id": top_candidate.get("source_id"),
@@ -9995,6 +9998,11 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         "request_template": request_template,
         "source_url_retorrent_request": source_url_retorrent_request,
         "candidate_execution_context": execution_context,
+        "candidate_executability": candidate_executability or None,
+        "can_submit_after_approval": candidate_executability.get("can_submit_after_approval") if candidate_executability else None,
+        "first_blocked_phase": candidate_executability.get("first_blocked_phase") if candidate_executability else None,
+        "first_blocked_check": candidate_executability.get("first_blocked_check") if candidate_executability else None,
+        "missing_checks": _string_list(candidate_executability.get("missing_checks")) if candidate_executability else [],
         "site_policy_profile_handoff": site_policy_profile_handoff,
         "site_policy_summary": site_policy_summary,
         "identity_inherited_from_candidate": {
@@ -18103,6 +18111,7 @@ def _daily_candidate_batch_publish_payload(
     publish_cards = [_daily_candidate_publish_approval_card(item) for item in approval_items if isinstance(item, dict)]
     completion_cards = [_daily_candidate_publish_completion_card(job) for job in completed_jobs if isinstance(job, dict)]
     candidate_field_completeness = _daily_candidate_publish_field_completeness(publish_cards)
+    candidate_executability_matrix = _daily_candidate_publish_executability_matrix(publish_cards, blockers)
     ready = status in {"ready_for_approval", "ready_to_report", "shortfall", "empty"} and not blockers
     title = _daily_candidate_batch_publish_title(status, counts)
     message = _daily_candidate_batch_publish_message(status, counts, publish_cards, completion_cards, blockers)
@@ -18129,6 +18138,7 @@ def _daily_candidate_batch_publish_payload(
         "items": publish_cards,
         "top_item": publish_cards[0] if publish_cards else None,
         "candidate_field_completeness": candidate_field_completeness,
+        "candidate_executability_matrix": candidate_executability_matrix,
         "completion_items": completion_cards,
         "top_completion": completion_cards[0] if completion_cards else None,
         "approval_queue": {
@@ -18213,9 +18223,11 @@ def _daily_candidate_publish_approval_card(item: dict[str, Any]) -> dict[str, An
         "endpoint": item.get("endpoint"),
         "method": item.get("method") or "POST",
         "request": request,
+        "candidate_executability": item.get("candidate_executability") if isinstance(item.get("candidate_executability"), dict) else None,
         "action": {
             "decision": action.get("decision") or "submit_when_confirmed",
             "can_submit": action.get("can_submit") if isinstance(action.get("can_submit"), bool) else bool(request),
+            "can_submit_after_approval": item.get("can_submit_after_approval"),
             "tool": action.get("tool") or item.get("submit_tool"),
             "endpoint": action.get("endpoint") or item.get("submit_endpoint"),
             "request": action.get("request") if isinstance(action.get("request"), dict) else request,
@@ -18260,6 +18272,116 @@ def _daily_candidate_publish_field_completeness(cards: list[dict[str, Any]]) -> 
         "continue_when": "candidate_field_completeness.ready=true before publishing the daily candidate digest as complete.",
         "stop_when": ["candidate_field_completeness.missing_by_source_id is non-empty"],
     }
+
+
+def _daily_candidate_publish_executability_matrix(cards: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    items = [_daily_candidate_publish_executability_item(card) for card in cards]
+    safe_items = [item for item in items if item.get("can_submit_after_approval")]
+    blocked_items = [item for item in items if not item.get("ready")]
+    next_item = blocked_items[0] if blocked_items else safe_items[0] if safe_items else None
+    return {
+        "kind": "ptcli.daily_candidate_executability_matrix",
+        "ready": bool(safe_items) and not blockers,
+        "status": "ready_for_approval" if safe_items and not blockers else "blocked" if blockers or blocked_items else "empty",
+        "item_count": len(items),
+        "safe_to_submit_count": len(safe_items),
+        "blocked_count": len(blocked_items),
+        "ready_count": sum(1 for item in items if item.get("ready")),
+        "next_source_id": next_item.get("source_id") if isinstance(next_item, dict) else None,
+        "next_phase": next_item.get("first_blocked_phase") if isinstance(next_item, dict) else None,
+        "next_evidence": next_item.get("first_blocked_check") if isinstance(next_item, dict) else None,
+        "items": items,
+        "phase_summary": _daily_candidate_publish_executability_phase_summary(items),
+        "blockers": blockers,
+        "continue_when": "candidate_executability_matrix.safe_to_submit_count>0 and user explicitly approves one candidate with confirm_upload=true",
+        "stop_when": ["candidate_executability_matrix.blockers is non-empty", "candidate_executability_matrix.safe_to_submit_count=0"],
+        "next_actions": _daily_candidate_publish_executability_next_actions(safe_items, next_item, blockers),
+    }
+
+
+def _daily_candidate_publish_executability_item(card: dict[str, Any]) -> dict[str, Any]:
+    report = card.get("candidate_executability") if isinstance(card.get("candidate_executability"), dict) else {}
+    if report:
+        return {
+            "rank": report.get("rank") or card.get("rank"),
+            "source_tracker": report.get("source_tracker") or card.get("source_tracker"),
+            "source_id": report.get("source_id") or card.get("source_id"),
+            "source_url": report.get("source_url") or card.get("source_url"),
+            "target": report.get("target") or card.get("target"),
+            "title": report.get("title") or card.get("title"),
+            "ready": report.get("ready") is True,
+            "can_submit_after_approval": report.get("can_submit_after_approval") is True,
+            "requires_human_approval": report.get("requires_human_approval") is not False,
+            "status": report.get("status") or "ready_for_approval" if report.get("can_submit_after_approval") is True else "blocked",
+            "first_blocked_phase": report.get("first_blocked_phase"),
+            "first_blocked_check": report.get("first_blocked_check"),
+            "checks": report.get("checks") if isinstance(report.get("checks"), list) else [],
+            "missing_checks": _string_list(report.get("missing_checks")),
+            "submit_tool": report.get("submit_tool") or "submit_daily_candidate_job",
+            "submit_endpoint": report.get("submit_endpoint") or card.get("endpoint"),
+            "submit_request": report.get("submit_request") if isinstance(report.get("submit_request"), dict) else card.get("request") if isinstance(card.get("request"), dict) else None,
+            "required_user_inputs": _string_list(report.get("required_user_inputs")) or _string_list((card.get("action") or {}).get("required_user_inputs") if isinstance(card.get("action"), dict) else []),
+            "blockers": _string_list(report.get("blockers")),
+        }
+    action = card.get("action") if isinstance(card.get("action"), dict) else {}
+    ready = action.get("can_submit") is True and bool(action.get("request") or card.get("request"))
+    return {
+        "rank": card.get("rank"),
+        "source_tracker": card.get("source_tracker"),
+        "source_id": card.get("source_id"),
+        "source_url": card.get("source_url"),
+        "target": card.get("target"),
+        "title": card.get("title"),
+        "ready": ready,
+        "can_submit_after_approval": ready,
+        "requires_human_approval": True,
+        "status": "ready_for_approval" if ready else "blocked",
+        "first_blocked_phase": None if ready else "submit",
+        "first_blocked_check": None if ready else "submit_request",
+        "checks": [],
+        "missing_checks": [] if ready else ["submit_request"],
+        "submit_tool": action.get("tool") or "submit_daily_candidate_job",
+        "submit_endpoint": action.get("endpoint") or card.get("endpoint"),
+        "submit_request": action.get("request") if isinstance(action.get("request"), dict) else card.get("request") if isinstance(card.get("request"), dict) else None,
+        "required_user_inputs": _string_list(action.get("required_user_inputs")) or ["confirm_upload=true", "save_path or path"],
+        "blockers": _string_list(card.get("blockers")),
+    }
+
+
+def _daily_candidate_publish_executability_phase_summary(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    phases = ["source", "metadata", "duplicate", "source_pull", "policy", "risk", "submit"]
+    summary: dict[str, dict[str, Any]] = {}
+    for phase in phases:
+        phase_items = [
+            item
+            for item in items
+            if item.get("first_blocked_phase") == phase
+            or any(isinstance(check, dict) and check.get("phase") == phase for check in item.get("checks", []) if isinstance(check, dict))
+        ]
+        blocked = [item for item in phase_items if item.get("first_blocked_phase") == phase or any(isinstance(check, dict) and check.get("phase") == phase and check.get("ready") is False for check in item.get("checks", []))]
+        summary[phase] = {
+            "ready": not blocked,
+            "item_count": len(phase_items),
+            "blocked_count": len(blocked),
+            "blocked_source_ids": [item.get("source_id") for item in blocked if item.get("source_id")],
+        }
+    return summary
+
+
+def _daily_candidate_publish_executability_next_actions(safe_items: list[dict[str, Any]], next_item: dict[str, Any] | None, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve daily_candidate_batch_publish_payload.candidate_executability_matrix.blockers before submitting candidates."]
+    if safe_items:
+        return ["Ask the user to approve candidate_executability_matrix.items[0].submit_request with confirm_upload=true, then call submit_daily_candidate_job."]
+    if next_item:
+        return [f"Resolve {next_item.get('first_blocked_phase') or 'candidate'} evidence for source_id={next_item.get('source_id')} before approval."]
+    return ["Run daily_candidates_job before expecting candidate_executability_matrix.items."]
+
+
+def _daily_candidate_executability_by_source_id(digest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    matrix = digest.get("candidate_executability_matrix") if isinstance(digest.get("candidate_executability_matrix"), dict) else {}
+    reports = matrix.get("items") if isinstance(matrix.get("items"), list) else []
+    return {str(item.get("source_id")): item for item in reports if isinstance(item, dict) and item.get("source_id") is not None}
 
 
 def _daily_candidate_publish_field_item(card: dict[str, Any], required_fields: list[str]) -> dict[str, Any]:
@@ -18458,6 +18580,11 @@ def _daily_candidate_approval_items(submission_plan: dict[str, Any]) -> list[dic
                 "method": submit_request.get("method") or "POST",
                 "submit_request": request,
                 "candidate_execution_context": submit_request.get("candidate_execution_context") if isinstance(submit_request.get("candidate_execution_context"), dict) else None,
+                "candidate_executability": submit_request.get("candidate_executability") if isinstance(submit_request.get("candidate_executability"), dict) else None,
+                "can_submit_after_approval": submit_request.get("can_submit_after_approval"),
+                "first_blocked_phase": submit_request.get("first_blocked_phase"),
+                "first_blocked_check": submit_request.get("first_blocked_check"),
+                "missing_checks": _string_list(submit_request.get("missing_checks")),
                 "site_policy_profile_handoff": site_policy_profile_handoff,
                 "site_policy_summary": site_policy_summary,
                 "required_overrides": submit_request.get("required_overrides") or ["confirm_upload=true", "save_path or path"],
@@ -18551,6 +18678,7 @@ def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jo
     job_id = str(candidate_job.get("job_id") or "")
     candidate_payload = _candidate_payload(candidate_job.get("result")) or {}
     digest = _candidate_digest_from_payload(candidate_job.get("result")) or {}
+    candidate_executability_matrix = digest.get("candidate_executability_matrix") if isinstance(digest.get("candidate_executability_matrix"), dict) else None
     batch_handoff = _job_candidate_batch_handoff(candidate_job) or {}
     control = _candidate_control_summary_from_payload(candidate_job.get("result")) or {}
     safe_ids = batch_handoff.get("items") if isinstance(batch_handoff.get("items"), list) else []
@@ -18574,6 +18702,7 @@ def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jo
             "shortfall": int(digest.get("shortfall_count") or control.get("ready_shortfall_count") or 0),
         },
         "candidate_control_summary": control or None,
+        "candidate_executability_matrix": candidate_executability_matrix,
         "candidate_batch_handoff_ready": batch_handoff.get("ready"),
         "submit_endpoint": batch_handoff.get("submit_endpoint"),
         "recommended_request": batch_handoff.get("recommended_request"),
@@ -18603,6 +18732,11 @@ def _daily_candidate_batch_item_submit_request(candidate_job_id: str, item: dict
         "request": request,
         "source_url_retorrent_request": item.get("source_url_retorrent_request") if isinstance(item.get("source_url_retorrent_request"), dict) else None,
         "candidate_execution_context": item.get("candidate_execution_context") if isinstance(item.get("candidate_execution_context"), dict) else None,
+        "candidate_executability": item.get("candidate_executability") if isinstance(item.get("candidate_executability"), dict) else None,
+        "can_submit_after_approval": item.get("can_submit_after_approval"),
+        "first_blocked_phase": item.get("first_blocked_phase"),
+        "first_blocked_check": item.get("first_blocked_check"),
+        "missing_checks": _string_list(item.get("missing_checks")),
         "site_policy_profile_handoff": site_policy_profile_handoff,
         "site_policy_summary": site_policy_summary,
         "required_overrides": item.get("required_overrides") if isinstance(item.get("required_overrides"), list) else ["confirm_upload=true", "save_path or path"],
@@ -30448,7 +30582,7 @@ def _job_response_contract() -> dict[str, Any]:
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "policy_runtime_ready", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "manual_retorrent_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "policy", "materials", "target_upload", "closure", "live", "control", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
-        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
+        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
         "candidate_executability_matrix_fields": ["ready", "status", "item_count", "safe_to_submit_count", "blocked_count", "ready_count", "next_source_id", "next_phase", "next_evidence", "items", "phase_summary", "blockers", "continue_when", "stop_when", "next_actions"],
         "candidate_executability_item_fields": ["rank", "source_tracker", "source_id", "source_url", "target", "title", "ready", "can_submit_after_approval", "requires_human_approval", "status", "first_blocked_phase", "first_blocked_check", "checks", "missing_checks", "submit_tool", "submit_endpoint", "submit_request", "required_user_inputs", "blockers"],
         "candidate_executability_check_fields": ["name", "phase", "ready", "status", "required_fields", "blocking"],
@@ -30548,15 +30682,15 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_refill_request_contract_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "scan_count", "scan_exhausted", "excluded_source_ids", "submitted_source_ids", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "ready_shortfall_count", "remaining_submit_count", "running_count", "blocked_count", "should_submit", "should_poll", "should_refill", "should_report", "refill_request_contract", "next_step", "after_step", "repeat_until", "read_order", "blockers", "next_actions"],
         "daily_candidate_batch_publish_payload_fields": ["ready", "status", "format", "title", "summary", "message", "counts", "items", "top_item", "candidate_field_completeness", "candidate_executability_matrix", "completion_items", "top_completion", "approval_queue", "tracking", "completion_gate", "completion_report", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "publish_contract", "read_order", "blockers", "next_actions"],
-        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "downloadability", "recommendation", "risk", "action", "summary_text", "endpoint", "method", "request", "requires_user_approval", "required_overrides", "site_policy_profile_handoff", "site_policy_summary", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
+        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "downloadability", "recommendation", "risk", "action", "summary_text", "endpoint", "method", "request", "candidate_executability", "requires_user_approval", "required_overrides", "site_policy_profile_handoff", "site_policy_summary", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
         "daily_candidate_field_completeness_fields": ["ready", "required_fields", "item_count", "ready_count", "missing_count", "missing_by_source_id", "items", "continue_when", "stop_when"],
         "daily_candidate_executability_matrix_fields": ["ready", "status", "item_count", "safe_to_submit_count", "blocked_count", "ready_count", "next_source_id", "next_phase", "next_evidence", "items", "phase_summary", "blockers", "continue_when", "stop_when", "next_actions"],
         "daily_candidate_executability_item_fields": ["rank", "source_tracker", "source_id", "source_url", "target", "title", "ready", "can_submit_after_approval", "requires_human_approval", "status", "first_blocked_phase", "first_blocked_check", "checks", "missing_checks", "submit_tool", "submit_endpoint", "submit_request", "required_user_inputs", "blockers"],
         "daily_candidate_executability_check_fields": ["name", "phase", "ready", "status", "required_fields", "blocking"],
-        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "approval_text", "after_submit"],
+        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "approval_text", "after_submit"],
         "daily_candidate_batch_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
-        "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
-        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "after_submit"],
+        "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_executability_matrix", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
+        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "after_submit"],
         "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
