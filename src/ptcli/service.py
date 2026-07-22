@@ -3399,6 +3399,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     live_validation_repair_plan = _seedbox_live_validation_repair_plan(seedbox_live_validation_handoff, live_validation_summary, seedbox_live_validation_report)
     live_validation_sequence = _seedbox_live_validation_sequence(seedbox_live_validation_report, live_validation_summary, live_validation_repair_plan)
     live_execution_package = _seedbox_live_execution_package(seedbox_live_validation_report, live_validation_summary, live_validation_sequence, live_validation_repair_plan)
+    first_live_validation_handoff = _seedbox_first_live_validation_handoff(seedbox_live_validation_report, live_validation_summary, live_validation_repair_plan, live_validation_sequence, live_execution_package)
     return {
         "kind": "ptcli.readiness_bundle",
         "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
@@ -3417,6 +3418,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "live_validation_repair_plan": live_validation_repair_plan,
         "live_validation_sequence": live_validation_sequence,
         "live_execution_package": live_execution_package,
+        "first_live_validation_handoff": first_live_validation_handoff,
         "next_step": live_test_handoff.get("next_step"),
         "recommended_tool": live_test_handoff.get("recommended_tool"),
         "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
@@ -4340,6 +4342,90 @@ def _seedbox_live_execution_package_next_actions(ready: bool, next_step: dict[st
     if next_step.get("tool"):
         return [f"Call {next_step.get('tool')} and rerun readiness_bundle until live_execution_package.ready=true."]
     return ["Resolve live_execution_package.blockers before any live tracker action."]
+
+
+def _seedbox_first_live_validation_handoff(
+    service_report: dict[str, Any],
+    summary: dict[str, Any],
+    repair_plan: dict[str, Any],
+    sequence: dict[str, Any],
+    execution_package: dict[str, Any],
+) -> dict[str, Any]:
+    """Compact first-live validation control surface for AI agents."""
+    ready = execution_package.get("ready") is True
+    next_step = execution_package.get("next_step") if isinstance(execution_package.get("next_step"), dict) else {}
+    if not next_step and execution_package.get("recommended_tool"):
+        next_step = {
+            "tool": execution_package.get("recommended_tool"),
+            "endpoint": execution_package.get("recommended_endpoint"),
+            "method": execution_package.get("recommended_method"),
+            "request": execution_package.get("recommended_request"),
+        }
+    if not next_step:
+        next_step = sequence.get("next_step") if isinstance(sequence.get("next_step"), dict) else repair_plan.get("next_step") if isinstance(repair_plan.get("next_step"), dict) else {}
+    action = "run_doctor" if ready else "repair_preflight"
+    submit_step = _live_validation_step_by_name(sequence, "check_and_submit")
+    poll_step = _live_validation_step_by_name(sequence, "poll_job")
+    finish_step = _live_validation_step_by_name(sequence, "resume_or_finish")
+    report_contract = execution_package.get("report_contract") if isinstance(execution_package.get("report_contract"), dict) else {}
+    blockers = _string_list(execution_package.get("blockers")) or _string_list(sequence.get("blockers")) or _string_list(repair_plan.get("blockers")) or _string_list(service_report.get("blockers"))
+    return {
+        "kind": "ptcli.first_live_validation_handoff",
+        "ready": ready,
+        "status": "ready_for_doctor" if ready else "blocked",
+        "action": action,
+        "phase": summary.get("phase") or service_report.get("phase") or "seedbox_live_validation",
+        "first_blocker": execution_package.get("first_blocker") or sequence.get("first_blocker") or repair_plan.get("first_blocker") or service_report.get("first_blocker"),
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_method": next_step.get("method"),
+        "recommended_request": next_step.get("request"),
+        "doctor": {
+            "step": "run_doctor",
+            "tool": next_step.get("tool") if ready else None,
+            "request": next_step.get("request") if ready else None,
+            "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
+            "summary_check": _live_validation_step_by_name(sequence, "check_doctor_summary"),
+        },
+        "submit": {
+            "tool": submit_step.get("tool"),
+            "endpoint": submit_step.get("endpoint"),
+            "method": submit_step.get("method"),
+            "request": submit_step.get("request"),
+            "continue_when": submit_step.get("continue_when"),
+            "stop_when": submit_step.get("stop_when"),
+        },
+        "after_submit": {
+            "poll": poll_step,
+            "resume_or_finish": finish_step,
+            "final_report_field": report_contract.get("final_report_field") or sequence.get("final_report_field") or "live_user_report",
+            "audit_report_fields": report_contract.get("audit_report_fields") or [sequence.get("audit_report_field") or "seedbox_live_validation_completion_report"],
+            "read_order": ["get_job_status.job_control_summary", "get_job_status.live_completion_gate", "get_job_status.live_user_report", "get_job_summary.live_user_report", "get_job_summary.seedbox_live_validation_completion_report"],
+        },
+        "run_order": execution_package.get("run_order") if isinstance(execution_package.get("run_order"), list) else [],
+        "read_first": ["first_live_validation_handoff", "live_execution_package", "live_validation_sequence", "seedbox_live_validation_report", "live_validation_repair_plan"],
+        "complete_when": report_contract.get("complete_when") or execution_package.get("complete_when") or ["live_user_report.report_allowed=true"],
+        "stop_when": report_contract.get("stop_when") or execution_package.get("stop_when") or sequence.get("stop_when"),
+        "blockers": blockers,
+        "next_actions": _seedbox_first_live_validation_handoff_next_actions(ready, next_step, blockers),
+    }
+
+
+def _live_validation_step_by_name(sequence: dict[str, Any], name: str) -> dict[str, Any]:
+    for step in sequence.get("steps", []) if isinstance(sequence.get("steps"), list) else []:
+        if isinstance(step, dict) and step.get("name") == name:
+            return step
+    return {}
+
+
+def _seedbox_first_live_validation_handoff_next_actions(ready: bool, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Follow first_live_validation_handoff.run_order; after submit, poll or resume until live_user_report.report_allowed=true."]
+    if next_step.get("tool"):
+        return [f"Repair first_live_validation_handoff.first_blocker with {next_step.get('tool')}, then rerun readiness_bundle."]
+    if blockers:
+        return ["Resolve first_live_validation_handoff.blockers before running doctor or submitting a live job."]
+    return ["Inspect live_validation_repair_plan before any live tracker action."]
 
 
 def _seedbox_live_validation_repair_plan(
@@ -24347,7 +24433,7 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "first_live_validation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
@@ -24361,6 +24447,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_validation_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "live_execution_package_fields": ["ready", "status", "current_action", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "step_count", "steps", "run_order", "report_contract", "read_order", "continue_when", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_execution_report_contract_fields": ["final_report_field", "audit_report_fields", "read_tool", "complete_when", "stop_when", "required_fields", "report_allowed_when"],
+        "first_live_validation_handoff_fields": ["ready", "status", "action", "phase", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "doctor", "submit", "after_submit", "run_order", "read_first", "complete_when", "stop_when", "blockers", "next_actions"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
         "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "audit_report_field", "stop_when"],
         "seedbox_live_evidence_contract_fields": ["final_read", "final_report_field", "audit_report_field", "complete_when", "required_fields", "audit_notes"],
@@ -26045,6 +26132,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "live_validation_repair_plan": {"type": "object"},
             "live_validation_sequence": {"type": "object"},
             "live_execution_package": {"type": "object"},
+            "first_live_validation_handoff": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},

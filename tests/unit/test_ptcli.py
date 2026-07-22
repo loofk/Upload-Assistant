@@ -19557,6 +19557,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_repair_plan" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_validation_sequence" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_execution_package" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "first_live_validation_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -19589,6 +19590,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "report_contract" in tool_by_name["readiness_bundle"]["response_contract"]["live_execution_package_fields"]
     assert "live_execution_report_contract_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "report_allowed_when" in tool_by_name["readiness_bundle"]["response_contract"]["live_execution_report_contract_fields"]
+    assert "first_live_validation_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "after_submit" in tool_by_name["readiness_bundle"]["response_contract"]["first_live_validation_handoff_fields"]
     assert "doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "manual_job" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "validation_plan" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -20070,6 +20073,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_repair_plan" in readiness_schema["properties"]
     assert "live_validation_sequence" in readiness_schema["properties"]
     assert "live_execution_package" in readiness_schema["properties"]
+    assert "first_live_validation_handoff" in readiness_schema["properties"]
     assert "agent_decision" in readiness_schema["properties"]
 
 
@@ -20413,6 +20417,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_validation_repair_plan" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_validation_sequence" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_execution_package" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "first_live_validation_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "policy_setup_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -20442,6 +20447,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_validation_sequence_step_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "live_execution_package_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "report_contract" in tools_by_name["readiness_bundle"]["response_contract"]["live_execution_package_fields"]
+        assert "first_live_validation_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "after_submit" in tools_by_name["readiness_bundle"]["response_contract"]["first_live_validation_handoff_fields"]
         assert "doctor" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "manual_job" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "validation_plan" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -22480,6 +22487,18 @@ services:
     assert payload["live_execution_package"]["run_order"] == ["run_doctor", "check_doctor_summary", "check_and_submit", "poll_job", "resume_or_finish"]
     assert payload["live_execution_package"]["report_contract"]["final_report_field"] == "live_user_report"
     assert payload["live_execution_package"]["report_contract"]["report_allowed_when"] == "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]"
+    assert payload["first_live_validation_handoff"]["kind"] == "ptcli.first_live_validation_handoff"
+    assert payload["first_live_validation_handoff"]["ready"] is True
+    assert payload["first_live_validation_handoff"]["status"] == "ready_for_doctor"
+    assert payload["first_live_validation_handoff"]["action"] == "run_doctor"
+    assert payload["first_live_validation_handoff"]["recommended_tool"] == "ptcli_doctor"
+    assert payload["first_live_validation_handoff"]["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["first_live_validation_handoff"]["doctor"]["summary_check"]["endpoint"] == "/v1/summary/check"
+    assert payload["first_live_validation_handoff"]["submit"]["tool"] == "source_url_check_and_submit"
+    assert payload["first_live_validation_handoff"]["submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["first_live_validation_handoff"]["after_submit"]["final_report_field"] == "live_user_report"
+    assert "get_job_summary.live_user_report" in payload["first_live_validation_handoff"]["after_submit"]["read_order"]
+    assert payload["first_live_validation_handoff"]["run_order"] == payload["live_execution_package"]["run_order"]
     assert payload["live_validation_repair_plan"]["kind"] == "ptcli.live_validation_repair_plan"
     assert payload["live_validation_repair_plan"]["ready"] is True
     assert payload["live_validation_repair_plan"]["status"] == "ready_for_doctor"
