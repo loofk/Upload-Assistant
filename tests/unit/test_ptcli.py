@@ -10980,6 +10980,17 @@ def test_service_target_package_prepare_returns_upload_preflight_handoff(monkeyp
     assert payload["target_package_handoff"]["next_step"]["tool"] == "target_upload_preflight"
     assert payload["target_package_handoff"]["target_upload_request"]["package_dir"] == str(package_dir)
     assert payload["target_package_handoff"]["target_upload_request"]["torrent_file"] == "/tmp/mteam-safe.torrent"
+    final_report = payload["target_materials_final_report"]
+    assert final_report["kind"] == "ptcli.target_materials_final_report"
+    assert final_report["ready_for_target_upload_preflight"] is True
+    assert final_report["ready_for_live_upload_attempt"] is False
+    assert final_report["metadata"]["imdb_id"] == "tt1234567"
+    assert final_report["description"]["has_ptgen"] is True
+    assert final_report["description"]["has_screenshots"] is True
+    assert final_report["media"]["mediainfo_or_bdinfo_ready"] is True
+    assert final_report["gates"]["duplicate_clear"] is True
+    assert final_report["gates"]["rule_ready"] is True
+    assert final_report["target_upload"]["target_upload_request"] == payload["target_package_handoff"]["target_upload_request"]
     assert payload["safety"]["does_not_upload_to_tracker"] is True
 
 
@@ -11002,6 +11013,7 @@ def test_service_target_package_prepare_job_exposes_handoff(monkeypatch, tmp_pat
                 "target_upload_request": {"package_dir": str(package_dir), "torrent_file": "<MTEAM-safe target torrent file>", "write_payload": True},
                 "next_step": {"tool": "target_upload_preflight", "endpoint": "/v1/target/upload/preflight", "method": "POST", "request": {"package_dir": str(package_dir), "torrent_file": "<MTEAM-safe target torrent file>", "write_payload": True}},
             },
+            "target_materials_final_report": {"kind": "ptcli.target_materials_final_report", "ready": True, "ready_for_target_upload_preflight": True},
             "blockers": [],
             "next_actions": ["Run target upload preflight."],
         }
@@ -11026,12 +11038,16 @@ def test_service_target_package_prepare_job_exposes_handoff(monkeypatch, tmp_pat
     assert job["status"] == "complete"
     assert job["request"]["parent_job_id"] == "d" * 32
     assert job["target_package_handoff"]["ready"] is True
+    assert job["target_materials_final_report"]["ready_for_target_upload_preflight"] is True
     assert job["target_package_handoff"]["recommended_tool"] == "target_upload_preflight"
     assert job["target_package_handoff"]["target_upload_request"]["package_dir"].endswith("/pkg")
     assert job["agent_decision"]["decision"] == "target_package_ready"
     assert job["agent_decision"]["target_package_handoff"] == job["target_package_handoff"]
+    assert job["agent_decision"]["target_materials_final_report"] == job["target_materials_final_report"]
     assert store.summary(job["job_id"])["target_package_handoff"]["recommended_endpoint"] == "/v1/target/upload/preflight"
+    assert store.summary(job["job_id"])["target_materials_final_report"]["ready_for_target_upload_preflight"] is True
     assert store.list({"kind": "ptcli.target_package_prepare"})["jobs"][0]["target_package_handoff"]["ready"] is True
+    assert store.list({"kind": "ptcli.target_package_prepare"})["jobs"][0]["target_materials_final_report"]["ready"] is True
 
 
 @pytest.mark.asyncio
@@ -20844,6 +20860,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["target_package_prepare"]["path"] == "/v1/target/package/prepare"
     assert tool_by_name["target_package_prepare"]["input_schema"]["required"] == ["source_info", "path"]
     assert "target_package_handoff" in tool_by_name["target_package_prepare"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report" in tool_by_name["target_package_prepare"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report_fields" in tool_by_name["target_package_prepare"]["response_contract"]
+    assert "ready_for_target_upload_preflight" in tool_by_name["target_package_prepare"]["response_contract"]["target_materials_final_report_fields"]
     assert "does_not_upload_to_tracker" in tool_by_name["target_package_prepare"]["safety"]
     assert tool_by_name["target_upload_preflight"]["path"] == "/v1/target/upload/preflight"
     assert tool_by_name["target_upload_preflight"]["input_schema"]["required"] == ["package_dir"]
@@ -20856,6 +20875,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "download_uploaded_torrent" in tool_by_name["target_upload"]["input_schema"]["properties"]
     assert tool_by_name["target_package_prepare_job"]["path"] == "/v1/jobs/target/package/prepare"
     assert "target_package_handoff" in tool_by_name["target_package_prepare_job"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report" in tool_by_name["target_package_prepare_job"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report_fields" in tool_by_name["target_package_prepare_job"]["response_contract"]
     assert tool_by_name["target_package_prepare_job"]["workflow_hints"]["handoff_field"] == "target_package_handoff"
     assert tool_by_name["target_upload_job"]["path"] == "/v1/jobs/target/upload"
     assert "target_upload_service_gate" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
@@ -22437,6 +22458,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     target_package_schema = openapi["paths"]["/v1/target/package/prepare"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "description_draft" in target_package_schema["properties"]
     assert "target_package_handoff" in target_package_schema["properties"]
+    assert "target_materials_final_report" in target_package_schema["properties"]
     target_preflight_request_schema = openapi["paths"]["/v1/target/upload/preflight"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert openapi["paths"]["/v1/target/upload/preflight"]["post"]["operationId"] == "preflightPtcliTargetUpload"
     assert target_preflight_request_schema["required"] == ["package_dir"]
@@ -23028,6 +23050,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["target_upload_job"].endswith("/v1/jobs/target/upload")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
         assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidate_refill_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert "target_materials_final_report" in tools_by_name["target_package_prepare"]["response_contract"]["required_fields"]
+        assert "target_materials_final_report_fields" in tools_by_name["target_package_prepare"]["response_contract"]
+        assert "ready_for_target_upload_preflight" in tools_by_name["target_package_prepare"]["response_contract"]["target_materials_final_report_fields"]
+        assert "target_materials_final_report" in tools_by_name["target_package_prepare_job"]["response_contract"]["required_fields"]
+        assert "target_materials_final_report_fields" in tools_by_name["target_package_prepare_job"]["response_contract"]
         assert "materials_prepare_handoff" in tools_by_name["materials_prepare"]["response_contract"]["required_fields"]
         assert "materials_prepare_handoff_fields" in tools_by_name["materials_prepare"]["response_contract"]
         assert "source_url_check_and_submit_request" in tools_by_name["materials_prepare"]["response_contract"]["materials_prepare_handoff_fields"]
