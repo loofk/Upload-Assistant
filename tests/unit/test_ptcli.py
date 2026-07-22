@@ -14452,6 +14452,14 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_application_handoff"]["applied_request_fields"] == job["policy_execution_plan"]["request_defaults"]
     assert job["policy_application_handoff"]["missing_request_fields"] == []
     assert job["policy_application_handoff"]["missing_confirmations"] == []
+    assert job["policy_application_report"]["kind"] == "ptcli.policy_application_report"
+    assert job["policy_application_report"]["ready_for_live_audit"] is True
+    assert job["policy_application_report"]["request_patch_applied"] is True
+    assert job["policy_application_report"]["protected_fields_ok"] is True
+    assert job["policy_application_report"]["confirmations_ok"] is True
+    assert job["policy_application_report"]["verdict"] == "await_qbit_evidence"
+    assert job["policy_application_report"]["qbit_pending_roles"] == ["source", "uploaded"]
+    assert job["policy_application_report"]["recommended_tool"] == "resume_job"
     assert job["request"]["policy_application_handoff"]["kind"] == "ptcli.policy_application_handoff"
     assert job["policy_config_apply_handoff"]["kind"] == "ptcli.site_policy_config_apply_handoff"
     assert job["policy_config_apply_handoff"]["ready"] is True
@@ -14486,6 +14494,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_execution_report"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
     assert job["policy_execution_report"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["policy_execution_report"]["policy_application_handoff"] == job["policy_application_handoff"]
+    assert job["policy_execution_report"]["policy_application_report"] == job["policy_application_report"]
     assert job["policy_execution_report"]["policy_config_apply_handoff"] == job["policy_config_apply_handoff"]
     assert job["policy_execution_report"]["qbit_plan"] == job["qbit_plan"]
     assert job["policy_execution_report"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
@@ -14522,6 +14531,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert summary["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
     assert summary["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert summary["policy_application_handoff"] == job["policy_application_handoff"]
+    assert summary["policy_application_report"] == job["policy_application_report"]
     assert summary["policy_config_apply_handoff"] == job["policy_config_apply_handoff"]
     assert summary["qbit_plan"] == job["qbit_plan"]
     assert summary["qbit_handoff"] == job["qbit_handoff"]
@@ -19683,10 +19693,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_runtime_contract" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_runtime_contract" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "policy_application_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "policy_application_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -19713,6 +19726,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+    assert "policy_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
@@ -19724,6 +19738,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "applied_request_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "policy_application_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "request_patch_applied" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
+    assert "qbit_evidence_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "policy_config_apply_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "verification" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_config_apply_handoff_fields"]
     assert "policy_runtime_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
@@ -21223,7 +21240,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "deployment_check" in manifest["skill_contract"]["mandatory_preflight"]
     assert "goal_progress" in manifest["skill_contract"]["mandatory_preflight"]
     assert "policy_application_handoff" in manifest["skill_contract"]["mandatory_preflight"]
+    assert "policy_application_report" in manifest["skill_contract"]["mandatory_preflight"]
     assert "policy_application_handoff.ready=true" in manifest["skill_contract"]["completion_evidence"]
+    assert "policy_application_report.ready_for_live_audit=true" in manifest["skill_contract"]["completion_evidence"]
     assert "live_user_report.report_allowed=true" in manifest["skill_contract"]["completion_evidence"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in manifest["skill_contract"]["completion_evidence"]
     assert "Read policy_application_handoff, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call." in manifest["agent_instructions"]["must"]
@@ -21361,6 +21380,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "target_upload_handoff.uploaded_seeding_ready=true" in payload["skill_contract"]["completion_evidence"]
         assert "live_validation_final_report.report_allowed=true" in payload["skill_contract"]["completion_evidence"]
         assert "live_user_report.report_allowed=true" in payload["skill_contract"]["completion_evidence"]
+        assert "policy_application_report.ready_for_live_audit=true" in payload["skill_contract"]["completion_evidence"]
         assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in payload["skill_contract"]["completion_evidence"]
         assert "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes." in payload["agent_instructions"]["must"]
         assert "Do not assume rule_review_fingerprint placeholders satisfy manual review." in payload["agent_instructions"]["must_not"]
