@@ -16979,17 +16979,35 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
             "ok": True,
             "target_count": 10,
             "scan_count": 50,
+            "scan_limit": 50,
+            "max_scan_limit": 200,
             "count": 1,
             "ready_count": 1,
             "shortfall_count": 9,
+            "pagination_plan": {
+                "pagination_supported": True,
+                "scan_limit": 50,
+                "max_scan_limit": 200,
+                "next_scan_limit": 100,
+                "recommended_request": {"scan_limit": 100},
+            },
             "digest": digest,
             "result": {
                 "kind": "ptcli.daily_candidates",
                 "target_count": 10,
                 "scan_count": 50,
+                "scan_limit": 50,
+                "max_scan_limit": 200,
                 "count": 1,
                 "ready_count": 1,
                 "shortfall_count": 9,
+                "pagination_plan": {
+                    "pagination_supported": True,
+                    "scan_limit": 50,
+                    "max_scan_limit": 200,
+                    "next_scan_limit": 100,
+                    "recommended_request": {"scan_limit": 100},
+                },
                 "digest": digest,
                 "candidates": [{"status": "ready"}],
             },
@@ -17012,20 +17030,29 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert refill_plan["ready_count"] == 1
     assert refill_plan["ready_shortfall_count"] == 9
     assert refill_plan["scan_count"] == 50
-    assert refill_plan["scan_exhausted"] is True
-    assert refill_plan["pagination_supported"] is False
+    assert refill_plan["scan_limit"] == 50
+    assert refill_plan["next_scan_limit"] == 100
+    assert refill_plan["max_scan_limit"] == 200
+    assert refill_plan["scan_exhausted"] is False
+    assert refill_plan["pagination_supported"] is True
     assert refill_plan["recommended_tool"] == "daily_candidates_job"
     assert refill_plan["recommended_endpoint"] == "/v1/jobs/candidates/daily"
-    assert refill_plan["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "accept_rules": True, "check_dupes": True}
+    assert refill_plan["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "scan_limit": 100, "accept_rules": True, "check_dupes": True}
     assert refill_plan["refill_request_contract"]["kind"] == "ptcli.daily_candidate_refill_request_contract"
     assert refill_plan["refill_request_contract"]["ready"] is True
     assert refill_plan["refill_request_contract"]["ready_shortfall_count"] == 9
+    assert refill_plan["refill_request_contract"]["scan_limit"] == 50
+    assert refill_plan["refill_request_contract"]["next_scan_limit"] == 100
+    assert refill_plan["refill_request_contract"]["max_scan_limit"] == 200
     assert refill_plan["refill_request_contract"]["recommended_request"] == refill_plan["recommended_request"]
     assert refill_plan["refill_request_contract"]["safe_to_call_now"] is True
     assert refill_plan["refill_job_handoff"]["kind"] == "ptcli.daily_candidate_refill_job_handoff"
     assert refill_plan["refill_job_handoff"]["ready"] is True
     assert refill_plan["refill_job_handoff"]["action"] == "create_refill_job"
     assert refill_plan["refill_job_handoff"]["ready_shortfall_count"] == 9
+    assert refill_plan["refill_job_handoff"]["scan_limit"] == 50
+    assert refill_plan["refill_job_handoff"]["next_scan_limit"] == 100
+    assert refill_plan["refill_job_handoff"]["max_scan_limit"] == 200
     assert refill_plan["refill_job_handoff"]["recommended_call"]["tool"] == "daily_candidates_job"
     assert refill_plan["refill_job_handoff"]["recommended_call"]["request"] == refill_plan["recommended_request"]
     assert refill_plan["refill_job_handoff"]["followup"]["tool"] == "daily_candidate_batch_status"
@@ -17047,6 +17074,9 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert completion_gate["refill_handoff"]["ready"] is True
     assert completion_gate["refill_handoff"]["action"] == "create_refill_job"
     assert completion_gate["refill_handoff"]["ready_shortfall_count"] == 9
+    assert completion_gate["refill_handoff"]["scan_limit"] == 50
+    assert completion_gate["refill_handoff"]["next_scan_limit"] == 100
+    assert completion_gate["refill_handoff"]["max_scan_limit"] == 200
     assert completion_gate["refill_handoff"]["recommended_tool"] == "daily_candidates_job"
     assert completion_gate["refill_handoff"]["recommended_request"] == refill_plan["refill_request_contract"]["recommended_request"]
     assert completion_gate["refill_handoff"]["recommended_call"]["safe_to_call_now"] is True
@@ -17112,17 +17142,35 @@ def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, 
             "ok": True,
             "target_count": 10,
             "scan_count": 50,
+            "scan_limit": int(request.get("scan_limit") or 50),
+            "max_scan_limit": 200,
             "count": 1,
             "ready_count": 1,
             "shortfall_count": 9,
+            "pagination_plan": {
+                "pagination_supported": True,
+                "scan_limit": int(request.get("scan_limit") or 50),
+                "max_scan_limit": 200,
+                "next_scan_limit": min(200, int(request.get("scan_limit") or 50) + 50),
+                "recommended_request": {"scan_limit": min(200, int(request.get("scan_limit") or 50) + 50)},
+            },
             "digest": digest,
             "result": {
                 "kind": "ptcli.daily_candidates",
                 "target_count": 10,
                 "scan_count": 50,
+                "scan_limit": int(request.get("scan_limit") or 50),
+                "max_scan_limit": 200,
                 "count": 1,
                 "ready_count": 1,
                 "shortfall_count": 9,
+                "pagination_plan": {
+                    "pagination_supported": True,
+                    "scan_limit": int(request.get("scan_limit") or 50),
+                    "max_scan_limit": 200,
+                    "next_scan_limit": min(200, int(request.get("scan_limit") or 50) + 50),
+                    "recommended_request": {"scan_limit": min(200, int(request.get("scan_limit") or 50) + 50)},
+                },
                 "digest": digest,
                 "candidates": [{"status": "ready", "source_id": source_id}],
             },
@@ -17145,7 +17193,9 @@ def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, 
     assert refill["refill_job"]["kind"] == "ptcli.daily_candidates"
     assert refill["refill_request"]["source_tracker"] == "U2"
     assert refill["refill_request"]["target"] == "MTEAM"
+    assert refill["refill_request"]["scan_limit"] == 100
     assert refill["refill_request"]["exclude_source_ids"] == ["60635"]
+    assert requests[1]["scan_limit"] == 100
     assert requests[1]["exclude_source_ids"] == ["60635"]
     assert refill["before"]["candidate_job_count"] == 1
     assert refill["after"]["candidate_job_count"] == 2
@@ -20423,11 +20473,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "remaining_submit_count" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_execution_summary_fields"]
     assert "blocked_jobs" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_execution_summary_fields"]
     assert "pagination_supported" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+    assert "scan_limit" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+    assert "next_scan_limit" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "exclude_source_ids_hint" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "refill_request_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "refill_job_handoff" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "daily_candidate_refill_request_contract_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "excluded_source_ids" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
+    assert "next_scan_limit" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
     assert "safe_to_call_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
     assert "daily_candidate_batch_sequence_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "daily_candidate_submit_action_handoff_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
@@ -23254,7 +23307,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "loop_control" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
         assert "refill_request_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
         assert "refill_job_handoff" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+        assert "scan_limit" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+        assert "next_scan_limit" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
         assert "daily_candidate_refill_request_contract_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
+        assert "scan_limit" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
+        assert "next_scan_limit" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
         assert "safe_to_call_now" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
         assert "daily_candidate_batch_loop_control_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "repeat_until" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_loop_control_fields"]
