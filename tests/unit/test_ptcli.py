@@ -14439,6 +14439,11 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_application_handoff"]["missing_request_fields"] == []
     assert job["policy_application_handoff"]["missing_confirmations"] == []
     assert job["request"]["policy_application_handoff"]["kind"] == "ptcli.policy_application_handoff"
+    assert job["policy_config_apply_handoff"]["kind"] == "ptcli.site_policy_config_apply_handoff"
+    assert job["policy_config_apply_handoff"]["ready"] is True
+    assert job["policy_config_apply_handoff"]["job_id"] == job["job_id"]
+    assert job["policy_application_handoff"]["policy_config_apply_handoff"] == job["policy_config_apply_handoff"]
+    assert job["request"]["policy_config_apply_handoff"]["kind"] == "ptcli.site_policy_config_apply_handoff"
     assert job["agent_decision"]["decision"] == "blocked"
     assert job["agent_decision"]["duplicate_check"]["status"] == "not_found"
     assert job["agent_decision"]["missing_confirmations"] == []
@@ -14467,6 +14472,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_execution_report"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
     assert job["policy_execution_report"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["policy_execution_report"]["policy_application_handoff"] == job["policy_application_handoff"]
+    assert job["policy_execution_report"]["policy_config_apply_handoff"] == job["policy_config_apply_handoff"]
     assert job["policy_execution_report"]["qbit_plan"] == job["qbit_plan"]
     assert job["policy_execution_report"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
     assert job["policy_execution_report"]["pending_qbit_roles"] == ["source", "uploaded"]
@@ -14490,6 +14496,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["workflow_context"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
     assert job["workflow_context"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["workflow_context"]["policy_application_handoff"] == job["policy_application_handoff"]
+    assert job["workflow_context"]["policy_config_apply_handoff"] == job["policy_config_apply_handoff"]
     assert job["workflow_context"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["workflow_context"]["policy_execution_report"] == job["policy_execution_report"]
     assert job["workflow_context"]["policy_execution_final_report"] == job["policy_execution_final_report"]
@@ -14501,6 +14508,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert summary["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
     assert summary["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert summary["policy_application_handoff"] == job["policy_application_handoff"]
+    assert summary["policy_config_apply_handoff"] == job["policy_config_apply_handoff"]
     assert summary["qbit_plan"] == job["qbit_plan"]
     assert summary["qbit_handoff"] == job["qbit_handoff"]
     assert summary["policy_execution_report"] == job["policy_execution_report"]
@@ -19221,8 +19229,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_runtime_contract" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_runtime_contract" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -19248,13 +19259,19 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "applied_request_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "policy_config_apply_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "verification" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_config_apply_handoff_fields"]
     assert "policy_runtime_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "policy_runtime_contract" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_application_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
@@ -20090,8 +20107,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "one_call_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "policy_config_apply_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "duplicate_check_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "one_call_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "does_check_duplicates_before_submit" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["one_call_handoff_fields"]
@@ -20412,6 +20431,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in summary_schema["properties"]
     assert "policy_runtime_contract" in summary_schema["properties"]
     assert "policy_application_handoff" in summary_schema["properties"]
+    assert "policy_config_apply_handoff" in summary_schema["properties"]
     assert "policy_enforcement_gate" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
     assert "check_submission" in summary_schema["properties"]
@@ -20434,6 +20454,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in job_schema["properties"]
     assert "policy_runtime_contract" in job_schema["properties"]
     assert "policy_application_handoff" in job_schema["properties"]
+    assert "policy_config_apply_handoff" in job_schema["properties"]
     assert "policy_enforcement_gate" in job_schema["properties"]
     assert "submit_if_clear_handoff" in job_schema["properties"]
     assert "check_submission" in job_schema["properties"]
@@ -20562,6 +20583,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_handoff" in deployment_schema["properties"]
     source_url_preflight_schema = openapi["paths"]["/v1/retorrent/source-url/preflight"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_execution_handoff" in source_url_preflight_schema["properties"]
+    assert "policy_config_apply_handoff" in source_url_preflight_schema["properties"]
     assert "one_call_handoff" in source_url_preflight_schema["properties"]
     readiness_schema = openapi["paths"]["/v1/readiness/bundle"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "live_readiness" in readiness_schema["properties"]
@@ -20877,8 +20899,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "policy_config_apply_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "one_call_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "policy_config_apply_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_check_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "one_call_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
@@ -23368,6 +23392,9 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["policy_execution_summary"]["ready"] is True
     assert payload["policy_execution_handoff"]["ready"] is True
     assert payload["policy_execution_handoff"]["recommended_tool"] == "readiness_bundle"
+    assert payload["policy_config_apply_handoff"]["ready"] is True
+    assert payload["policy_config_apply_handoff"]["verification"]["request"]["source_tracker"] == "U2"
+    assert payload["policy_config_apply_handoff"]["verification"]["request"]["target"] == "MTEAM"
     assert payload["job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
     assert payload["job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["job_template"]["request"]["target"] == "MTEAM"
@@ -23413,6 +23440,10 @@ def test_source_url_preflight_blocks_on_policy_config(tmp_path, monkeypatch) -> 
     assert payload["policy_execution_summary"]["ready"] is False
     assert payload["policy_execution_handoff"]["ready"] is False
     assert payload["policy_execution_handoff"]["recommended_tool"] == "edit_config"
+    assert payload["policy_config_apply_handoff"]["ready"] is False
+    assert payload["policy_config_apply_handoff"]["action"] == "manual_rule_review_then_edit_config"
+    assert payload["policy_config_apply_handoff"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert payload["policy_config_apply_handoff"]["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["one_call_handoff"]["ready"] is False
     assert payload["one_call_handoff"]["tool"] == "source_url_check_and_submit"
     assert payload["recommended_tool"] == "edit_config"
