@@ -19334,6 +19334,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "schedule_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "next_step" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "tracker_adapters" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+    assert "tracker_adapter_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "adapter_extension_final_report" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
+    assert "tracker_rollout_handoff" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
     assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "live_validation_preflight" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "site_policy_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -20110,6 +20114,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "daily_candidates" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "schedule_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "tracker_adapters" in goal_progress_tool["response_contract"]["evidence_fields"]
+    assert "tracker_adapter_evidence_fields" in goal_progress_tool["response_contract"]
+    assert "adapter_extension_final_report" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
+    assert "tracker_rollout_handoff" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
     assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
@@ -20159,6 +20167,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "daily_candidates" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "schedule_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "tracker_adapters" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+        assert "tracker_adapter_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "adapter_extension_final_report" in tools_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
+        assert "tracker_rollout_handoff" in tools_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
         assert "live_submission_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -21338,6 +21350,11 @@ services:
     assert payload["evidence"]["site_policies"]["config_update_plan"]["flat_patch"]["U2"]["download_rate_limit"]
     assert payload["evidence"]["site_policies"]["config_update_plan"]["flat_patch"]["MTEAM"]["upload_rate_limit"]
     assert payload["evidence"]["site_policies"]["next_step"]["tool"] == "site_policy_rule_review"
+    adapters = payload["evidence"]["tracker_adapters"]
+    assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
+    assert adapters["tracker_rollout_handoff"]["kind"] == "ptcli.tracker_rollout_handoff"
+    assert adapters["adapter_coverage_summary"]["coverage_counts"]
+    assert "adapter_extension_final_report" in adapters["adapter_extension_final_report"]["read_order"]
     assert payload["evidence"]["live_validation"]["status"] == "missing"
     assert payload["evidence"]["live_validation"]["ready"] is False
     assert payload["evidence"]["live_validation_preflight"]["kind"] == "ptcli.goal_live_validation_preflight"
@@ -21435,6 +21452,7 @@ services:
 
     preflight = payload["evidence"]["live_validation_preflight"]
     daily = payload["evidence"]["daily_candidates"]
+    adapters = payload["evidence"]["tracker_adapters"]
     assert daily["configured"] is True
     assert daily["count"] == 1
     assert daily["schedule_handoff"]["ready"] is True
@@ -21447,6 +21465,9 @@ services:
     assert preflight["live_validation_repair_plan"]["ready"] is True
     assert preflight["next_step"]["tool"] == "ptcli_doctor"
     assert preflight["next_step"]["request"]["argv"] == preflight["live_execution_package"]["steps"][0]["request"]["argv"]
+    assert adapters["requested_trackers"] == ["U2", "MTEAM"]
+    assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
+    assert adapters["adapter_extension_final_report"]["verdict"] in {"adapter_ready", "policy_blocked", "validation_blocked"}
     assert payload["next_step"]["tool"] == "ptcli_doctor"
     assert payload["next_step"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
     assert any("goal_live_validation_preflight.next_step" in action for action in preflight["next_actions"])

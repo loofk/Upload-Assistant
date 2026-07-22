@@ -21437,11 +21437,15 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
         site_policies = site_policies_payload(policy_request)
     except ServiceError as exc:
         site_policies = {"status": "blocked", "ok": False, "ready": False, "blockers": [str(exc)]}
+    try:
+        tracker_adapters = sites_payload(policy_request)
+    except ServiceError as exc:
+        tracker_adapters = {"status": "blocked", "ok": False, "ready": False, "blockers": [str(exc)]}
     tools = _agent_tool_schemas()
     tool_names = {str(tool.get("name")) for tool in tools}
     live_validation_evidence = _goal_progress_live_validation_evidence(request)
     live_validation_preflight = _goal_progress_live_validation_preflight(request, live_validation_evidence)
-    progress_items = _goal_progress_items(deployment, site_policies, tool_names, live_validation_evidence)
+    progress_items = _goal_progress_items(deployment, site_policies, tracker_adapters, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
     policy_repair_gate = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
@@ -21511,6 +21515,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "next_step": policy_repair_gate.get("next_step") if isinstance(policy_repair_gate.get("next_step"), dict) else policy_config_handoff.get("next_step") if isinstance(policy_config_handoff.get("next_step"), dict) else None,
                 "blockers": _string_list(site_policies.get("blockers")),
             },
+            "tracker_adapters": _goal_progress_tracker_adapter_evidence(tracker_adapters),
             "live_validation": live_validation_evidence,
             "live_validation_preflight": live_validation_preflight,
             "tool_count": len(tools),
@@ -21890,10 +21895,69 @@ def _goal_progress_live_validation_evidence_next_actions(status: str, ready: boo
     return ["Run readiness_bundle.live_execution_package on a real U2/CHD -> MTEAM seedbox job, then rerun /v1/goal/progress with job_id or job_dir."]
 
 
-def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, Any], tool_names: set[str], live_validation_evidence: dict[str, Any]) -> list[dict[str, Any]]:
+def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) -> dict[str, Any]:
+    final_report = tracker_adapters.get("adapter_extension_final_report") if isinstance(tracker_adapters.get("adapter_extension_final_report"), dict) else {}
+    rollout = tracker_adapters.get("tracker_rollout_handoff") if isinstance(tracker_adapters.get("tracker_rollout_handoff"), dict) else {}
+    coverage = tracker_adapters.get("adapter_coverage_summary") if isinstance(tracker_adapters.get("adapter_coverage_summary"), dict) else {}
+    extension = tracker_adapters.get("extension_handoff") if isinstance(tracker_adapters.get("extension_handoff"), dict) else {}
+    validation = tracker_adapters.get("extension_validation_matrix") if isinstance(tracker_adapters.get("extension_validation_matrix"), dict) else {}
+    next_step = final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else rollout.get("next_step") if isinstance(rollout.get("next_step"), dict) else None
+    return {
+        "ready": final_report.get("ready") if final_report else tracker_adapters.get("ready"),
+        "status": tracker_adapters.get("status"),
+        "verdict": final_report.get("verdict"),
+        "requested_trackers": final_report.get("requested_trackers") if isinstance(final_report.get("requested_trackers"), list) else tracker_adapters.get("sites"),
+        "requested_flow": final_report.get("requested_flow") if isinstance(final_report.get("requested_flow"), dict) else coverage.get("requested_flow") if isinstance(coverage.get("requested_flow"), dict) else None,
+        "adapter_extension_final_report": final_report or None,
+        "tracker_rollout_handoff": rollout or None,
+        "adapter_coverage_summary": {
+            "ready": coverage.get("ready"),
+            "coverage_counts": coverage.get("coverage_counts") if isinstance(coverage.get("coverage_counts"), dict) else {},
+            "missing_by_tracker": coverage.get("missing_by_tracker") if isinstance(coverage.get("missing_by_tracker"), dict) else {},
+            "priority_next": coverage.get("priority_next") if isinstance(coverage.get("priority_next"), dict) else None,
+            "source_ready_trackers": _string_list(coverage.get("source_ready_trackers")),
+            "target_ready_trackers": _string_list(coverage.get("target_ready_trackers")),
+            "live_reference_sources_to_mteam": _string_list(coverage.get("live_reference_sources_to_mteam")),
+        }
+        if coverage
+        else None,
+        "extension_handoff": {
+            "ready": extension.get("ready"),
+            "phase": extension.get("phase"),
+            "recommended_next_tracker": extension.get("recommended_next_tracker"),
+            "implementation_order": extension.get("implementation_order") if isinstance(extension.get("implementation_order"), list) else [],
+            "next_validation": extension.get("next_validation") if isinstance(extension.get("next_validation"), dict) else None,
+        }
+        if extension
+        else None,
+        "extension_validation_matrix": {
+            "ready": validation.get("ready"),
+            "ready_trackers": _string_list(validation.get("ready_trackers")),
+            "blocked_trackers": _string_list(validation.get("blocked_trackers")),
+            "next_item": validation.get("next_item") if isinstance(validation.get("next_item"), dict) else None,
+        }
+        if validation
+        else None,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else final_report.get("recommended_tool"),
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else final_report.get("recommended_endpoint"),
+        "recommended_request": next_step.get("request") if isinstance(next_step, dict) else final_report.get("recommended_request"),
+        "blockers": _string_list(final_report.get("blockers")) or _string_list(tracker_adapters.get("blockers")),
+        "next_actions": _string_list(final_report.get("next_actions")) or _string_list(tracker_adapters.get("next_actions")),
+    }
+
+
+def _goal_progress_items(
+    deployment: dict[str, Any],
+    site_policies: dict[str, Any],
+    tracker_adapters: dict[str, Any],
+    tool_names: set[str],
+    live_validation_evidence: dict[str, Any],
+) -> list[dict[str, Any]]:
     docker_compose = deployment.get("docker_compose") if isinstance(deployment.get("docker_compose"), dict) else {}
     qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
     policy_repair = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
+    adapter_final_report = tracker_adapters.get("adapter_extension_final_report") if isinstance(tracker_adapters.get("adapter_extension_final_report"), dict) else {}
     live_verified = live_validation_evidence.get("ready") is True
     live_status = str(live_validation_evidence.get("status") or "")
     live_ready_to_submit = live_status == "ready_to_submit"
@@ -21964,10 +22028,12 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
         _goal_progress_item(
             "tracker_adapters",
             "Extensible Chinese PT tracker adapter/profile model",
-            "partial",
+            "complete" if adapter_final_report.get("ready") is True and adapter_final_report.get("report_allowed") is True else "partial",
             7,
-            ["/v1/sites", "CHINESE_PT_TRACKERS", "extension_handoff"],
-            blockers=["Only U2/CHD -> MTEAM are priority reference flows; more Chinese PT sites still need full live adapter validation."],
+            ["/v1/sites", "CHINESE_PT_TRACKERS", "extension_handoff", "adapter_extension_final_report"],
+            blockers=_string_list(adapter_final_report.get("blockers"))
+            or _string_list(tracker_adapters.get("blockers"))
+            or ([] if adapter_final_report.get("ready") is True else ["Only U2/CHD -> MTEAM are priority reference flows; more Chinese PT sites still need full live adapter validation."]),
         ),
         _goal_progress_item(
             "seedbox_live_validation",
@@ -22880,9 +22946,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
-                "evidence_fields": ["deployment", "daily_candidates", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
+                "evidence_fields": ["deployment", "daily_candidates", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "next_step", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "next_step", "blockers"],
+                "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],

@@ -29127,6 +29127,7 @@
           "deployment",
           "daily_candidates",
           "site_policies",
+          "tracker_adapters",
           "live_validation",
           "live_validation_preflight",
           "tool_count"
@@ -29153,6 +29154,24 @@
           "policy_config_handoff",
           "next_step",
           "blockers"
+        ],
+        "tracker_adapter_evidence_fields": [
+          "ready",
+          "status",
+          "verdict",
+          "requested_trackers",
+          "requested_flow",
+          "adapter_extension_final_report",
+          "tracker_rollout_handoff",
+          "adapter_coverage_summary",
+          "extension_handoff",
+          "extension_validation_matrix",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
         ],
         "live_validation_evidence_fields": [
           "ready",
