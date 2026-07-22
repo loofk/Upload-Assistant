@@ -4931,6 +4931,7 @@ def _seedbox_live_validation_service_report(handoff: dict[str, Any], summary: di
             "complete_when": _string_list(evidence_contract.get("complete_when")),
             "audit_notes": _string_list(evidence_contract.get("audit_notes")),
         },
+        "evidence_matrix": _seedbox_live_evidence_matrix(),
         "runbook": _seedbox_live_validation_service_runbook(validation_plan),
         "components": validation_report.get("components") if isinstance(validation_report.get("components"), list) else [],
         "component_counts": {
@@ -4965,6 +4966,88 @@ def _seedbox_live_validation_service_runbook(validation_plan: dict[str, Any]) ->
     ]
 
 
+def _seedbox_live_evidence_matrix() -> list[dict[str, Any]]:
+    """Evidence contract for proving one real seedbox retorrent loop."""
+    return [
+        _seedbox_live_evidence_item(
+            "source_torrent_downloaded",
+            "source_pull",
+            "source_url_check_and_submit / resume_job",
+            ["source_torrent.exists=true", "source_torrent.sha1", "source_torrent.torrent_hash or source_torrent.infohash", "source_torrent_path"],
+            "Proves the source tracker torrent was actually obtained before qBittorrent injection.",
+        ),
+        _seedbox_live_evidence_item(
+            "source_qbit_complete",
+            "source_download",
+            "qbit_wait / pipeline",
+            ["closure_summary.source.torrent_hash", "closure_summary.source.content_path", "source_wait.complete=true", "qbit_enforcement_summary.source.rate_limits"],
+            "Proves qBittorrent has the source content, applied source-side limits, and reached a usable completed path.",
+        ),
+        _seedbox_live_evidence_item(
+            "metadata_and_description_ready",
+            "target_prepare",
+            "metadata_prepare / target_package_prepare",
+            ["metadata_prepare_handoff.ready=true", "target_package_handoff.metadata_ready=true", "imdb_id or tmdb_id", "douban_id or douban_url", "target_package_handoff.description_ready=true"],
+            "Proves IMDb/TMDb/豆瓣/PTGen-derived target description material exists before upload.",
+        ),
+        _seedbox_live_evidence_item(
+            "media_assets_ready",
+            "target_prepare",
+            "materials_prepare / target_package_prepare",
+            ["materials_handoff.ready=true", "material_evidence_summary.media_info_ready=true", "material_evidence_summary.screenshots_ready=true", "material_evidence_summary.image_hosts_ready=true"],
+            "Proves MediaInfo/BDInfo, screenshots, and hosted image evidence are present before target upload.",
+        ),
+        _seedbox_live_evidence_item(
+            "target_duplicate_clear",
+            "target_preflight",
+            "source_url_check_and_submit / target_package_prepare",
+            ["duplicate_check.searched=true", "duplicate_check.exists=false", "target_upload_service_gate.duplicate_clear=true"],
+            "Proves the target tracker was checked and no existing duplicate should stop the upload.",
+        ),
+        _seedbox_live_evidence_item(
+            "target_upload_created",
+            "target_upload",
+            "target_upload / source_url_check_and_submit",
+            ["target_upload_handoff.uploaded_torrent_id", "target_upload_handoff.uploaded_torrent_path", "target_upload_handoff.uploaded_torrent_hash", "closure_summary.target.uploaded_torrent_hash"],
+            "Proves the target tracker accepted the upload and generated a fresh target-side torrent.",
+        ),
+        _seedbox_live_evidence_item(
+            "target_qbit_seeding",
+            "target_seed",
+            "qbit_inject / qbit_wait / target_upload",
+            ["target_upload_handoff.injected_torrent_hash", "target_upload_handoff.uploaded_seeding_ready=true", "closure_summary.target.injected_torrent_hash", "qbit_enforcement_summary.uploaded.rate_limits"],
+            "Proves the uploaded target torrent was injected into qBittorrent and is ready to seed under target-side limits.",
+        ),
+        _seedbox_live_evidence_item(
+            "final_user_report_allowed",
+            "final_audit",
+            "get_job_summary",
+            [
+                "live_validation_completion_audit.report_allowed=true",
+                "live_validation_completion_audit.failed_checks=[]",
+                "live_validation_completion_audit.missing_evidence=[]",
+                "live_validation_completion_audit.blockers=[]",
+                "live_user_report.report_allowed=true",
+                "seedbox_live_validation_completion_report.ready_for_user_report=true",
+            ],
+            "Proves the service has enough audited evidence to report the live attempt as complete.",
+        ),
+    ]
+
+
+def _seedbox_live_evidence_item(name: str, phase: str, produced_by: str, required_fields: list[str], description: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "phase": phase,
+        "produced_by": produced_by,
+        "required_fields": required_fields,
+        "description": description,
+        "read_from": ["get_job_status", "get_job_summary"],
+        "required_for_completion": True,
+        "stop_when_missing": True,
+    }
+
+
 def _seedbox_live_validation_service_report_next_actions(ready: bool, first_blocker: Any) -> list[str]:
     if ready:
         return ["Run seedbox_live_validation_report.doctor.request.argv, then POST ptcli-doctor-summary.json to /v1/summary/check and follow live_validation_result."]
@@ -4984,6 +5067,7 @@ def _seedbox_live_validation_sequence(
     check_and_submit = service_report.get("check_and_submit") if isinstance(service_report.get("check_and_submit"), dict) else {}
     after_submit = service_report.get("after_submit") if isinstance(service_report.get("after_submit"), dict) else {}
     final_evidence = service_report.get("final_evidence") if isinstance(service_report.get("final_evidence"), dict) else {}
+    evidence_matrix = service_report.get("evidence_matrix") if isinstance(service_report.get("evidence_matrix"), list) else _seedbox_live_evidence_matrix()
     blockers = _string_list(service_report.get("blockers")) or _string_list(repair_plan.get("blockers"))
     steps = [
         _live_validation_sequence_step(
@@ -5060,6 +5144,7 @@ def _seedbox_live_validation_sequence(
         "final_read": final_evidence.get("read_tool") or "get_job_summary",
         "final_report_field": final_evidence.get("final_report_field") or LIVE_VALIDATION_FINAL_REPORT_FIELD,
         "audit_report_field": final_evidence.get("audit_report_field") or "seedbox_live_validation_completion_report",
+        "evidence_matrix": evidence_matrix,
         "complete_when": _string_list(final_evidence.get("complete_when")) or _string_list(service_report.get("complete_when")),
         "stop_when": _string_list(service_report.get("stop_when")),
         "blockers": blockers,
@@ -5119,6 +5204,7 @@ def _seedbox_live_execution_package(
     steps = sequence.get("steps") if isinstance(sequence.get("steps"), list) else []
     next_step = sequence.get("next_step") if isinstance(sequence.get("next_step"), dict) else repair_plan.get("next_step") if isinstance(repair_plan.get("next_step"), dict) else {}
     final_evidence = service_report.get("final_evidence") if isinstance(service_report.get("final_evidence"), dict) else {}
+    evidence_matrix = service_report.get("evidence_matrix") if isinstance(service_report.get("evidence_matrix"), list) else _seedbox_live_evidence_matrix()
     report_contract = {
         "final_report_field": LIVE_VALIDATION_FINAL_REPORT_FIELD,
         "audit_report_fields": LIVE_VALIDATION_AUDIT_REPORT_FIELDS,
@@ -5126,6 +5212,7 @@ def _seedbox_live_execution_package(
         "complete_when": _string_list(final_evidence.get("complete_when")) or LIVE_VALIDATION_COMPLETE_WHEN,
         "stop_when": _string_list(sequence.get("stop_when")),
         "required_fields": _string_list(final_evidence.get("required_fields")),
+        "evidence_matrix": evidence_matrix,
         "report_allowed_when": " and ".join(LIVE_VALIDATION_COMPLETE_WHEN),
     }
     return {
@@ -5269,6 +5356,7 @@ def _seedbox_live_runbook_final_report(
         }
     steps = sequence.get("steps") if isinstance(sequence.get("steps"), list) else []
     report_contract = execution_package.get("report_contract") if isinstance(execution_package.get("report_contract"), dict) else {}
+    evidence_matrix = report_contract.get("evidence_matrix") if isinstance(report_contract.get("evidence_matrix"), list) else sequence.get("evidence_matrix") if isinstance(sequence.get("evidence_matrix"), list) else _seedbox_live_evidence_matrix()
     return {
         "kind": "ptcli.seedbox_live_runbook_final_report",
         "ready": ready,
@@ -5300,9 +5388,23 @@ def _seedbox_live_runbook_final_report(
         "final_report_field": report_contract.get("final_report_field") or LIVE_VALIDATION_FINAL_REPORT_FIELD,
         "audit_report_fields": report_contract.get("audit_report_fields") or ["seedbox_live_validation_completion_report", "closure_summary", "qbit_enforcement_summary"],
         "evidence_required": _string_list(report_contract.get("required_fields")),
+        "evidence_matrix": evidence_matrix,
+        "evidence_required_by_phase": _seedbox_live_evidence_required_by_phase(evidence_matrix),
         "blockers": blockers,
         "next_actions": _seedbox_live_runbook_final_report_next_actions(ready, next_step, blockers),
     }
+
+
+def _seedbox_live_evidence_required_by_phase(evidence_matrix: list[dict[str, Any]]) -> dict[str, list[str]]:
+    by_phase: dict[str, list[str]] = {}
+    for item in evidence_matrix:
+        if not isinstance(item, dict):
+            continue
+        phase = str(item.get("phase") or "unknown")
+        by_phase.setdefault(phase, [])
+        by_phase[phase].extend(_string_list(item.get("required_fields")))
+        by_phase[phase] = list(dict.fromkeys(by_phase[phase]))
+    return by_phase
 
 
 def _seedbox_live_runbook_final_report_next_actions(ready: bool, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
@@ -30018,15 +30120,16 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "seedbox_live_validation_handoff_fields": ["ready", "phase", "validation_report", "live_validation_summary", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "validation_plan", "post_submit_handoff", "evidence_contract", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
         "seedbox_live_validation_summary_fields": ["ready", "phase", "status", "can_run_doctor", "can_submit_after_doctor", "ready_count", "blocked_count", "total_count", "first_blocker", "doctor_request", "check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_read", "poll_tool", "finish_tool", "required_order", "read_first", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
         "seedbox_live_validation_report_fields": ["ready", "phase", "ready_count", "blocked_count", "total_count", "components", "first_blocker", "next_step", "complete_when", "stop_when"],
-        "seedbox_live_validation_service_report_fields": ["ready", "status", "phase", "current_step", "first_blocker", "read_first", "doctor", "check_and_submit", "after_submit", "final_evidence", "runbook", "components", "component_counts", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
+        "seedbox_live_validation_service_report_fields": ["ready", "status", "phase", "current_step", "first_blocker", "read_first", "doctor", "check_and_submit", "after_submit", "final_evidence", "evidence_matrix", "runbook", "components", "component_counts", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
         "live_validation_repair_plan_fields": ["ready", "status", "phase", "first_blocker", "blocked_categories", "ready_categories", "categories", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "ordered_steps", "read_after_repair", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_validation_repair_category_fields": ["category", "ready", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when", "blockers", "next_actions"],
-        "live_validation_sequence_fields": ["ready", "status", "current_action", "first_blocker", "steps", "next_step", "final_read", "final_report_field", "audit_report_field", "complete_when", "stop_when", "blockers", "next_actions"],
+        "live_validation_sequence_fields": ["ready", "status", "current_action", "first_blocker", "steps", "next_step", "final_read", "final_report_field", "audit_report_field", "evidence_matrix", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_validation_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "live_execution_package_fields": ["ready", "status", "current_action", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "step_count", "steps", "run_order", "report_contract", "read_order", "continue_when", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_execution_report_contract_fields": ["final_report_field", "audit_report_fields", "read_tool", "complete_when", "stop_when", "required_fields", "report_allowed_when"],
         "first_live_validation_handoff_fields": ["ready", "status", "action", "phase", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "doctor", "submit", "after_submit", "run_order", "read_first", "complete_when", "stop_when", "blockers", "next_actions"],
-        "seedbox_live_runbook_final_report_fields": ["ready", "report_allowed", "status", "verdict", "current_action", "first_blocker", "recommended_call", "doctor", "submit", "after_submit", "run_order", "steps", "read_order", "complete_when", "stop_when", "must_not_report_complete_until", "final_report_field", "audit_report_fields", "evidence_required", "blockers", "next_actions"],
+        "seedbox_live_runbook_final_report_fields": ["ready", "report_allowed", "status", "verdict", "current_action", "first_blocker", "recommended_call", "doctor", "submit", "after_submit", "run_order", "steps", "read_order", "complete_when", "stop_when", "must_not_report_complete_until", "final_report_field", "audit_report_fields", "evidence_required", "evidence_matrix", "evidence_required_by_phase", "blockers", "next_actions"],
+        "seedbox_live_evidence_matrix_fields": ["name", "phase", "produced_by", "required_fields", "description", "read_from", "required_for_completion", "stop_when_missing"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
         "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "audit_report_field", "stop_when"],
         "seedbox_live_evidence_contract_fields": ["final_read", "final_report_field", "audit_report_field", "complete_when", "required_fields", "audit_notes"],

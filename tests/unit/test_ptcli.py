@@ -21104,12 +21104,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_service_report_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "check_and_submit" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
     assert "final_evidence" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
+    assert "evidence_matrix" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
     assert "live_validation_repair_plan_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "blocked_categories" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_repair_plan_fields"]
     assert "live_validation_repair_category_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "continue_when" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_repair_category_fields"]
     assert "live_validation_sequence_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "final_report_field" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_sequence_fields"]
+    assert "evidence_matrix" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_sequence_fields"]
     assert "live_validation_sequence_step_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "repeat_when" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_sequence_step_fields"]
     assert "live_execution_package_fields" in tool_by_name["readiness_bundle"]["response_contract"]
@@ -21120,6 +21122,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "after_submit" in tool_by_name["readiness_bundle"]["response_contract"]["first_live_validation_handoff_fields"]
     assert "seedbox_live_runbook_final_report_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "must_not_report_complete_until" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_runbook_final_report_fields"]
+    assert "evidence_required_by_phase" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_runbook_final_report_fields"]
+    assert "seedbox_live_evidence_matrix_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "stop_when_missing" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_evidence_matrix_fields"]
     assert "doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "manual_job" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "validation_plan" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -24545,12 +24550,19 @@ services:
     assert payload["seedbox_live_validation_report"]["final_evidence"]["final_report_field"] == "live_validation_completion_audit"
     assert payload["seedbox_live_validation_report"]["final_evidence"]["audit_report_field"] == "seedbox_live_validation_completion_report"
     assert "live_validation_completion_audit.report_allowed" in payload["seedbox_live_validation_report"]["final_evidence"]["required_fields"]
+    evidence_by_name = {item["name"]: item for item in payload["seedbox_live_validation_report"]["evidence_matrix"]}
+    assert set(evidence_by_name) >= {"source_torrent_downloaded", "source_qbit_complete", "metadata_and_description_ready", "media_assets_ready", "target_duplicate_clear", "target_upload_created", "target_qbit_seeding", "final_user_report_allowed"}
+    assert evidence_by_name["source_torrent_downloaded"]["phase"] == "source_pull"
+    assert "source_torrent.sha1" in evidence_by_name["source_torrent_downloaded"]["required_fields"]
+    assert evidence_by_name["target_qbit_seeding"]["stop_when_missing"] is True
+    assert "target_upload_handoff.uploaded_seeding_ready=true" in evidence_by_name["target_qbit_seeding"]["required_fields"]
     assert [step["name"] for step in payload["seedbox_live_validation_report"]["runbook"]] == ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"]
     assert payload["live_validation_sequence"]["kind"] == "ptcli.live_validation_sequence"
     assert payload["live_validation_sequence"]["ready"] is True
     assert payload["live_validation_sequence"]["current_action"] == "run_doctor"
     assert payload["live_validation_sequence"]["final_report_field"] == "live_validation_completion_audit"
     assert payload["live_validation_sequence"]["audit_report_field"] == "seedbox_live_validation_completion_report"
+    assert payload["live_validation_sequence"]["evidence_matrix"] == payload["seedbox_live_validation_report"]["evidence_matrix"]
     assert [step["name"] for step in payload["live_validation_sequence"]["steps"]] == ["run_doctor", "check_doctor_summary", "check_and_submit", "poll_job", "resume_or_finish"]
     sequence_steps = {step["name"]: step for step in payload["live_validation_sequence"]["steps"]}
     assert sequence_steps["run_doctor"]["action"] == "run_cli"
@@ -24566,6 +24578,7 @@ services:
     assert payload["live_execution_package"]["status"] == "ready_for_doctor"
     assert payload["live_execution_package"]["run_order"] == ["run_doctor", "check_doctor_summary", "check_and_submit", "poll_job", "resume_or_finish"]
     assert payload["live_execution_package"]["report_contract"]["final_report_field"] == "live_validation_completion_audit"
+    assert payload["live_execution_package"]["report_contract"]["evidence_matrix"] == payload["seedbox_live_validation_report"]["evidence_matrix"]
     assert payload["live_execution_package"]["report_contract"]["report_allowed_when"] == "live_validation_completion_audit.report_allowed=true and live_validation_completion_audit.failed_checks=[] and live_validation_completion_audit.missing_evidence=[] and live_validation_completion_audit.blockers=[]"
     assert payload["first_live_validation_handoff"]["kind"] == "ptcli.first_live_validation_handoff"
     assert payload["first_live_validation_handoff"]["ready"] is True
@@ -24589,6 +24602,9 @@ services:
     assert payload["seedbox_live_runbook_final_report"]["recommended_call"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["seedbox_live_runbook_final_report"]["run_order"] == payload["live_execution_package"]["run_order"]
     assert payload["seedbox_live_runbook_final_report"]["final_report_field"] == "live_validation_completion_audit"
+    assert payload["seedbox_live_runbook_final_report"]["evidence_matrix"] == payload["seedbox_live_validation_report"]["evidence_matrix"]
+    assert "target_upload_handoff.uploaded_seeding_ready=true" in payload["seedbox_live_runbook_final_report"]["evidence_required_by_phase"]["target_seed"]
+    assert "live_validation_completion_audit.report_allowed=true" in payload["seedbox_live_runbook_final_report"]["evidence_required_by_phase"]["final_audit"]
     assert "seedbox_live_runbook_final_report" in payload["seedbox_live_runbook_final_report"]["read_order"]
     assert "live_validation_completion_audit.report_allowed=true" in payload["seedbox_live_runbook_final_report"]["must_not_report_complete_until"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in payload["seedbox_live_runbook_final_report"]["must_not_report_complete_until"]

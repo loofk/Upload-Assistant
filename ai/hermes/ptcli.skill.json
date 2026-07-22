@@ -37075,6 +37075,7 @@
           "check_and_submit",
           "after_submit",
           "final_evidence",
+          "evidence_matrix",
           "runbook",
           "components",
           "component_counts",
@@ -37127,6 +37128,7 @@
           "final_read",
           "final_report_field",
           "audit_report_field",
+          "evidence_matrix",
           "complete_when",
           "stop_when",
           "blockers",
@@ -37214,8 +37216,20 @@
           "final_report_field",
           "audit_report_fields",
           "evidence_required",
+          "evidence_matrix",
+          "evidence_required_by_phase",
           "blockers",
           "next_actions"
+        ],
+        "seedbox_live_evidence_matrix_fields": [
+          "name",
+          "phase",
+          "produced_by",
+          "required_fields",
+          "description",
+          "read_from",
+          "required_for_completion",
+          "stop_when_missing"
         ],
         "seedbox_live_validation_plan_fields": [
           "ready",
