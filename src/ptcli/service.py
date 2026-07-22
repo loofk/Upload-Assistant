@@ -3327,6 +3327,7 @@ def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[st
         "daily_candidate_operational_final_report": operational_report,
         "daily_candidate_target_fulfillment_report": target_fulfillment_report,
         "notification_payload": schedule_result.get("notification_payload"),
+        "next_call": report.get("next_call"),
         "blockers": blockers,
         "next_actions": _daily_candidate_run_and_deliver_next_actions(report, blockers),
         "safety": {
@@ -3390,6 +3391,7 @@ def _daily_candidate_run_and_deliver_report(schedule_result: dict[str, Any], del
         "daily_candidate_run_handoff": run_handoff or None,
         "daily_candidate_delivery_final_report": delivery_final or None,
         "next_step": run_handoff.get("next_step") if isinstance(run_handoff.get("next_step"), dict) else None,
+        "next_call": run_handoff.get("next_call") if isinstance(run_handoff.get("next_call"), dict) else None,
         "recommended_tool": run_handoff.get("recommended_tool"),
         "recommended_endpoint": run_handoff.get("recommended_endpoint"),
         "recommended_request": run_handoff.get("recommended_request"),
@@ -32453,8 +32455,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Run enabled daily candidate schedules and deliver the resulting digest to local files or webhook in one AI-callable step. This creates candidate scan jobs but never submits candidates or uploads torrents.",
             "input_schema": candidate_run_and_deliver_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "notification_payload", "blockers", "next_actions", "safety"],
-                "run_and_deliver_report_fields": ["ready", "action", "schedule_status", "schedule_job_count", "delivery_requested", "delivery_status", "delivery_ok", "notification_delivered", "file_delivery", "webhook_delivery", "payload_fingerprint", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers"],
+                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
+                "run_and_deliver_report_fields": ["ready", "action", "schedule_status", "schedule_job_count", "delivery_requested", "delivery_status", "delivery_ok", "notification_delivered", "file_delivery", "webhook_delivery", "payload_fingerprint", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers"],
                 "daily_candidate_operational_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "approval", "completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_fulfillment_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "delivery_result_fields": _daily_candidate_delivery_response_contract()["required_fields"],
@@ -34468,7 +34470,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
             "tool": "daily_candidate_run_and_deliver",
             "description": "Find up to 10 ranked source/target retorrent candidates, deliver the digest, then submit approved candidates through the inherited-identity handoff.",
             "required_fields": ["source_tracker", "target"],
-            "read_result": ["daily_candidate_operational_final_report", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
+            "read_result": ["next_call", "daily_candidate_operational_final_report", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
             "runbook": [
                 {
                     "step": "preflight",
@@ -34480,7 +34482,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "run_and_deliver_digest",
                     "tool": "daily_candidate_run_and_deliver",
-                    "read": ["daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
+                    "read": ["next_call", "daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
                     "continue_when": "daily_candidate_operational_final_report.delivery.delivered=true and daily_candidate_run_handoff.pending_job_count=0",
                     "repeat_when": "daily_candidate_run_handoff.pending_job_count>0",
                     "stop_when": ["blockers is non-empty"],
@@ -35135,6 +35137,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_operational_final_report": {"type": ["object", "null"]},
             "daily_candidate_target_fulfillment_report": {"type": ["object", "null"]},
             "notification_payload": {"type": ["object", "null"]},
+            "next_call": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "safety": {"type": "object"},

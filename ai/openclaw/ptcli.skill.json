@@ -636,6 +636,7 @@
         "target"
       ],
       "read_result": [
+        "next_call",
         "daily_candidate_operational_final_report",
         "run_and_deliver_report",
         "daily_candidate_run_handoff",
@@ -662,6 +663,7 @@
           "step": "run_and_deliver_digest",
           "tool": "daily_candidate_run_and_deliver",
           "read": [
+            "next_call",
             "daily_candidate_operational_final_report",
             "run_and_deliver_report",
             "delivery_result",
@@ -20230,6 +20232,7 @@
           "daily_candidate_operational_final_report",
           "daily_candidate_target_fulfillment_report",
           "notification_payload",
+          "next_call",
           "blockers",
           "next_actions",
           "safety"
@@ -20249,6 +20252,7 @@
           "daily_candidate_run_handoff",
           "daily_candidate_delivery_final_report",
           "next_step",
+          "next_call",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",

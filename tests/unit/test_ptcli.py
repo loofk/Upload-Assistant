@@ -18562,6 +18562,11 @@ def test_daily_candidate_run_and_deliver_runs_schedule_and_writes_digest(monkeyp
     assert report["kind"] == "ptcli.daily_candidate_run_and_deliver_report"
     assert report["notification_delivered"] is True
     assert report["recommended_tool"] == "submit_daily_candidate_job"
+    assert report["next_call"] == payload["daily_candidate_run_handoff"]["next_call"]
+    assert payload["next_call"] == report["next_call"]
+    assert payload["next_call"]["tool"] == "submit_daily_candidate_job"
+    assert payload["next_call"]["safe_to_call_now"] is False
+    assert payload["next_call"]["requires_user_review"] is True
     assert report["safety"]["does_not_submit_candidates"] is True
     operational_report = payload["daily_candidate_operational_final_report"]
     assert operational_report["kind"] == "ptcli.daily_candidate_operational_final_report"
@@ -21717,6 +21722,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_operational_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_target_fulfillment_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
+    assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["run_and_deliver_report_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "next_scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -22767,8 +22774,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
     daily_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "daily_candidates")
     assert daily_workflow["tool"] == "daily_candidate_run_and_deliver"
-    assert daily_workflow["read_result"][0] == "daily_candidate_operational_final_report"
+    assert daily_workflow["read_result"][0] == "next_call"
+    assert "daily_candidate_operational_final_report" in daily_workflow["read_result"]
     assert daily_workflow["runbook"][1]["tool"] == "daily_candidate_run_and_deliver"
+    assert "next_call" in daily_workflow["runbook"][1]["read"]
     assert "daily_candidate_operational_final_report" in daily_workflow["runbook"][1]["read"]
     assert daily_workflow["runbook"][2]["tool"] == "submit_daily_candidate_job"
     assert "policy_application_handoff" in daily_workflow["runbook"][2]["read"]
