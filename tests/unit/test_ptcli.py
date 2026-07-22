@@ -14072,6 +14072,17 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["resume_audit"]["summary_endpoint"] == f"/v1/jobs/{resume['job_id']}/summary"
     assert resume["resume_summary"]["available"] is False
     assert resume["resume_summary"]["allowed"] is False
+    assert resume["resume_followup_handoff"]["kind"] == "ptcli.resume_followup_handoff"
+    assert resume["resume_followup_handoff"]["ready"] is True
+    assert resume["resume_followup_handoff"]["is_resume_job"] is True
+    assert resume["resume_followup_handoff"]["action"] == "read_child_summary"
+    assert resume["resume_followup_handoff"]["job_id"] == resume["job_id"]
+    assert resume["resume_followup_handoff"]["parent_job_id"] == parent["job_id"]
+    assert resume["resume_followup_handoff"]["status_endpoint"] == f"/v1/jobs/{resume['job_id']}"
+    assert resume["resume_followup_handoff"]["summary_endpoint"] == f"/v1/jobs/{resume['job_id']}/summary"
+    assert resume["resume_followup_handoff"]["parent_status_endpoint"] == f"/v1/jobs/{parent['job_id']}"
+    assert [step["name"] for step in resume["resume_followup_handoff"]["steps"]] == ["read_child_summary", "refresh_parent_lineage"]
+    assert resume["resume_followup_handoff"]["primary_next_step"]["tool"] == "get_job_summary"
     assert resume["agent_decision"]["resume_summary"] == resume["resume_summary"]
     assert resume["material_resolution"] is None
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
@@ -14094,8 +14105,10 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert parent_summary["job_lineage"] == parent_after_resume["job_lineage"]
     assert child_summary["job_lineage"]["parent_job_id"] == parent["job_id"]
     assert child_summary["job_lineage"]["root_job_id"] == parent["job_id"]
+    assert child_summary["resume_followup_handoff"] == resume["resume_followup_handoff"]
     assert listed["jobs"][0]["job_lineage"]["parent_job_id"] == parent["job_id"]
     assert listed["jobs"][0]["job_lineage"]["chain"][0]["job_id"] == parent["job_id"]
+    assert listed["jobs"][0]["resume_followup_handoff"] == resume["resume_followup_handoff"]
 
 
 def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -> None:
@@ -19187,6 +19200,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_summary_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "recommended_tool" in tool_by_name["resume_job"]["response_contract"]["resume_summary_fields"]
+    assert "resume_followup_handoff" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_followup_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_followup_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_followup_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "resume_followup_handoff_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "primary_next_step" in tool_by_name["resume_job"]["response_contract"]["resume_followup_handoff_fields"]
     assert "material_resolution" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "material_resolution" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_resolution" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -21142,6 +21161,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_summary_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "resume_followup_handoff" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_followup_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_followup_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_followup_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "resume_followup_handoff_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "primary_next_step" in tools_by_name["resume_job"]["response_contract"]["resume_followup_handoff_fields"]
         assert "recommended_tool" in tools_by_name["resume_job"]["response_contract"]["resume_summary_fields"]
         assert "material_resolution" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "material_resolution" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
