@@ -13937,6 +13937,18 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["recovery_handoff"]["gates"]["closure_complete"] is False
     assert "materials_handoff.not_ready" in job["recovery_handoff"]["blockers"]
     assert "Call recovery_handoff.dry_run_request" in job["recovery_handoff"]["next_actions"][0]
+    assert job["blocked_recovery_report"]["kind"] == "ptcli.blocked_recovery_report"
+    assert job["blocked_recovery_report"]["status"] == "blocked"
+    assert job["blocked_recovery_report"]["recoverable"] is True
+    assert job["blocked_recovery_report"]["action"] == "prepare_materials"
+    assert job["blocked_recovery_report"]["should_resume"] is True
+    assert job["blocked_recovery_report"]["resume_preview_required"] is True
+    assert job["blocked_recovery_report"]["recommended_tool"] == "resume_job"
+    assert job["blocked_recovery_report"]["dry_run_request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
+    assert job["blocked_recovery_report"]["execute_request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
+    assert "materials" in job["blocked_recovery_report"]["blocked_domains"]
+    assert "materials_handoff.not_ready" in job["blocked_recovery_report"]["blockers"]
+    assert job["blocked_recovery_report"]["read_order"][0] == "blocked_recovery_report"
     assert job["job_control_summary"]["state"] == "action_required"
     assert job["job_control_summary"]["action"] == "resume_preview"
     assert job["job_control_summary"]["should_resume"] is True
@@ -13986,6 +13998,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["job_handoff"] == job["job_handoff"]
     assert summary["recovery_handoff"] == job["recovery_handoff"]
     assert summary["job_control_summary"] == job["job_control_summary"]
+    assert summary["blocked_recovery_report"] == job["blocked_recovery_report"]
     assert summary["job_final_report"] == job["job_final_report"]
     assert summary["workflow_context"]["recovery_handoff"] == job["recovery_handoff"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
@@ -13995,6 +14008,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     listed = store.list({"status": "blocked"})["jobs"][0]
     assert listed["resume_final_report"]["verdict"] == "preview_resume"
     assert listed["resume_final_report"]["recommended_call"]["request"] == {"job_id": job["job_id"], "dry_run": True}
+    assert listed["blocked_recovery_report"] == job["blocked_recovery_report"]
 
 
 def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
@@ -14017,6 +14031,11 @@ def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
     assert parent["job_resume_handoff"]["action"] == "unavailable"
     assert parent["job_resume_handoff"]["ready"] is False
     assert "No executable resume command is available for this job." in parent["job_resume_handoff"]["blockers"]
+    assert parent["blocked_recovery_report"]["kind"] == "ptcli.blocked_recovery_report"
+    assert parent["blocked_recovery_report"]["action"] == "resolve_blockers"
+    assert parent["blocked_recovery_report"]["recoverable"] is False
+    assert parent["blocked_recovery_report"]["recommended_tool"] is None
+    assert "No executable resume command is available for this job." in parent["blocked_recovery_report"]["blockers"]
 
 
 def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> None:
@@ -19069,6 +19088,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_control_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "blocked_recovery_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "blocked_recovery_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "blocked_recovery_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "blocked_recovery_report_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "recoverable" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+    assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -21101,6 +21126,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_control_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "job_control_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "job_control_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "blocked_recovery_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "blocked_recovery_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "blocked_recovery_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "blocked_recovery_report_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "recoverable" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+        assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
         assert "job_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "job_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "job_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
