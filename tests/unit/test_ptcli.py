@@ -16324,6 +16324,15 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert completion_gate["recommended_request"]["source_id"] == "60635"
     assert completion_gate["recommended_call"]["requires_user_review"] is True
     assert "submit_next without explicit user approval" in completion_gate["stop_when"]
+    target_report = list_payload["daily_candidate_batch_target_report"]
+    assert target_report["kind"] == "ptcli.daily_candidate_batch_target_report"
+    assert target_report["action"] == "submit_next"
+    assert target_report["target"]["target_count"] == 1
+    assert target_report["target"]["remaining_submit_count"] == 1
+    assert target_report["loop"]["should_submit"] is True
+    assert target_report["submission"]["approval_required"] is True
+    assert target_report["recommended_call"] == completion_gate["recommended_call"]
+    assert target_report["safety"]["submit_requires_human_approval"] is True
     publish_payload = list_payload["daily_candidate_batch_publish_payload"]
     assert publish_payload["kind"] == "ptcli.daily_candidate_batch_publish_payload"
     assert publish_payload["status"] == "ready_for_approval"
@@ -16342,6 +16351,8 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert publish_payload["tracking"]["recommended_tool"] == "submit_daily_candidate_job"
     assert publish_payload["completion_gate"] == completion_gate
     assert publish_payload["daily_candidate_completion_gate"] == completion_gate
+    assert publish_payload["target_report"] == target_report
+    assert publish_payload["daily_candidate_batch_target_report"] == target_report
     assert publish_payload["publish_contract"]["does_not_upload"] is True
 
 
@@ -17034,11 +17045,22 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert completion_gate["refill_handoff"]["followup"]["expected_new_job"]["ready_shortfall_before_refill"] == 9
     assert "candidate_job_count increased" in completion_gate["refill_handoff"]["followup"]["continue_when"]
     assert completion_gate["recommended_request"] == completion_gate["refill_handoff"]["recommended_request"]
+    target_report = batch["daily_candidate_batch_target_report"]
+    assert target_report["kind"] == "ptcli.daily_candidate_batch_target_report"
+    assert target_report["status"] == "shortfall"
+    assert target_report["action"] == "refill_shortfall"
+    assert target_report["target"]["target_count"] == 10
+    assert target_report["target"]["ready_shortfall_count"] == 9
+    assert target_report["loop"]["should_refill"] is True
+    assert target_report["refill_handoff"] == completion_gate["refill_handoff"]
+    assert target_report["recommended_call"] == completion_gate["refill_handoff"]["recommended_call"]
+    assert batch["target_report"] == target_report
     publish_payload = batch["daily_candidate_batch_publish_payload"]
     assert publish_payload["kind"] == "ptcli.daily_candidate_batch_publish_payload"
     assert publish_payload["status"] == "shortfall"
     assert publish_payload["counts"]["shortfall_candidates"] == 9
     assert publish_payload["tracking"]["should_refill"] is True
+    assert publish_payload["target_report"] == target_report
     assert publish_payload["publish_contract"]["submit_requires_user_approval"] is True
     assert "rerun returns no new safe candidates" in refill_plan["stop_when"][0]
 
@@ -20373,6 +20395,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submit_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_item_fields"]
     assert "tracking_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "after_submit_calls" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+    assert "daily_candidate_batch_target_report" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "target_report" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "daily_candidate_batch_target_report_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "target" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_target_report_fields"]
+    assert "loop" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_target_report_fields"]
+    assert "daily_candidate_batch_target_counts_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "ready_shortfall_count" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_target_counts_fields"]
+    assert "daily_candidate_batch_target_loop_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "should_refill" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_target_loop_fields"]
     assert "steps" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_sequence_fields"]
     assert "loop_control" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_sequence_fields"]
     assert "daily_candidate_batch_loop_control_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
