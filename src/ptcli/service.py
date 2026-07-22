@@ -8215,6 +8215,7 @@ def _daily_candidate_schedule_env_example() -> list[dict[str, Any]]:
             "source_tracker": "U2",
             "target": "MTEAM",
             "limit": DEFAULT_CANDIDATE_LIMIT,
+            "scan_limit": MAX_CANDIDATE_SCAN,
             "time": "09:00",
             "timezone": "Asia/Shanghai",
             "accept_rules": True,
@@ -8255,6 +8256,9 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         digest_approval_queue = digest.get("approval_queue") if isinstance(digest.get("approval_queue"), dict) else {}
         digest_safe_candidates = digest.get("top_safe_candidates") if isinstance(digest.get("top_safe_candidates"), list) else digest_approval_queue.get("top_safe_candidates") if isinstance(digest_approval_queue.get("top_safe_candidates"), list) else []
         selected_count = int(digest.get("selected_count") or len(digest_push_items))
+        scan_limit = _bounded_int(digest.get("scan_limit") or request.get("scan_limit"), default=MAX_CANDIDATE_SCAN, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN)
+        max_scan_limit = _bounded_int(digest.get("max_scan_limit"), default=HARD_MAX_CANDIDATE_SCAN, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN)
+        pagination_plan = digest.get("pagination_plan") if isinstance(digest.get("pagination_plan"), dict) else {}
         item = {
             "schedule_name": job.get("schedule_name"),
             "job_id": job.get("job_id"),
@@ -8266,6 +8270,7 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
                 "source_tracker": request.get("source_tracker"),
                 "target_trackers": request.get("target_trackers"),
                 "limit": int(request.get("limit") or DEFAULT_CANDIDATE_LIMIT),
+                "scan_limit": scan_limit,
                 "accept_rules": request.get("accept_rules"),
                 "check_dupes": request.get("check_dupes"),
                 "base_dir": request.get("base_dir"),
@@ -8275,6 +8280,10 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
             "recommendation": digest.get("recommendation"),
             "target_count": int(digest.get("target_count") or request.get("limit") or DEFAULT_CANDIDATE_LIMIT),
             "scan_count": int(digest.get("scan_count") or 0),
+            "scan_limit": scan_limit,
+            "next_scan_limit": _daily_candidate_schedule_next_scan_limit({"scan_limit": scan_limit, "max_scan_limit": max_scan_limit, "pagination_plan": pagination_plan}),
+            "max_scan_limit": max_scan_limit,
+            "pagination_plan": pagination_plan or None,
             "selected_count": selected_count,
             "ready_count": int(digest.get("ready_count") or decision.get("ready_count") or 0),
             "shortfall_count": int(digest.get("shortfall_count") or 0),
@@ -8344,6 +8353,10 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
     push_payload = _daily_candidate_schedule_push_payload(push_items, items, submission_handoff, blockers, approval_queue=approval_queue)
     target_count = sum(int(item.get("target_count") or 0) for item in items)
     scan_count = sum(int(item.get("scan_count") or 0) for item in items)
+    scan_limit = max((_bounded_int(item.get("scan_limit"), default=MAX_CANDIDATE_SCAN, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN) for item in items), default=MAX_CANDIDATE_SCAN)
+    max_scan_limit = max((_bounded_int(item.get("max_scan_limit"), default=HARD_MAX_CANDIDATE_SCAN, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN) for item in items), default=HARD_MAX_CANDIDATE_SCAN)
+    next_scan_limits = [_bounded_int(item.get("next_scan_limit"), default=scan_limit, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN) for item in items if item.get("next_scan_limit")]
+    next_scan_limit = max(next_scan_limits) if next_scan_limits and scan_limit < max_scan_limit else None
     selected_count = sum(int(item.get("selected_count") or 0) for item in items)
     ready_count = sum(int(item.get("ready_count") or 0) for item in items)
     shortfall_count = sum(max(0, int(item.get("target_count") or 0) - int(item.get("selected_count") or 0)) for item in items)
@@ -8356,6 +8369,10 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         "skipped_count": len(skipped),
         "target_count": target_count,
         "scan_count": scan_count,
+        "scan_limit": scan_limit,
+        "next_scan_limit": next_scan_limit,
+        "max_scan_limit": max_scan_limit,
+        "pagination_supported": any(bool((item.get("pagination_plan") or {}).get("pagination_supported")) for item in items if isinstance(item.get("pagination_plan"), dict)),
         "selected_count": selected_count,
         "ready_count": ready_count,
         "shortfall_count": shortfall_count,
@@ -8401,6 +8418,10 @@ def _daily_candidate_schedule_batch_report(schedule_digest: dict[str, Any], dail
         "decision": daily_candidate_report.get("decision"),
         "target_count": int(schedule_digest.get("target_count") or 0),
         "scan_count": int(schedule_digest.get("scan_count") or 0),
+        "scan_limit": schedule_digest.get("scan_limit"),
+        "next_scan_limit": schedule_digest.get("next_scan_limit"),
+        "max_scan_limit": schedule_digest.get("max_scan_limit"),
+        "pagination_supported": bool(schedule_digest.get("pagination_supported")),
         "selected_count": int(schedule_digest.get("selected_count") or 0),
         "ready_count": int(schedule_digest.get("ready_count") or 0),
         "safe_to_submit_count": safe_count,
@@ -8447,6 +8468,10 @@ def _daily_candidate_schedule_shortfall_recovery(schedule_digest: dict[str, Any]
             "target_count": int(item.get("target_count") or 0),
             "ready_count": int(item.get("ready_count") or 0),
             "ready_shortfall_count": max(0, int(item.get("target_count") or 0) - int(item.get("ready_count") or 0)),
+            "scan_limit": item.get("scan_limit"),
+            "next_scan_limit": item.get("next_scan_limit"),
+            "max_scan_limit": item.get("max_scan_limit"),
+            "pagination_plan": item.get("pagination_plan") if isinstance(item.get("pagination_plan"), dict) else None,
             "status_endpoint": item.get("status_endpoint"),
             "summary_endpoint": item.get("summary_endpoint"),
         }
@@ -8465,6 +8490,11 @@ def _daily_candidate_schedule_shortfall_recovery(schedule_digest: dict[str, Any]
         "target_count": target_count,
         "selected_shortfall_count": selected_shortfall,
         "ready_shortfall_count": ready_shortfall,
+        "scan_count": int(schedule_digest.get("scan_count") or 0),
+        "scan_limit": schedule_digest.get("scan_limit"),
+        "next_scan_limit": schedule_digest.get("next_scan_limit"),
+        "max_scan_limit": schedule_digest.get("max_scan_limit"),
+        "pagination_supported": bool(schedule_digest.get("pagination_supported")),
         "shortfall_items": shortfall_items,
         "refill_requests": refill_requests,
         "fallback_schedule_request": {"schedules": schedules} if ready_shortfall else None,
@@ -8472,7 +8502,7 @@ def _daily_candidate_schedule_shortfall_recovery(schedule_digest: dict[str, Any]
         "recommended_endpoint": "/v1/jobs/candidates/daily/refill" if ready_shortfall else None,
         "recommended_method": "POST" if ready_shortfall else None,
         "recommended_request": first_refill_request,
-        "recommended_overrides": {"fallback_tool": "daily_candidates_schedule_job", "fallback_endpoint": "/v1/jobs/candidates/daily/schedule", "fallback_request": {"schedules": schedules} if ready_shortfall else None},
+        "recommended_overrides": {"scan_limit": schedule_digest.get("next_scan_limit") or schedule_digest.get("scan_limit"), "fallback_tool": "daily_candidates_schedule_job", "fallback_endpoint": "/v1/jobs/candidates/daily/schedule", "fallback_request": {"schedules": schedules} if ready_shortfall else None},
         "continue_when": "daily_candidate_refill_job.after_batch.daily_candidate_batch_publish_payload is ready, or ready_shortfall_count becomes 0",
         "stop_when": ["daily_candidate_refill_job.blockers is non-empty", "progress.candidate_job_count_delta=0 after refill", "schedule or policy blockers remain"],
     }
@@ -8481,12 +8511,14 @@ def _daily_candidate_schedule_shortfall_recovery(schedule_digest: dict[str, Any]
 def _daily_candidate_schedule_refill_request(item: dict[str, Any]) -> dict[str, Any]:
     context = item.get("request_context") if isinstance(item.get("request_context"), dict) else {}
     target = context.get("target_trackers") if context.get("target_trackers") is not None else item.get("target_trackers")
+    next_scan_limit = _daily_candidate_schedule_next_scan_limit(item)
     return {
         key: value
         for key, value in {
             "source_tracker": context.get("source_tracker") or item.get("source_tracker"),
             "target": target,
             "limit": int(context.get("limit") or item.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+            "scan_limit": next_scan_limit or context.get("scan_limit") or item.get("scan_limit"),
         }.items()
         if value is not None and value != ""
     }
@@ -8495,6 +8527,7 @@ def _daily_candidate_schedule_refill_request(item: dict[str, Any]) -> dict[str, 
 def _daily_candidate_schedule_rerun_request(item: dict[str, Any]) -> dict[str, Any]:
     context = item.get("request_context") if isinstance(item.get("request_context"), dict) else {}
     target = ",".join(context.get("target_trackers") or []) if isinstance(context.get("target_trackers"), list) else item.get("target_trackers")
+    next_scan_limit = _daily_candidate_schedule_next_scan_limit(item)
     return {
         key: value
         for key, value in {
@@ -8502,12 +8535,26 @@ def _daily_candidate_schedule_rerun_request(item: dict[str, Any]) -> dict[str, A
             "source_tracker": context.get("source_tracker") or item.get("source_tracker"),
             "target": target,
             "limit": int(context.get("limit") or item.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+            "scan_limit": next_scan_limit or context.get("scan_limit") or item.get("scan_limit"),
             "accept_rules": context.get("accept_rules"),
             "check_dupes": True,
             "base_dir": context.get("base_dir"),
         }.items()
         if value is not None and value != ""
     }
+
+
+def _daily_candidate_schedule_next_scan_limit(item: dict[str, Any]) -> int | None:
+    current = _bounded_int(item.get("scan_limit"), default=MAX_CANDIDATE_SCAN, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN)
+    maximum = _bounded_int(item.get("max_scan_limit"), default=HARD_MAX_CANDIDATE_SCAN, minimum=1, maximum=HARD_MAX_CANDIDATE_SCAN)
+    plan = item.get("pagination_plan") if isinstance(item.get("pagination_plan"), dict) else {}
+    recommended = plan.get("recommended_request") if isinstance(plan.get("recommended_request"), dict) else {}
+    for value in (recommended.get("scan_limit"), plan.get("next_scan_limit")):
+        if value:
+            return _bounded_int(value, default=current, minimum=1, maximum=maximum)
+    if current >= maximum:
+        return None
+    return min(maximum, current + MAX_CANDIDATE_SCAN)
 
 
 def _daily_candidate_schedule_batch_report_next_actions(safe_count: int, pending_count: int, blockers: list[str], daily_candidate_report: dict[str, Any]) -> list[str]:
@@ -8631,6 +8678,11 @@ def _daily_candidate_schedule_decision_report(schedule_digest: dict[str, Any]) -
         "decision": decision,
         "action": action,
         "target_count": target_count,
+        "scan_count": int(schedule_digest.get("scan_count") or 0),
+        "scan_limit": schedule_digest.get("scan_limit"),
+        "next_scan_limit": schedule_digest.get("next_scan_limit"),
+        "max_scan_limit": schedule_digest.get("max_scan_limit"),
+        "pagination_supported": bool(schedule_digest.get("pagination_supported")),
         "selected_count": selected_count,
         "ready_count": ready_count,
         "safe_to_submit_count": safe_count,
@@ -30505,12 +30557,12 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_delivery_final_report", "daily_candidate_schedule_execution_context", "daily_candidate_run_handoff", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_final_report", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
-                "digest_fields": ["items", "push_items", "push_payload", "candidate_executability_matrix", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_handoff", "candidate_control_summary", "daily_candidate_schedule_execution_context", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "digest_fields": ["items", "push_items", "push_payload", "candidate_executability_matrix", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_handoff", "candidate_control_summary", "daily_candidate_schedule_execution_context", "top_submit_requests", "submission_handoff", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
                 "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "publish_cards", "candidate_executability_matrix", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_target_fulfillment_report", "candidate_control_summary", "decision_summary", "submission_ready", "recommended_action"],
-                "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "pending_job_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
-                "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
+                "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "pending_job_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
+                "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "candidate_control_summary_fields": _candidate_response_contract()["candidate_control_summary_fields"],
-                "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
+                "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
                 "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "candidate_executability_matrix", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
                 "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "delivery_tool", "delivery_endpoint", "delivery_method", "delivery_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "candidate_executability_matrix", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_schedule_gate_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "pending_job_count", "publish_ready", "submission_ready", "notification_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
@@ -32017,6 +32069,14 @@ def _candidate_response_contract() -> dict[str, Any]:
             "recommended_action",
             "target_count",
             "scan_count",
+            "scan_limit",
+            "max_scan_limit",
+            "discovered_count",
+            "eligible_count",
+            "excluded_count",
+            "exclude_source_ids",
+            "skipped_source_ids",
+            "pagination_plan",
             "selected_count",
             "shortfall_count",
             "target_met",
@@ -32163,9 +32223,9 @@ def _candidate_response_contract() -> dict[str, Any]:
         "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "site_policy_profile_handoff", "site_policy_summary", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
         "execution_plan_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "request_context", "recommended_submit_requests", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_control_summary_fields": ["ready", "action", "decision", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "ready_shortfall_count", "target_met", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "shortfall_recovery", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
+        "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
+        "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
+        "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
         "policy_execution_handoff_fields": ["ready", "accepted_rules", "phase", "qbit", "seeding", "transfer_rules", "rule_obligations", "missing_by_category", "continue_when", "stop_when", "blockers", "next_actions"],
         "policy_coverage_fields": ["ready", "rule_obligations_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "recommendations"],
         "rule_fields": ["source_rules_url", "target_rules_urls", "source_fingerprint", "target_fingerprints", "fingerprint_status"],

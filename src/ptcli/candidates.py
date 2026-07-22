@@ -143,6 +143,14 @@ async def build_daily_candidates(
         discovered_count=len(discovered_seeds),
         eligible_count=len(seeds),
     )
+    digest["scan_limit"] = scan_limit
+    digest["max_scan_limit"] = HARD_MAX_CANDIDATE_SCAN
+    digest["discovered_count"] = len(discovered_seeds)
+    digest["eligible_count"] = len(seeds)
+    digest["excluded_count"] = len(skipped_source_ids)
+    digest["exclude_source_ids"] = excluded_source_ids
+    digest["skipped_source_ids"] = skipped_source_ids
+    digest["pagination_plan"] = pagination_plan
     return {
         "kind": "ptcli.daily_candidates",
         "status": status,

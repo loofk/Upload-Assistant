@@ -17614,6 +17614,7 @@ def test_daily_candidate_schedule_payload_normalizes_job_requests(monkeypatch) -
                     "source_tracker": "U2",
                     "target": "MTEAM",
                     "limit": 99,
+                    "scan_limit": 250,
                     "time": "09:30",
                     "accept_rules": True,
                 }
@@ -17627,6 +17628,7 @@ def test_daily_candidate_schedule_payload_normalizes_job_requests(monkeypatch) -
     assert schedule["name"] == "u2-to-mteam"
     assert schedule["job_endpoint"] == "/v1/jobs/candidates/daily"
     assert schedule["job_request"]["limit"] == 10
+    assert schedule["job_request"]["scan_limit"] == 200
     assert schedule["job_request"]["accept_rules"] is True
     assert schedule["schedule"]["time"] == "09:30"
     assert schedule["push_contract"]["items"] == "candidate_digest.push_items"
@@ -17666,6 +17668,7 @@ def test_daily_candidate_schedule_payload_exposes_env_template_when_missing(monk
     assert payload["schedule_handoff"]["ready"] is False
     assert payload["schedule_handoff"]["action"] == "configure_schedule"
     assert payload["schedule_handoff"]["env_example"]["json"][0]["limit"] == 10
+    assert payload["schedule_handoff"]["env_example"]["json"][0]["scan_limit"] == 50
     assert payload["schedule_handoff"]["env_example"]["json"][0]["confirm_upload"] is False
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in payload["schedule_handoff"]["env_example"]["shell"]
     assert payload["schedule_handoff"]["compose"]["daemon"] == "docker compose --profile daily up -d ptcli-daily-scheduler"
@@ -17677,6 +17680,16 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     digest = {
         "kind": "ptcli.daily_candidates_digest",
         "recommendation": "submit_top_candidate_when_confirmed",
+        "scan_count": 50,
+        "scan_limit": 50,
+        "max_scan_limit": 200,
+        "pagination_plan": {
+            "pagination_supported": True,
+            "scan_limit": 50,
+            "max_scan_limit": 200,
+            "next_scan_limit": 100,
+            "recommended_request": {"scan_limit": 100},
+        },
         "ready_count": 1,
         "top_candidate": {"source_tracker": "U2", "source_id": "60635"},
         "top_submit_request": {
@@ -17859,6 +17872,10 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["kind"] == "ptcli.daily_candidate_schedule_digest"
     assert payload["schedule_digest"]["ready_job_count"] == 1
     assert payload["schedule_digest"]["target_count"] == 10
+    assert payload["schedule_digest"]["scan_limit"] == 50
+    assert payload["schedule_digest"]["next_scan_limit"] == 100
+    assert payload["schedule_digest"]["max_scan_limit"] == 200
+    assert payload["schedule_digest"]["pagination_supported"] is True
     assert payload["schedule_digest"]["selected_count"] == 1
     assert payload["schedule_digest"]["shortfall_count"] == 9
     assert payload["schedule_digest"]["target_met"] is False
@@ -17879,6 +17896,10 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert schedule_report["scope"] == "schedule_batch"
     assert schedule_report["decision"] == "submit_ready"
     assert schedule_report["target_count"] == 10
+    assert schedule_report["scan_limit"] == 50
+    assert schedule_report["next_scan_limit"] == 100
+    assert schedule_report["max_scan_limit"] == 200
+    assert schedule_report["pagination_supported"] is True
     assert schedule_report["selected_count"] == 1
     assert schedule_report["ready_count"] == 1
     assert schedule_report["safe_to_submit_count"] == 1
@@ -17906,14 +17927,20 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert schedule_batch_report["shortfall_recovery"]["kind"] == "ptcli.daily_candidate_schedule_shortfall_recovery"
     assert schedule_batch_report["shortfall_recovery"]["action"] == "refill_daily_candidate_batch"
     assert schedule_batch_report["shortfall_recovery"]["ready_shortfall_count"] == 9
+    assert schedule_batch_report["shortfall_recovery"]["scan_limit"] == 50
+    assert schedule_batch_report["shortfall_recovery"]["next_scan_limit"] == 100
+    assert schedule_batch_report["shortfall_recovery"]["max_scan_limit"] == 200
+    assert schedule_batch_report["shortfall_recovery"]["pagination_supported"] is True
     assert schedule_batch_report["shortfall_recovery"]["shortfall_items"][0]["schedule_name"] == "u2-to-mteam"
     assert schedule_batch_report["shortfall_recovery"]["shortfall_items"][0]["source_tracker"] == "U2"
+    assert schedule_batch_report["shortfall_recovery"]["shortfall_items"][0]["next_scan_limit"] == 100
     assert schedule_batch_report["shortfall_recovery"]["recommended_tool"] == "daily_candidate_refill_job"
     assert schedule_batch_report["shortfall_recovery"]["recommended_endpoint"] == "/v1/jobs/candidates/daily/refill"
-    assert schedule_batch_report["shortfall_recovery"]["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10}
-    assert schedule_batch_report["shortfall_recovery"]["refill_requests"] == [{"source_tracker": "U2", "target": "MTEAM", "limit": 10}]
+    assert schedule_batch_report["shortfall_recovery"]["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "scan_limit": 100}
+    assert schedule_batch_report["shortfall_recovery"]["refill_requests"] == [{"source_tracker": "U2", "target": "MTEAM", "limit": 10, "scan_limit": 100}]
     assert schedule_batch_report["shortfall_recovery"]["fallback_schedule_request"]["schedules"][0]["source_tracker"] == "U2"
     assert schedule_batch_report["shortfall_recovery"]["fallback_schedule_request"]["schedules"][0]["target"] == "MTEAM"
+    assert schedule_batch_report["shortfall_recovery"]["fallback_schedule_request"]["schedules"][0]["scan_limit"] == 100
     assert schedule_batch_report["blockers"] == []
     assert payload["schedule_digest"]["push_payload"]["daily_candidate_batch_report"] == schedule_batch_report
     assert payload["schedule_digest"]["approval_queue"]["kind"] == "ptcli.daily_candidate_schedule_approval_queue"
@@ -21303,8 +21330,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_target_fulfillment_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "next_scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "pagination_supported" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "target_met" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_report_fields"]
+    assert "next_scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
+    assert "scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
+    assert "next_scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
     assert "submission_ready" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "approval_queue" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "approval_prompts" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
@@ -22826,6 +22860,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "top_safe_candidates" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "daily_candidate_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "candidate_control_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "scan_limit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "next_scan_limit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "pagination_supported" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "shortfall_count" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "target_met" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "submission_ready" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
@@ -22848,8 +22885,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "first_submit_request" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_report_fields"]
         assert "daily_candidate_batch_report_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "candidate_control_summary_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "scan_limit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_report_fields"]
+        assert "next_scan_limit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
         assert "shortfall_recovery" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
         assert "daily_candidate_shortfall_recovery_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "scan_limit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
+        assert "next_scan_limit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
         assert "shortfall_items" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
         assert "refill_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
         assert "fallback_schedule_request" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
@@ -23433,6 +23474,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_pagination_plan_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "excluded_count" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "scan_limit" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
+        assert "scan_limit" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "pagination_plan" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "pagination_plan" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "scan_limit" in tools_by_name["daily_candidates_job"]["input_schema"]["properties"]
         assert "dedupe" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
