@@ -816,6 +816,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/target/package/prepare": lambda payload: create_target_package_prepare_job(job_store, payload),
                 "/v1/jobs/target/upload": lambda payload: create_target_upload_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
+                "/v1/jobs/candidates/daily/refill": lambda payload: create_daily_candidate_refill_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
             if path.startswith("/v1/jobs/candidates/") and path.endswith("/submit"):
@@ -2536,6 +2537,45 @@ def create_daily_candidates_job(job_store: JobStore, request: dict[str, Any]) ->
     )
 
 
+def create_daily_candidate_refill_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create one safe daily-candidate refill job from the current batch shortfall."""
+    before_batch = job_store.daily_candidate_batch(request)
+    refill_plan = before_batch.get("daily_candidate_refill_plan") if isinstance(before_batch.get("daily_candidate_refill_plan"), dict) else {}
+    handoff = refill_plan.get("refill_job_handoff") if isinstance(refill_plan.get("refill_job_handoff"), dict) else {}
+    recommended_call = handoff.get("recommended_call") if isinstance(handoff.get("recommended_call"), dict) else {}
+    refill_request = recommended_call.get("request") if isinstance(recommended_call.get("request"), dict) else refill_plan.get("recommended_request")
+    refill_request = dict(refill_request) if isinstance(refill_request, dict) else {}
+    before_summary = before_batch.get("daily_candidate_batch_summary") if isinstance(before_batch.get("daily_candidate_batch_summary"), dict) else {}
+    excluded_source_ids = (
+        _string_list(handoff.get("excluded_source_ids") or refill_plan.get("exclude_source_ids_hint"))
+        or _daily_candidate_batch_source_ids(before_summary)
+        or _daily_candidate_existing_source_ids(job_store, before_batch.get("filters") if isinstance(before_batch.get("filters"), dict) else {})
+    )
+    if excluded_source_ids and "exclude_source_ids" not in refill_request:
+        refill_request["exclude_source_ids"] = excluded_source_ids
+    blockers = _string_list(refill_plan.get("blockers")) + _string_list(handoff.get("blockers"))
+    ready = bool(handoff.get("ready")) and bool(recommended_call.get("safe_to_call_now")) and bool(refill_request) and not blockers
+    if not ready:
+        return _daily_candidate_refill_job_result(
+            before_batch=before_batch,
+            after_batch=before_batch,
+            refill_job=None,
+            refill_request=refill_request or None,
+            blockers=blockers or ["daily_candidate_refill_plan.refill_job_handoff is not ready."],
+        )
+
+    refill_job = create_daily_candidates_job(job_store, refill_request)
+    followup_request = handoff.get("followup", {}).get("request") if isinstance(handoff.get("followup"), dict) and isinstance(handoff.get("followup", {}).get("request"), dict) else request
+    after_batch = job_store.daily_candidate_batch(followup_request if isinstance(followup_request, dict) else request)
+    return _daily_candidate_refill_job_result(
+        before_batch=before_batch,
+        after_batch=after_batch,
+        refill_job=refill_job,
+        refill_request=refill_request,
+        blockers=[],
+    )
+
+
 def create_materials_prepare_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
     """Create an asynchronous local-material preparation job."""
     normalized_request = _materials_prepare_request_context(request)
@@ -2672,6 +2712,142 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_run_next_actions(jobs, skipped, blockers),
     }
+
+
+def _daily_candidate_refill_job_result(
+    *,
+    before_batch: dict[str, Any],
+    after_batch: dict[str, Any],
+    refill_job: dict[str, Any] | None,
+    refill_request: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    before_summary = before_batch.get("daily_candidate_batch_summary") if isinstance(before_batch.get("daily_candidate_batch_summary"), dict) else {}
+    after_summary = after_batch.get("daily_candidate_batch_summary") if isinstance(after_batch.get("daily_candidate_batch_summary"), dict) else {}
+    before_job_count = int(before_summary.get("candidate_job_count") or 0)
+    after_job_count = int(after_summary.get("candidate_job_count") or 0)
+    before_ready_count = int(before_summary.get("ready_to_submit_count") or before_summary.get("ready_count") or 0)
+    after_ready_count = int(after_summary.get("ready_to_submit_count") or after_summary.get("ready_count") or 0)
+    job_id = refill_job.get("job_id") if isinstance(refill_job, dict) else None
+    ok = bool(refill_job) and not blockers
+    return {
+        "kind": "ptcli.daily_candidate_refill_job_result",
+        "status": "ok" if ok else "blocked",
+        "ok": ok,
+        "created": bool(refill_job),
+        "refill_job": refill_job,
+        "refill_job_id": job_id,
+        "refill_request": refill_request,
+        "before": {
+            "candidate_job_count": before_job_count,
+            "ready_count": before_ready_count,
+            "ready_shortfall_count": (before_batch.get("daily_candidate_refill_plan") or {}).get("ready_shortfall_count") if isinstance(before_batch.get("daily_candidate_refill_plan"), dict) else None,
+        },
+        "after": {
+            "candidate_job_count": after_job_count,
+            "ready_count": after_ready_count,
+            "ready_shortfall_count": (after_batch.get("daily_candidate_refill_plan") or {}).get("ready_shortfall_count") if isinstance(after_batch.get("daily_candidate_refill_plan"), dict) else None,
+        },
+        "progress": {
+            "candidate_job_count_delta": after_job_count - before_job_count,
+            "ready_count_delta": after_ready_count - before_ready_count,
+        },
+        "before_batch": before_batch,
+        "after_batch": after_batch,
+        "followup": {
+            "tool": "daily_candidate_batch_status",
+            "endpoint": "/v1/jobs/candidates/daily/batch",
+            "method": "GET",
+            "request": after_batch.get("filters"),
+        },
+        "continue_when": "after_batch.daily_candidate_refill_plan.ready_shortfall_count reaches 0, or created refill jobs expose new safe candidates for user-approved submission.",
+        "stop_when": [
+            "blockers is non-empty",
+            "progress.candidate_job_count_delta=0 after a refill attempt",
+            "after_batch.daily_candidate_refill_plan.action=resolve_blockers",
+        ],
+        "blockers": blockers,
+        "next_actions": _daily_candidate_refill_job_result_next_actions(ok, after_batch, blockers),
+    }
+
+
+def _daily_candidate_batch_source_ids(summary: dict[str, Any]) -> list[str]:
+    source_ids: list[str] = []
+    for item in summary.get("items", []) if isinstance(summary.get("items"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        for source_id in _string_list(item.get("safe_source_ids")):
+            _append_unique_string(source_ids, source_id)
+        for request in item.get("submit_requests", []) if isinstance(item.get("submit_requests"), list) else []:
+            if isinstance(request, dict):
+                _append_unique_string(source_ids, request.get("source_id"))
+        for candidate in _daily_candidate_batch_item_candidates(item):
+            _append_unique_string(source_ids, candidate.get("source_id"))
+    return source_ids
+
+
+def _append_unique_string(items: list[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if text and text not in items:
+        items.append(text)
+
+
+def _daily_candidate_batch_item_candidates(item: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    digest = item.get("candidate_digest") if isinstance(item.get("candidate_digest"), dict) else {}
+    for key in ("top_candidate", "top_safe_candidates", "push_items"):
+        value = digest.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+        elif isinstance(value, list):
+            candidates.extend(candidate for candidate in value if isinstance(candidate, dict))
+    return candidates
+
+
+def _daily_candidate_existing_source_ids(job_store: JobStore, filters: dict[str, Any]) -> list[str]:
+    source_tracker = str(filters.get("source_tracker") or "").strip().upper()
+    target_trackers = _daily_candidate_batch_targets(filters.get("target_trackers") or filters.get("target"))
+    source_ids: list[str] = []
+    for job in job_store._read_all_jobs():
+        if job.get("kind") != "ptcli.daily_candidates":
+            continue
+        request = job.get("request") if isinstance(job.get("request"), dict) else {}
+        if source_tracker and str(request.get("source_tracker") or "").strip().upper() != source_tracker:
+            continue
+        if target_trackers and _daily_candidate_batch_targets(request.get("target_trackers") or request.get("target")) != target_trackers:
+            continue
+        result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        digest = result.get("digest") if isinstance(result.get("digest"), dict) else job.get("candidate_digest") if isinstance(job.get("candidate_digest"), dict) else {}
+        for candidate in _daily_candidate_digest_candidates(digest):
+            _append_unique_string(source_ids, candidate.get("source_id"))
+        for candidate in result.get("candidates", []) if isinstance(result.get("candidates"), list) else []:
+            if isinstance(candidate, dict):
+                _append_unique_string(source_ids, candidate.get("source_id"))
+    return source_ids
+
+
+def _daily_candidate_digest_candidates(digest: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for key in ("top_candidate", "top_safe_candidates", "push_items", "candidates"):
+        value = digest.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+        elif isinstance(value, list):
+            candidates.extend(candidate for candidate in value if isinstance(candidate, dict))
+    return candidates
+
+
+def _daily_candidate_refill_job_result_next_actions(ok: bool, after_batch: dict[str, Any], blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve daily_candidate_refill_job_result.blockers, then retry the refill endpoint."]
+    refill_plan = after_batch.get("daily_candidate_refill_plan") if isinstance(after_batch.get("daily_candidate_refill_plan"), dict) else {}
+    shortfall = int(refill_plan.get("ready_shortfall_count") or 0)
+    refill_handoff = refill_plan.get("refill_job_handoff") if isinstance(refill_plan.get("refill_job_handoff"), dict) else {}
+    if ok and shortfall > 0 and refill_handoff.get("ready") is True:
+        return [f"Call daily_candidate_refill_job again to continue filling {shortfall} missing ready candidate(s), then read after_batch."]
+    if ok:
+        return ["Read after_batch.daily_candidate_batch_publish_payload, then deliver the digest or ask for user approval before submitting candidates."]
+    return ["Inspect before_batch.daily_candidate_refill_plan.refill_job_handoff before retrying."]
 
 
 async def retorrent_check(request: dict[str, Any]) -> dict[str, Any]:
@@ -26707,6 +26883,21 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
         },
         {
+            "name": "daily_candidate_refill_job",
+            "method": "POST",
+            "path": "/v1/jobs/candidates/daily/refill",
+            "description": "Read the current daily-candidate batch and create one additional discovery job only when refill_job_handoff.safe_to_call_now=true. This helps fill the daily target without submitting or uploading torrents.",
+            "input_schema": daily_candidate_batch_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "created", "refill_job", "refill_job_id", "refill_request", "before", "after", "progress", "before_batch", "after_batch", "followup", "blockers", "next_actions"],
+                "before_after_fields": ["candidate_job_count", "ready_count", "ready_shortfall_count"],
+                "progress_fields": ["candidate_job_count_delta", "ready_count_delta"],
+                "followup_fields": ["tool", "endpoint", "method", "request"],
+            },
+            "workflow_hints": {"read_before": "daily_candidate_batch_status", "repeat_until": "after.ready_shortfall_count=0 or blockers is non-empty", "submit_with": "submit_daily_candidate_job only after user approval"},
+            "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
             "name": "submit_daily_candidate_job",
             "method": "POST",
             "path": "/v1/jobs/candidates/{job_id}/submit",
@@ -29074,6 +29265,26 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    daily_candidate_refill_response_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "created": {"type": "boolean"},
+            "refill_job": {"type": ["object", "null"]},
+            "refill_job_id": {"type": ["string", "null"]},
+            "refill_request": {"type": ["object", "null"]},
+            "before": {"type": "object"},
+            "after": {"type": "object"},
+            "progress": {"type": "object"},
+            "before_batch": {"type": "object"},
+            "after_batch": {"type": "object"},
+            "followup": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     candidate_request_schema = {
         "type": "object",
         "required": ["source_tracker", "target"],
@@ -29088,6 +29299,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "exclude_source_ids": {"type": "array", "items": {"type": "string"}, "description": "Source torrent ids already covered by this daily batch; used by refill calls to avoid duplicate submissions."},
         },
     }
+    daily_candidate_batch_schema = _daily_candidate_batch_status_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_delivery_request_schema = _daily_candidate_delivery_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -30091,6 +30303,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_request_schema}}},
                     "responses": {"200": {"description": "Queued daily-candidate discovery job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/candidates/daily/refill": {
+                "post": {
+                    "operationId": "createDailyRetorrentCandidateRefillJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": daily_candidate_batch_schema}}},
+                    "responses": {"200": {"description": "Create one safe daily-candidate refill job and return before/after batch evidence.", "content": {"application/json": {"schema": daily_candidate_refill_response_schema}}}},
                 }
             },
             "/v1/jobs/candidates/{job_id}/submit": {

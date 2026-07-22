@@ -13804,6 +13804,82 @@
       }
     },
     {
+      "name": "daily_candidate_refill_job",
+      "method": "POST",
+      "path": "/v1/jobs/candidates/daily/refill",
+      "description": "Read the current daily-candidate batch and create one additional discovery job only when refill_job_handoff.safe_to_call_now=true. This helps fill the daily target without submitting or uploading torrents.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional source tracker filter, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": "string",
+            "description": "Optional target tracker filter, e.g. MTEAM."
+          },
+          "target_trackers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional target tracker filter list."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "created",
+          "refill_job",
+          "refill_job_id",
+          "refill_request",
+          "before",
+          "after",
+          "progress",
+          "before_batch",
+          "after_batch",
+          "followup",
+          "blockers",
+          "next_actions"
+        ],
+        "before_after_fields": [
+          "candidate_job_count",
+          "ready_count",
+          "ready_shortfall_count"
+        ],
+        "progress_fields": [
+          "candidate_job_count_delta",
+          "ready_count_delta"
+        ],
+        "followup_fields": [
+          "tool",
+          "endpoint",
+          "method",
+          "request"
+        ]
+      },
+      "workflow_hints": {
+        "read_before": "daily_candidate_batch_status",
+        "repeat_until": "after.ready_shortfall_count=0 or blockers is non-empty",
+        "submit_with": "submit_daily_candidate_job only after user approval"
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "submit_daily_candidate_job",
       "method": "POST",
       "path": "/v1/jobs/candidates/{job_id}/submit",
@@ -34779,7 +34855,7 @@
       }
     }
   ],
-  "tool_count": 44,
+  "tool_count": 45,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

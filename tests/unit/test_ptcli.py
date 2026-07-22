@@ -16580,6 +16580,78 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert "rerun returns no new safe candidates" in refill_plan["stop_when"][0]
 
 
+def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, tmp_path) -> None:
+    requests: list[dict] = []
+
+    async def fake_daily_candidates(request):
+        requests.append(dict(request))
+        index = len(requests)
+        source_id = "60635" if index == 1 else "99999"
+        digest = {
+            "kind": "ptcli.daily_candidates_digest",
+            "target_count": 10,
+            "scan_count": 50,
+            "count": 1,
+            "selected_count": 1,
+            "ready_count": 1,
+            "shortfall_count": 9,
+            "top_candidate": {"source_tracker": "U2", "source_id": source_id, "title": f"Example.{source_id}"},
+            "top_submit_request": {"source": f"https://u2.dmhy.org/details.php?id={source_id}", "source_url": f"https://u2.dmhy.org/details.php?id={source_id}", "source_tracker": "U2", "target": "MTEAM"},
+            "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+            "top_submit_tool": "source_url_retorrent_job",
+            "push_items": [],
+            "blockers": ["ready_target_shortfall"],
+            "next_actions": [],
+        }
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "partial",
+            "ok": True,
+            "target_count": 10,
+            "scan_count": 50,
+            "count": 1,
+            "ready_count": 1,
+            "shortfall_count": 9,
+            "digest": digest,
+            "result": {
+                "kind": "ptcli.daily_candidates",
+                "target_count": 10,
+                "scan_count": 50,
+                "count": 1,
+                "ready_count": 1,
+                "shortfall_count": 9,
+                "digest": digest,
+                "candidates": [{"status": "ready", "source_id": source_id}],
+            },
+            "candidates": [{"status": "ready", "source_id": source_id}],
+            "blockers": ["ready_target_shortfall"],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    first_job = ptcli_service.create_daily_candidates_job(store, {"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    refill = ptcli_service.create_daily_candidate_refill_job(store, {"source_tracker": "U2", "target": "MTEAM"})
+
+    assert refill["kind"] == "ptcli.daily_candidate_refill_job_result"
+    assert refill["status"] == "ok"
+    assert refill["ok"] is True
+    assert refill["created"] is True
+    assert refill["refill_job_id"] != first_job["job_id"]
+    assert refill["refill_job"]["kind"] == "ptcli.daily_candidates"
+    assert refill["refill_request"]["source_tracker"] == "U2"
+    assert refill["refill_request"]["target"] == "MTEAM"
+    assert refill["refill_request"]["exclude_source_ids"] == ["60635"]
+    assert requests[1]["exclude_source_ids"] == ["60635"]
+    assert refill["before"]["candidate_job_count"] == 1
+    assert refill["after"]["candidate_job_count"] == 2
+    assert refill["progress"]["candidate_job_count_delta"] == 1
+    assert refill["followup"]["tool"] == "daily_candidate_batch_status"
+    assert refill["followup"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
+    assert refill["after_batch"]["daily_candidate_batch_summary"]["candidate_job_count"] == 2
+
+
 def test_daily_candidate_final_report_exposes_completion_evidence() -> None:
     complete_job = {
         "retorrent_job_id": "job-retorrent-1",
@@ -19267,6 +19339,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/candidates/daily/deliver" in paths
     assert "/v1/jobs/candidates/daily" in paths
+    assert "/v1/jobs/candidates/daily/refill" in paths
     assert "/v1/jobs/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily/batch" in paths
     assert "/v1/qbit/inject" in paths
@@ -19399,6 +19472,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
     assert "exclude_source_ids" in tool_by_name["daily_candidates_job"]["input_schema"]["properties"]
+    assert tool_by_name["daily_candidate_refill_job"]["path"] == "/v1/jobs/candidates/daily/refill"
+    assert tool_by_name["daily_candidate_refill_job"]["method"] == "POST"
+    assert tool_by_name["daily_candidate_refill_job"]["safety"]["live_upload"] is False
+    assert "refill_job_id" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
+    assert "before_batch" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
+    assert "after_batch" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
     assert tool_by_name["daily_candidate_delivery"]["path"] == "/v1/candidates/daily/deliver"
     assert tool_by_name["daily_candidate_delivery"]["method"] == "POST"
     assert "daily_candidate_batch_publish_payload" in tool_by_name["daily_candidate_delivery"]["input_schema"]["properties"]
@@ -20563,6 +20642,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/candidates/daily/deliver" in openapi["paths"]
     assert "file_delivery" in openapi["paths"]["/v1/candidates/daily/deliver"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
+    assert "/v1/jobs/candidates/daily/refill" in openapi["paths"]
     assert "/v1/jobs/candidates/daily/schedule" in openapi["paths"]
     assert "/v1/jobs/candidates/daily/batch" in openapi["paths"]
     assert "/v1/jobs" in openapi["paths"]
@@ -20841,6 +20921,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_run_handoff" in schedule_jobs_schema["properties"]
     assert "daily_candidate_final_report" in schedule_jobs_schema["properties"]
     assert "agent_decision" in schedule_jobs_schema["properties"]
+    refill_schema = openapi["paths"]["/v1/jobs/candidates/daily/refill"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "refill_job_id" in refill_schema["properties"]
+    assert "before_batch" in refill_schema["properties"]
+    assert "after_batch" in refill_schema["properties"]
     batch_status_schema = openapi["paths"]["/v1/jobs/candidates/daily/batch"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "daily_candidate_batch_summary" in batch_status_schema["properties"]
     assert "daily_candidate_batch_gate" in batch_status_schema["properties"]
@@ -21193,7 +21277,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["target_upload"].endswith("/v1/target/upload")
         assert payload["discovery"]["target_upload_job"].endswith("/v1/jobs/target/upload")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidate_refill_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert "ready_to_submit" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "submitted_running" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -21532,6 +21616,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["submit_daily_candidate_job"]["input_schema"]["required"] == ["job_id"]
         assert "overrides" in tools_by_name["submit_daily_candidate_job"]["input_schema"]["properties"]
         assert "confirm_upload=true" in tools_by_name["submit_daily_candidate_job"]["safety"]["requires_confirmation"]
+        assert tools_by_name["daily_candidate_refill_job"]["path"] == "/v1/jobs/candidates/daily/refill"
+        assert "after_batch" in tools_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
+        assert tools_by_name["daily_candidate_refill_job"]["safety"]["live_upload"] is False
         assert tools_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
         assert "job_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "schedule_digest" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
