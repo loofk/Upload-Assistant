@@ -21929,9 +21929,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "policy_execution_targets" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "one_call_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "policy_execution_targets_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "request_defaults" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["policy_execution_targets_fields"]
     assert "policy_config_apply_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "duplicate_check_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "one_call_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
@@ -22821,9 +22824,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "policy_execution_targets" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_config_apply_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "one_call_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "policy_execution_targets_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "request_defaults" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["policy_execution_targets_fields"]
         assert "policy_config_apply_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_check_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
@@ -25698,6 +25704,16 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["policy_execution_summary"]["ready"] is True
     assert payload["policy_execution_handoff"]["ready"] is True
     assert payload["policy_execution_handoff"]["recommended_tool"] == "readiness_bundle"
+    assert payload["policy_execution_targets"]["ready"] is True
+    assert payload["policy_execution_targets"]["source"]["role_key"] == "source:U2"
+    assert payload["policy_execution_targets"]["source"]["qbit"]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert payload["policy_execution_targets"]["targets"][0]["role_key"] == "target:MTEAM"
+    assert payload["policy_execution_targets"]["targets"][0]["qbit"]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert payload["policy_execution_targets"]["request_defaults"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
+    assert "next_call" in payload["one_call_handoff"]["read"]
     assert payload["policy_config_apply_handoff"]["ready"] is True
     assert payload["policy_config_apply_handoff"]["verification"]["request"]["source_tracker"] == "U2"
     assert payload["policy_config_apply_handoff"]["verification"]["request"]["target"] == "MTEAM"

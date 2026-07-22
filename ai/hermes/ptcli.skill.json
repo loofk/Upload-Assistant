@@ -1206,6 +1206,7 @@
           "readiness_bundle",
           "policy_execution_summary",
           "policy_execution_handoff",
+          "policy_execution_targets",
           "policy_config_apply_handoff",
           "job_template",
           "job_creation_handoff",
@@ -1238,6 +1239,20 @@
           "next_step",
           "blockers",
           "next_actions"
+        ],
+        "policy_execution_targets_fields": [
+          "ready",
+          "status",
+          "source",
+          "targets",
+          "request_defaults",
+          "qbit",
+          "seeding",
+          "rules",
+          "enforcement",
+          "blockers",
+          "next_actions",
+          "safety"
         ],
         "policy_config_apply_handoff_fields": [
           "ready",

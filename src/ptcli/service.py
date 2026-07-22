@@ -1843,6 +1843,7 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
     policy_execution_handoff = live_readiness.get("policy_execution_handoff") if isinstance(live_readiness.get("policy_execution_handoff"), dict) else None
     if policy_execution_handoff is None and isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_handoff"), dict):
         policy_execution_handoff = site_policies["policy_execution_handoff"]
+    policy_execution_targets = site_policies.get("policy_execution_targets") if isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_targets"), dict) else None
     policy_config_apply_handoff = site_policies.get("policy_config_apply_handoff") if isinstance(site_policies, dict) and isinstance(site_policies.get("policy_config_apply_handoff"), dict) else None
     source_reference = live_readiness.get("source") if isinstance(live_readiness.get("source"), dict) else None
     target_trackers = live_readiness.get("target_trackers")
@@ -1882,6 +1883,7 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
         "readiness_bundle": readiness,
         "policy_execution_summary": policy_execution_summary,
         "policy_execution_handoff": policy_execution_handoff,
+        "policy_execution_targets": policy_execution_targets,
         "policy_config_apply_handoff": policy_config_apply_handoff,
         "job_template": manual_job_template,
         "job_creation_handoff": _source_url_preflight_job_creation_handoff(manual_job_template, ready_to_create_job),
@@ -1991,7 +1993,7 @@ def _source_url_preflight_one_call_handoff(manual_job_template: dict[str, Any] |
         "does_check_duplicates_before_submit": True,
         "creates_job_only_when_duplicate_clear": True,
         "requires_before_call": ["accept_rules=true", "confirm_upload=true", "site policy ready", "source_url resolved", "target present"],
-        "read": ["check_and_submit_gate", "duplicate_check", "job_id", "status_endpoint", "summary_endpoint", "check_and_submit_policy_report", "check_and_submit_final_report", "blockers"],
+        "read": ["check_and_submit_gate", "duplicate_check", "job_id", "status_endpoint", "summary_endpoint", "check_and_submit_policy_report", "check_and_submit_final_report", "next_call", "blockers"],
         "continue_when": "check_and_submit_gate.duplicate_clear=true and job_id is returned",
         "stop_when": ["duplicate_check.exists=true", "check_and_submit_gate.action=resolve_gate_blockers", "blockers is non-empty"],
         "after_submit": {
@@ -33070,9 +33072,10 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
 
 def _source_url_preflight_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "one_call_handoff", "readiness_bundle", "policy_execution_summary", "policy_execution_handoff", "policy_config_apply_handoff", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "one_call_handoff", "readiness_bundle", "policy_execution_summary", "policy_execution_handoff", "policy_execution_targets", "policy_config_apply_handoff", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
         "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "blockers"],
         "policy_execution_handoff_fields": ["ready", "phase", "qbit", "seeding", "transfer_rules", "rule_obligations", "config", "next_step", "blockers", "next_actions"],
+        "policy_execution_targets_fields": ["ready", "status", "source", "targets", "request_defaults", "qbit", "seeding", "rules", "enforcement", "blockers", "next_actions", "safety"],
         "policy_config_apply_handoff_fields": ["ready", "status", "action", "preferred_patch", "patch_paths", "manual_review", "edit_config", "verification", "next_step", "blockers", "next_actions"],
         "duplicate_check_fields": ["searched", "status", "exists", "count", "dupes", "reason", "ready_to_check", "next_tool", "next_endpoint", "next_request", "continue_when", "stop_when"],
         "duplicate_handoff_fields": ["ready", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when", "then_tool", "then_endpoint", "then_request"],
@@ -35025,6 +35028,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "readiness_bundle": {"type": "object"},
             "policy_execution_summary": {"type": ["object", "null"]},
             "policy_execution_handoff": {"type": ["object", "null"]},
+            "policy_execution_targets": {"type": ["object", "null"]},
             "policy_config_apply_handoff": {"type": ["object", "null"]},
             "job_template": {"type": ["object", "null"]},
             "job_creation_handoff": {"type": "object"},
