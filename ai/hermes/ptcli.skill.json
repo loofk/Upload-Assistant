@@ -188,6 +188,7 @@
     "all_preflight_signals": "readiness_bundle",
     "rules_and_rate_limits": "site_policies",
     "daily_candidates": "daily_candidates_schedule_job",
+    "deliver_daily_candidate_digest": "daily_candidate_delivery",
     "submit_approved_daily_candidate": "submit_daily_candidate_job",
     "inspect_or_poll_job": "get_job_status",
     "read_final_job_result": "get_job_summary",
@@ -628,6 +629,21 @@
           ],
           "continue_when": "schedule_digest.pending_job_count=0 and schedule_digest.submission_handoff.ready=true",
           "repeat_when": "schedule_digest.pending_job_count>0"
+        },
+        {
+          "step": "deliver_candidate_digest",
+          "tool": "daily_candidate_delivery",
+          "request_from": "notification_payload or daily_candidate_batch_publish_payload",
+          "read": [
+            "file_delivery",
+            "webhook_delivery",
+            "payload_fingerprint",
+            "evidence_contract"
+          ],
+          "continue_when": "ok=true",
+          "stop_when": [
+            "blockers is non-empty"
+          ]
         },
         {
           "step": "submit_approved_candidate",
@@ -15247,6 +15263,126 @@
           "blockers",
           "next_actions"
         ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "daily_candidate_delivery",
+      "method": "POST",
+      "path": "/v1/candidates/daily/deliver",
+      "description": "Deliver an already-built daily candidate notification or batch publish payload to local handoff files and optionally a webhook. This endpoint never submits candidates, uploads torrents, contacts trackers, or contacts qBittorrent.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "notification_payload": {
+            "type": "object",
+            "description": "notification_payload from daily_candidates_schedule_job."
+          },
+          "daily_candidate_batch_publish_payload": {
+            "type": "object",
+            "description": "daily_candidate_batch_publish_payload from daily_candidate_batch_status."
+          },
+          "publish_payload": {
+            "type": "object",
+            "description": "Alias for daily_candidate_batch_publish_payload."
+          },
+          "delivery_handoff": {
+            "type": "object"
+          },
+          "daily_candidate_delivery_handoff": {
+            "type": "object"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "Local handoff directory. Defaults to PTCLI_DAILY_CANDIDATE_OUTPUT_DIR or /Upload-Assistant/tmp/daily-candidates."
+          },
+          "write_files": {
+            "type": "boolean",
+            "default": true
+          },
+          "webhook_url": {
+            "type": "string",
+            "description": "Optional webhook URL. Only used when explicitly supplied."
+          },
+          "use_env_webhook": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true and webhook_url is missing, use PTCLI_DAILY_CANDIDATE_WEBHOOK_URL."
+          },
+          "webhook_timeout": {
+            "type": "number",
+            "default": 10
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "kind",
+          "status",
+          "ok",
+          "ready",
+          "dry_run",
+          "mutates_state",
+          "uploads",
+          "contacts_trackers",
+          "contacts_qbittorrent",
+          "payload_fingerprint",
+          "notification_payload",
+          "daily_candidate_batch_publish_payload",
+          "delivery_handoff",
+          "file_delivery",
+          "webhook_delivery",
+          "evidence_contract",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "file_delivery_fields": [
+          "attempted",
+          "ok",
+          "dry_run",
+          "output_dir",
+          "json",
+          "text",
+          "json_exists",
+          "text_exists",
+          "blocker"
+        ],
+        "webhook_delivery_fields": [
+          "attempted",
+          "ok",
+          "dry_run",
+          "url",
+          "status_code",
+          "error",
+          "blocker"
+        ],
+        "evidence_contract_fields": [
+          "read_after_delivery",
+          "candidate_digest_ref",
+          "completion_evidence_refs",
+          "stop_when"
+        ],
+        "safety_fields": [
+          "delivery_only",
+          "submits_candidates",
+          "uploads_torrents",
+          "requires_upload_confirmation",
+          "safe_to_retry"
+        ]
+      },
+      "workflow_hints": {
+        "after": "daily_candidate_batch_status or daily_candidates_schedule_job",
+        "submit_with": "submit_daily_candidate_job only after user approval"
       },
       "safety": {
         "mutates_state": false,
@@ -33290,7 +33426,7 @@
       }
     }
   ],
-  "tool_count": 43,
+  "tool_count": 44,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

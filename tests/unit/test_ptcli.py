@@ -17398,6 +17398,55 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert "export PTCLI_READINESS_DAILY_CANDIDATE_SHORTFALL=9" in shell_output
 
 
+def test_daily_candidate_delivery_payload_writes_handoff_files(tmp_path) -> None:
+    publish_payload = {
+        "kind": "ptcli.daily_candidate_batch_publish_payload",
+        "ready": True,
+        "status": "ready_to_report",
+        "title": "Daily PT candidates",
+        "summary": "1 candidate complete",
+        "message": "#1 U2-60635 Example",
+        "items": [{"source_id": "60635", "title": "Example"}],
+        "top_item": {"source_id": "60635", "title": "Example"},
+        "completion_items": [{"source_id": "60635", "qbit_enforcement_ready": True, "qbit_execution_ready": True, "uploaded_seeding_ready": True}],
+        "completion_report": {"completed_jobs": [{"source_id": "60635", "uploaded_seeding_evidence": {"ready": True}}]},
+        "approval_queue": {"items": []},
+    }
+
+    payload = ptcli_service.daily_candidate_delivery_payload(
+        {
+            "daily_candidate_batch_publish_payload": publish_payload,
+            "delivery_handoff": {"kind": "ptcli.daily_candidate_deployment_delivery_handoff", "ready": True},
+            "output_dir": str(tmp_path),
+        }
+    )
+
+    assert payload["kind"] == "ptcli.daily_candidate_delivery_result"
+    assert payload["status"] == "delivered"
+    assert payload["ok"] is True
+    assert payload["mutates_state"] is False
+    assert payload["uploads"] is False
+    assert payload["contacts_trackers"] is False
+    assert payload["contacts_qbittorrent"] is False
+    assert payload["payload_fingerprint"]
+    assert payload["notification_payload"]["top_item"]["source_id"] == "60635"
+    assert payload["daily_candidate_batch_publish_payload"] == publish_payload
+    assert payload["file_delivery"]["attempted"] is True
+    assert payload["file_delivery"]["ok"] is True
+    assert payload["webhook_delivery"]["attempted"] is False
+    assert payload["safety"]["delivery_only"] is True
+    assert payload["safety"]["submits_candidates"] is False
+    assert "daily_candidate_batch_publish_payload.completion_items[].uploaded_seeding_ready" in payload["evidence_contract"]["completion_evidence_refs"]
+    notification_json = Path(payload["file_delivery"]["json"])
+    notification_text = Path(payload["file_delivery"]["text"])
+    assert notification_json == tmp_path / "ptcli-daily-candidates-notification.json"
+    assert notification_text == tmp_path / "ptcli-daily-candidates-notification.txt"
+    written = json.loads(notification_json.read_text(encoding="utf-8"))
+    assert written["daily_candidate_batch_publish_payload"]["top_item"]["source_id"] == "60635"
+    assert written["safety"]["uploads"] is False
+    assert "#1 U2-60635 Example" in notification_text.read_text(encoding="utf-8")
+
+
 def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys) -> None:
     async def fake_daily_candidates(_request):
         return {
@@ -18927,6 +18976,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/site-policies/rule-review" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/candidates/daily/schedule" in paths
+    assert "/v1/candidates/daily/deliver" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily/batch" in paths
@@ -19060,6 +19110,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
     assert "exclude_source_ids" in tool_by_name["daily_candidates_job"]["input_schema"]["properties"]
+    assert tool_by_name["daily_candidate_delivery"]["path"] == "/v1/candidates/daily/deliver"
+    assert tool_by_name["daily_candidate_delivery"]["method"] == "POST"
+    assert "daily_candidate_batch_publish_payload" in tool_by_name["daily_candidate_delivery"]["input_schema"]["properties"]
+    assert "file_delivery" in tool_by_name["daily_candidate_delivery"]["response_contract"]["required_fields"]
+    assert "webhook_delivery" in tool_by_name["daily_candidate_delivery"]["response_contract"]["required_fields"]
+    assert "completion_evidence_refs" in tool_by_name["daily_candidate_delivery"]["response_contract"]["evidence_contract_fields"]
+    assert tool_by_name["daily_candidate_delivery"]["safety"]["live_upload"] is False
     assert tool_by_name["daily_candidate_batch_status"]["path"] == "/v1/jobs/candidates/daily/batch"
     assert tool_by_name["daily_candidate_batch_status"]["method"] == "GET"
     assert "source_tracker" in tool_by_name["daily_candidate_batch_status"]["input_schema"]["properties"]
@@ -20151,6 +20208,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/from-url/check-and-submit" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
     assert "/v1/candidates/daily/schedule" in openapi["paths"]
+    assert "/v1/candidates/daily/deliver" in openapi["paths"]
+    assert "file_delivery" in openapi["paths"]["/v1/candidates/daily/deliver"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
     assert "/v1/jobs/candidates/daily/schedule" in openapi["paths"]
     assert "/v1/jobs/candidates/daily/batch" in openapi["paths"]
@@ -20573,9 +20632,9 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert daily_ready["status"] == "ok"
     assert daily_ready["request_template"]["source_tracker"] == "U2"
     assert daily_ready["request_template"]["submission_overrides"]["confirm_upload"] is True
-    assert [step["tool"] for step in daily_ready["steps"]] == ["readiness_bundle", "daily_candidates_schedule_job", "submit_daily_candidate_job"]
+    assert [step["tool"] for step in daily_ready["steps"]] == ["readiness_bundle", "daily_candidates_schedule_job", "daily_candidate_delivery", "submit_daily_candidate_job"]
     assert daily_ready["steps"][1]["request"]["schedules"][0]["source_tracker"] == "U2"
-    assert daily_ready["steps"][2]["request"]["overrides"]["save_path"] == "/downloads"
+    assert daily_ready["steps"][3]["request"]["overrides"]["save_path"] == "/downloads"
     assert "Create daily candidate schedule jobs" in daily_ready["next_actions"][0]
 
 
@@ -20671,8 +20730,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
     daily_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "daily_candidates")
     assert daily_workflow["tool"] == "daily_candidates_schedule_job"
-    assert daily_workflow["runbook"][2]["tool"] == "submit_daily_candidate_job"
-    assert "policy_application_handoff" in daily_workflow["runbook"][2]["read"]
+    assert daily_workflow["runbook"][2]["tool"] == "daily_candidate_delivery"
+    assert "payload_fingerprint" in daily_workflow["runbook"][2]["read"]
+    assert daily_workflow["runbook"][3]["tool"] == "submit_daily_candidate_job"
+    assert "policy_application_handoff" in daily_workflow["runbook"][3]["read"]
     retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
     assert retorrent_tool["input_schema"]["required"] == ["source", "target"]
     assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
