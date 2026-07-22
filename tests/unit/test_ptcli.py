@@ -18086,6 +18086,8 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["delivery_result"] == payload["delivery_result"]
     assert summary["delivery_audit"] == payload["delivery_audit"]
     assert summary["run_and_deliver_report"] == payload["run_and_deliver_report"]
+    assert summary["daily_candidate_target_fulfillment_report"] == payload["daily_candidate_target_fulfillment_report"]
+    assert summary["daily_candidate_target_fulfillment_report"]["target"]["shortfall_count"] == 9
     assert summary["run_and_deliver_result"]["kind"] == "ptcli.daily_candidate_run_and_deliver"
     assert payload["run_and_deliver_report"]["notification_delivered"] is True
     assert payload["delivery_result"]["run_and_deliver_report"]["notification_delivered"] is True
@@ -18378,6 +18380,15 @@ def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_
     assert payload["last_run"]["delivery_result"]["status"] == "delivered"
     assert payload["last_run"]["delivery_result"]["file_delivery"]["ok"] is True
     assert payload["last_run"]["delivery_result"]["webhook_delivery"]["attempted"] is False
+    final_report = payload["daily_scheduler_final_report"]
+    assert final_report["kind"] == "ptcli.daily_scheduler_final_report"
+    assert final_report["ready"] is True
+    assert final_report["mode"] == "once"
+    assert final_report["delivery"]["delivered"] is True
+    assert final_report["target_fulfillment"]["target"]["shortfall_count"] == 9
+    assert final_report["safety"]["scheduler_does_not_upload_torrents"] is True
+    assert final_report["action"] == "refill_shortfall"
+    assert final_report["recommended_call"]["safe_to_call_now"] is True
     assert Path(payload["last_run"]["notification_files"]["json"]).exists()
     assert Path(payload["last_run"]["notification_files"]["text"]).exists()
     summary_path = Path(payload["summary_file"])
@@ -18385,6 +18396,7 @@ def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_
     summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary_payload["notification_payload"]["top_item"]["source_id"] == "60635"
     assert summary_payload["notification_files"] == payload["last_run"]["notification_files"]
+    assert summary_payload["daily_scheduler_final_report"] == final_report
 
 
 def test_daily_scheduler_plan_calculates_next_run(tmp_path) -> None:

@@ -11820,6 +11820,8 @@ def daily_scheduler_plan(args: argparse.Namespace, *, now: datetime | None = Non
 def daily_scheduler_once_payload(args: argparse.Namespace) -> dict[str, Any]:
     plan = daily_scheduler_plan(args)
     run_payload = daily_schedule_payload(args)
+    final_report = _daily_scheduler_final_report(plan, run_payload, mode="once")
+    _write_daily_scheduler_final_report_to_summary(run_payload.get("summary_file"), final_report)
     return {
         "kind": "ptcli.cli.daily_scheduler",
         "status": run_payload.get("status"),
@@ -11827,10 +11829,27 @@ def daily_scheduler_once_payload(args: argparse.Namespace) -> dict[str, Any]:
         "mode": "once",
         "scheduler": plan,
         "last_run": run_payload,
+        "daily_scheduler_final_report": final_report,
         "summary_file": run_payload.get("summary_file"),
         "blockers": run_payload.get("blockers", []),
         "next_actions": run_payload.get("next_actions", []),
     }
+
+
+def _write_daily_scheduler_final_report_to_summary(summary_file: Any, final_report: dict[str, Any]) -> None:
+    if not summary_file:
+        return
+    path = Path(str(summary_file)).expanduser()
+    if not path.exists():
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(payload, dict):
+        return
+    payload["daily_scheduler_final_report"] = final_report
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def run_daily_scheduler(args: argparse.Namespace, *, json_output: bool = False) -> int:
@@ -11850,8 +11869,113 @@ def run_daily_scheduler(args: argparse.Namespace, *, json_output: bool = False) 
         _print_payload({**plan, "event": "scheduler_sleep"}, json_output=True)
         time.sleep(sleep_seconds)
         run_payload = daily_schedule_payload(args)
-        _print_payload({"kind": "ptcli.cli.daily_scheduler", "event": "scheduled_run", "scheduler": plan, "last_run": run_payload, "summary_file": run_payload.get("summary_file")}, json_output=True)
+        final_report = _daily_scheduler_final_report(plan, run_payload, mode="daemon")
+        _print_payload({"kind": "ptcli.cli.daily_scheduler", "event": "scheduled_run", "scheduler": plan, "last_run": run_payload, "daily_scheduler_final_report": final_report, "summary_file": run_payload.get("summary_file")}, json_output=True)
         time.sleep(60)
+
+
+def _daily_scheduler_final_report(plan: dict[str, Any], run_payload: dict[str, Any], *, mode: str) -> dict[str, Any]:
+    delivery_result = run_payload.get("delivery_result") if isinstance(run_payload.get("delivery_result"), dict) else {}
+    delivery_audit = run_payload.get("delivery_audit") if isinstance(run_payload.get("delivery_audit"), dict) else {}
+    target_report = run_payload.get("daily_candidate_target_fulfillment_report") if isinstance(run_payload.get("daily_candidate_target_fulfillment_report"), dict) else {}
+    operational_report = run_payload.get("daily_candidate_operational_final_report") if isinstance(run_payload.get("daily_candidate_operational_final_report"), dict) else {}
+    blockers = list(dict.fromkeys(_string_list(run_payload.get("blockers")) + _string_list(delivery_result.get("blockers")) + _string_list(delivery_audit.get("blockers"))))
+    delivered = bool(delivery_result.get("channel_attempted") and delivery_result.get("ok"))
+    report_allowed = bool(run_payload.get("ok")) and not blockers
+    action = _daily_scheduler_final_report_action(report_allowed, delivered, target_report, delivery_result)
+    recommended_call = _daily_scheduler_final_report_recommended_call(action, target_report, delivery_audit, run_payload)
+    return {
+        "kind": "ptcli.daily_scheduler_final_report",
+        "ready": report_allowed,
+        "report_allowed": report_allowed,
+        "mode": mode,
+        "verdict": "ready" if report_allowed else "blocked",
+        "action": action,
+        "scheduler": {
+            "source": plan.get("source"),
+            "enabled_count": plan.get("enabled_count"),
+            "next_run": plan.get("next_run"),
+            "next_runs": plan.get("next_runs", []),
+        },
+        "last_run": {
+            "status": run_payload.get("status"),
+            "ok": bool(run_payload.get("ok")),
+            "job_count": run_payload.get("job_count"),
+            "summary_file": run_payload.get("summary_file"),
+            "notification_files": run_payload.get("notification_files"),
+            "notification_webhook": run_payload.get("notification_webhook"),
+        },
+        "delivery": {
+            "status": delivery_result.get("status"),
+            "ok": bool(delivery_result.get("ok")),
+            "delivered": delivered,
+            "channel_attempted": bool(delivery_result.get("channel_attempted")),
+            "file_ok": (delivery_result.get("file_delivery") or {}).get("ok") if isinstance(delivery_result.get("file_delivery"), dict) else None,
+            "webhook_ok": (delivery_result.get("webhook_delivery") or {}).get("ok") if isinstance(delivery_result.get("webhook_delivery"), dict) else None,
+            "payload_fingerprint": delivery_result.get("payload_fingerprint") or delivery_audit.get("payload_fingerprint"),
+        },
+        "target_fulfillment": target_report or None,
+        "operational_report": operational_report or None,
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": ["daily_scheduler_final_report", "last_run.daily_candidate_target_fulfillment_report", "last_run.delivery_result", "last_run.delivery_audit", "last_run.schedule_digest"],
+        "complete_when": ["delivery.delivered=true for the daily digest", "target_fulfillment.target.ready_target_met=true or target_fulfillment.action explains refill/approval next step"],
+        "stop_when": ["blockers is non-empty", "delivery.ok=false", "recommended_call.safe_to_call_now=false and user approval is missing"],
+        "safety": {
+            "scheduler_does_not_submit_candidates": True,
+            "scheduler_does_not_upload_torrents": True,
+            "submit_requires_user_approval": True,
+            "safe_for_cron": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_scheduler_final_report_next_actions(action, blockers),
+    }
+
+
+def _daily_scheduler_final_report_action(report_allowed: bool, delivered: bool, target_report: dict[str, Any], delivery_result: dict[str, Any]) -> str:
+    if not report_allowed:
+        return "resolve_blockers"
+    target_action = str(target_report.get("action") or "")
+    if target_action in {"request_user_approval", "refill_shortfall", "poll_jobs", "publish_digest"}:
+        return target_action
+    if not bool(delivery_result.get("channel_attempted")):
+        return "configure_delivery"
+    if not delivered:
+        return "retry_delivery"
+    return "report_digest_delivered"
+
+
+def _daily_scheduler_final_report_recommended_call(action: str, target_report: dict[str, Any], delivery_audit: dict[str, Any], run_payload: dict[str, Any]) -> dict[str, Any]:
+    target_call = target_report.get("recommended_call") if isinstance(target_report.get("recommended_call"), dict) else {}
+    if action in {"request_user_approval", "refill_shortfall", "poll_jobs", "publish_digest"} and target_call:
+        return target_call
+    retry = delivery_audit.get("retry") if isinstance(delivery_audit.get("retry"), dict) else {}
+    if action == "retry_delivery" and retry:
+        return {"tool": retry.get("tool"), "endpoint": None, "method": None, "request": {"argv": retry.get("argv")}, "safe_to_call_now": bool(retry.get("safe")), "reason": retry.get("reason")}
+    if action == "configure_delivery":
+        return {"tool": "daily-schedule", "endpoint": None, "method": None, "request": {"argv": ["python3", "ptcli.py", "daily-schedule", "--write-summary", "--write-notification", "--json"]}, "safe_to_call_now": True, "reason": "delivery_channel_not_configured"}
+    return {"tool": None, "endpoint": None, "method": None, "request": None, "safe_to_call_now": False, "reason": action, "summary_file": run_payload.get("summary_file")}
+
+
+def _daily_scheduler_final_report_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve daily_scheduler_final_report.blockers, then rerun daily-scheduler --once before trusting the daily digest."]
+    if action == "request_user_approval":
+        return ["Show last_run.notification_payload to the user and wait for explicit approval before submitting any candidate."]
+    if action == "refill_shortfall":
+        return ["Call daily_scheduler_final_report.recommended_call to refill the daily 10-candidate shortfall."]
+    if action == "poll_jobs":
+        return ["Poll pending daily candidate jobs, then read the next daily_scheduler_final_report."]
+    if action == "publish_digest":
+        return ["Deliver or consume the daily digest, then ask for explicit approval before any candidate submission."]
+    if action == "configure_delivery":
+        return ["Enable --write-notification or PTCLI_DAILY_CANDIDATE_WEBHOOK_URL so the scheduler hands candidates to an AI/IM/webhook consumer."]
+    if action == "retry_delivery":
+        return ["Retry delivery using delivery_audit.retry; this still does not submit or upload torrents."]
+    return ["Daily candidate digest was delivered; wait for explicit user approval before any submit_daily_candidate_job call."]
 
 
 def _daily_schedule_request_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -11919,6 +12043,9 @@ def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namesp
         "delivery_audit": payload.get("delivery_audit"),
         "run_and_deliver_result": payload.get("run_and_deliver_result"),
         "run_and_deliver_report": payload.get("run_and_deliver_report"),
+        "daily_candidate_operational_final_report": payload.get("daily_candidate_operational_final_report"),
+        "daily_candidate_target_fulfillment_report": payload.get("daily_candidate_target_fulfillment_report"),
+        "daily_scheduler_final_report": payload.get("daily_scheduler_final_report"),
         "agent_decision": payload.get("agent_decision"),
         "blockers": payload.get("blockers", []),
         "next_actions": payload.get("next_actions", []),
