@@ -12858,6 +12858,8 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
     candidate_execution = candidate_submission_summary.get("execution_handoff") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("execution_handoff"), dict) else None
     closure_handoff = _job_closure_handoff(job, payload if isinstance(payload, dict) else None)
     retorrent_stage_handoff = _job_retorrent_stage_handoff(job, payload if isinstance(payload, dict) else None)
+    material_gap_summary = _job_material_gap_summary(job, payload if isinstance(payload, dict) else None)
+    material_preparation_final_report = _job_material_preparation_final_report(job, payload if isinstance(payload, dict) else None)
     next_step = closure_handoff.get("next_step") if isinstance(closure_handoff.get("next_step"), dict) else {}
     action = str(agent_decision.get("decision") or "inspect")
     recommended_tool = agent_decision.get("next_tool")
@@ -12974,6 +12976,8 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         "resume_execution_handoff": _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None),
         "candidate_submission_execution": candidate_execution,
         "retorrent_stage_handoff": retorrent_stage_handoff,
+        "material_gap_summary": material_gap_summary,
+        "material_preparation_final_report": material_preparation_final_report,
         "material_input_template": candidate_execution.get("material_input_template") if isinstance(candidate_execution, dict) else None,
         "dry_run_request": dry_run_request,
         "execute_request": execute_request,
@@ -14145,7 +14149,7 @@ def _job_control_read_order(action: str) -> list[str]:
     if action == "configure_policy":
         return [*base, "policy_config_apply_handoff", "policy_application_handoff", "site_policy_rule_review", "blockers", "next_actions"]
     if action in {"resume_preview", "resume_execute", "prepare_materials", "repair_qbit"}:
-        return [*base, "resume_execution_handoff", "resume_requirements", "materials_handoff", "qbit_handoff"]
+        return [*base, "material_gap_summary", "material_preparation_final_report", "resume_execution_handoff", "resume_requirements", "materials_handoff", "qbit_handoff"]
     if action in {"read_summary", "stop_duplicate"}:
         return [*base, "closure_summary", "closure_handoff", "qbit_enforcement_summary", "summary"]
     return [*base, "closure_summary", "closure_handoff", "blockers", "next_actions"]
@@ -27322,7 +27326,7 @@ def _job_response_contract() -> dict[str, Any]:
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
-        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
+        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_gap_summary", "material_preparation_final_report", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
         "job_control_summary_fields": ["state", "action", "ready", "terminal", "should_poll", "should_resume", "resume_preview_required", "safe_to_call_now", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "poll_after_seconds", "status_endpoint", "summary_endpoint", "resume_endpoint", "read_order", "poll_resume_summary_sequence", "continue_when", "stop_when", "complete_when", "sources", "blockers", "next_actions"],
         "job_poll_resume_summary_sequence_fields": ["ready", "primary_next_step", "steps", "complete_when", "stop_when"],
         "job_final_report_fields": ["ready", "ready_for_user_report", "report_allowed", "verdict", "status", "job_id", "job_kind", "summary_file", "control", "progress", "source_reference", "target_trackers", "duplicate_check", "manual_retorrent", "live", "closure", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],

@@ -13716,6 +13716,10 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["material_preparation_final_report"]["media"]["screenshots_ready"] is True
     assert job["material_preparation_final_report"]["recommended_tool"] == "resume_job"
     assert job["material_preparation_final_report"]["dry_run_request"] == job["material_gap_summary"]["dry_run_request"]
+    assert job["job_handoff"]["material_gap_summary"] == job["material_gap_summary"]
+    assert job["job_handoff"]["material_preparation_final_report"] == job["material_preparation_final_report"]
+    assert "material_gap_summary" in job["job_control_summary"]["read_order"]
+    assert "material_preparation_final_report" in job["job_control_summary"]["read_order"]
     assert job["agent_decision"]["materials_handoff"] == job["materials_handoff"]
     assert job["agent_decision"]["material_preparation_final_report"] == job["material_preparation_final_report"]
     assert job["target_upload_handoff"]["kind"] == "ptcli.target_upload_handoff"
@@ -16623,6 +16627,10 @@ def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -
     assert gap_summary["recommended_tool"] == "resume_job"
     assert gap_summary["dry_run_request"]["dry_run"] is True
     assert gap_summary["execute_request"]["metadata_file"] == "/tmp/materials/metadata.json"
+    assert job["job_handoff"]["material_gap_summary"] == gap_summary
+    assert job["job_handoff"]["material_preparation_final_report"] == job["material_preparation_final_report"]
+    assert "material_gap_summary" in job["job_control_summary"]["read_order"]
+    assert "material_preparation_final_report" in job["job_control_summary"]["read_order"]
 
 
 def test_submit_daily_candidate_job_rejects_blocked_candidate(monkeypatch, tmp_path) -> None:
@@ -19534,6 +19542,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "manual_retorrent_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "material_gap_summary" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "material_preparation_final_report" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "job_control_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -19713,6 +19723,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recommended_tool" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "resume_recommended" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "candidate_submission_execution" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "material_gap_summary" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "material_preparation_final_report" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "material_input_template" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "agent_candidate_submission_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
     assert "candidate_submission_execution" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
@@ -21688,6 +21700,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_execution_handoff_fields"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["job_handoff_fields"]
         assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "material_gap_summary" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "material_preparation_final_report" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         assert "recommended_call_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "recommended_call_gate_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "safe_to_call_now" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
@@ -21695,6 +21709,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "requires_user_review" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
         assert "confirm_upload_present" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_gate_fields"]
         assert "candidate_submission_execution" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "material_gap_summary" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "material_preparation_final_report" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         assert "material_input_template" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         assert "agent_candidate_submission_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
         assert "candidate_submission_execution" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
