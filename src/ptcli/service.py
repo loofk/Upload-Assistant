@@ -27177,8 +27177,8 @@ def _agent_skill_contract(public_base_url: str) -> dict[str, Any]:
                 "restriction": "Use job_control_summary.dry_run_request/recommended_request first, or fall back to job_handoff.recommended_request plus allowlisted overrides.",
             },
         },
-        "mandatory_preflight": ["goal_progress", "deployment_check", "readiness_bundle", "site_policies", "target duplicate check"],
-        "completion_evidence": ["live_validation_final_report.report_allowed=true", "live_validation_final_report.evidence.missing_evidence=[]", "live_validation_final_report.blockers=[]", "live_user_report.ready_for_user_report=true", "live_user_report.report_allowed=true", "seedbox_live_validation_completion_report.ready_for_user_report=true", "job_control_summary.action=read_summary", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
+        "mandatory_preflight": ["goal_progress", "deployment_check", "readiness_bundle", "site_policies", "policy_application_handoff", "target duplicate check"],
+        "completion_evidence": ["policy_application_handoff.ready=true", "policy_application_handoff.missing_request_fields=[]", "live_validation_final_report.report_allowed=true", "live_validation_final_report.evidence.missing_evidence=[]", "live_validation_final_report.blockers=[]", "live_user_report.ready_for_user_report=true", "live_user_report.report_allowed=true", "seedbox_live_validation_completion_report.ready_for_user_report=true", "job_control_summary.action=read_summary", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
     }
 
 
@@ -27188,7 +27188,7 @@ def _agent_instructions() -> dict[str, Any]:
         "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
         "must": [
             "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
-            "Read live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
+            "Read policy_application_handoff, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
             "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
             "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
             "Treat status=blocked as recoverable only when job_control_summary.recommended_call, next_step, or job_handoff.recommended_request names a safe tool.",
@@ -27196,7 +27196,7 @@ def _agent_instructions() -> dict[str, Any]:
         ],
         "must_not": [
             "Do not upload or submit a daily candidate without confirm_upload=true.",
-            "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check.",
+            "Do not bypass site_policies, rule_obligations, policy_execution_handoff, policy_application_handoff, or duplicate_check.",
             "Do not assume rule_review_fingerprint placeholders satisfy manual review.",
             "Do not mark a job complete from status alone; verify live_validation_final_report.report_allowed=true and target uploaded seeding evidence.",
             "Do not retry live upload after a duplicate, rule blocker, or missing uploaded torrent evidence unless the next_step explicitly allows recovery.",
@@ -27273,9 +27273,9 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "policy_audit",
                     "tool": "site_policies",
-                    "read": ["ready", "policy_execution_summary.ready", "policy_execution_handoff.ready", "policy_execution_handoff.qbit", "policy_execution_handoff.seeding", "policy_execution_handoff.transfer_rules", "policy_execution_handoff.rule_obligations", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
-                    "continue_when": "ready=true and policy_execution_handoff.ready=true",
-                    "stop_when": ["missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
+                    "read": ["ready", "policy_execution_summary.ready", "policy_execution_handoff.ready", "policy_execution_handoff.qbit", "policy_execution_handoff.seeding", "policy_execution_handoff.transfer_rules", "policy_execution_handoff.rule_obligations", "policy_execution_contract", "policy_runtime_contract", "policy_application_handoff.ready", "policy_application_handoff.request_patch", "policy_application_handoff.protected_fields", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
+                    "continue_when": "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true",
+                    "stop_when": ["policy_application_handoff.ready=false", "missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
                 },
                 {
                     "step": "duplicate_check",
@@ -27289,14 +27289,14 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "submit_job",
                     "tool": "source_url_retorrent_job",
                     "request_from": "source_url_retorrent_preflight.job_creation_handoff.request after duplicate_check.exists=false",
-                    "read": ["job_id", "status", "job_handoff", "runtime.status_endpoint", "agent_decision", "closure_summary", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
+                    "read": ["job_id", "status", "policy_application_handoff", "job_handoff", "runtime.status_endpoint", "agent_decision", "closure_summary", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
                     "continue_when": "job_id is present",
                     "stop_when": ["job_handoff.action=stop", "closure_handoff.action=stop_duplicate", "closure_handoff.action=configure_policy", "closure_handoff.action=collect_confirmations"],
                 },
                 {
                     "step": "poll",
                     "tool": "get_job_status",
-                    "read": ["status", "job_handoff.action", "job_handoff.should_poll", "job_handoff.poll_after_seconds", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "runtime.should_poll", "agent_decision", "seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "blockers", "next_actions"],
+                    "read": ["status", "policy_application_handoff.ready", "policy_application_handoff.missing_request_fields", "policy_application_handoff.missing_confirmations", "job_handoff.action", "job_handoff.should_poll", "job_handoff.poll_after_seconds", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "runtime.should_poll", "agent_decision", "seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "blockers", "next_actions"],
                     "continue_when": "job_handoff.action!=wait and status not in queued,running",
                     "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
                     "stop_when": ["job_handoff.action=stop", "status=blocked", "status=failed", "status=cancelled"],
@@ -27340,7 +27340,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "closure_decision",
                     "tool": "get_job_summary",
-                    "read": ["live_user_report.ready_for_user_report", "live_user_report.report_allowed", "live_user_report.report_blocked_reason", "live_user_report.recommended_call", "live_user_report.evidence.missing_evidence", "seedbox_live_validation_completion_report.status", "seedbox_live_validation_completion_report.ready_for_user_report", "seedbox_live_validation_completion_report.recommended_call", "seedbox_live_validation_completion_report.missing_evidence", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "job_handoff.blockers", "closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
+                    "read": ["policy_application_handoff.ready", "policy_application_handoff.applied_request_fields", "policy_application_handoff.missing_request_fields", "policy_application_handoff.missing_protected_fields", "live_user_report.ready_for_user_report", "live_user_report.report_allowed", "live_user_report.report_blocked_reason", "live_user_report.recommended_call", "live_user_report.evidence.missing_evidence", "seedbox_live_validation_completion_report.status", "seedbox_live_validation_completion_report.ready_for_user_report", "seedbox_live_validation_completion_report.recommended_call", "seedbox_live_validation_completion_report.missing_evidence", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "job_handoff.blockers", "closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
                     "complete_when": "live_user_report.report_allowed=true",
                     "resume_with": "job_handoff when job_handoff.action=resume; pass only job_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
                     "stop_when": ["seedbox_live_validation_completion_report.status=duplicate_stopped", "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null", "job_handoff.action=stop", "closure_summary.action=stop_duplicate", "closure_summary.action=collect_confirmations without explicit user confirmation", "closure_summary.action=configure_policy", "closure_summary.action=resolve_blockers and recommended_tool is null"],

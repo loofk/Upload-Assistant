@@ -20477,12 +20477,15 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
     assert "live_readiness.policy_execution_handoff" in ready["steps"][1]["read"]
     assert "policy_execution_handoff.ready" in ready["steps"][2]["read"]
-    assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true"
+    assert "policy_application_handoff.ready" in ready["steps"][2]["read"]
+    assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true"
     assert ready["steps"][3]["tool"] == "retorrent_check"
     assert ready["steps"][3]["request"]["source"] == ready["request_template"]["source_url"]
     assert ready["steps"][4]["request"] == ready["request_template"]
     assert "job_handoff" in ready["steps"][4]["read"]
+    assert "policy_application_handoff" in ready["steps"][4]["read"]
     assert "job_handoff.action" in ready["steps"][5]["read"]
+    assert "policy_application_handoff.missing_request_fields" in ready["steps"][5]["read"]
     assert ready["steps"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
     assert ready["steps"][6]["tool"] == "metadata_prepare_job"
     assert "metadata_prepare_handoff.material_options" in ready["steps"][6]["read"]
@@ -20552,10 +20555,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["tool"] == "source_url_check_and_submit"
     assert "deployment_check" in manifest["skill_contract"]["mandatory_preflight"]
     assert "goal_progress" in manifest["skill_contract"]["mandatory_preflight"]
+    assert "policy_application_handoff" in manifest["skill_contract"]["mandatory_preflight"]
+    assert "policy_application_handoff.ready=true" in manifest["skill_contract"]["completion_evidence"]
     assert "live_user_report.report_allowed=true" in manifest["skill_contract"]["completion_evidence"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in manifest["skill_contract"]["completion_evidence"]
-    assert "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user." in manifest["agent_instructions"]["must"]
-    assert "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check." in manifest["agent_instructions"]["must_not"]
+    assert "Read policy_application_handoff, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call." in manifest["agent_instructions"]["must"]
+    assert "Do not bypass site_policies, rule_obligations, policy_execution_handoff, policy_application_handoff, or duplicate_check." in manifest["agent_instructions"]["must_not"]
     assert "site policy config_audit reports missing_fields or placeholder_fields" in manifest["agent_instructions"]["ask_user_when"]
     assert manifest["tool_selection"]["manual_link_to_target"] == "source_url_check_and_submit"
     assert manifest["tool_selection"]["rules_and_rate_limits"] == "site_policies"
@@ -20580,12 +20585,15 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_readiness.policy_execution_summary" in source_url_workflow["runbook"][1]["read"]
     assert "live_readiness.policy_execution_handoff" in source_url_workflow["runbook"][1]["read"]
     assert "policy_execution_handoff.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
-    assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true"
+    assert "policy_application_handoff.request_patch" in source_url_workflow["runbook"][2]["read"]
+    assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true"
     assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
     assert source_url_workflow["runbook"][3]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
     assert "job_handoff" in source_url_workflow["runbook"][4]["read"]
+    assert "policy_application_handoff" in source_url_workflow["runbook"][4]["read"]
     assert "job_handoff.action=stop" in source_url_workflow["runbook"][4]["stop_when"]
     assert "job_handoff.action" in source_url_workflow["runbook"][5]["read"]
+    assert "policy_application_handoff.missing_request_fields" in source_url_workflow["runbook"][5]["read"]
     assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
     assert source_url_workflow["runbook"][6]["step"] == "prepare_metadata"
     assert source_url_workflow["runbook"][6]["tool"] == "metadata_prepare_job"
@@ -20602,6 +20610,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
     assert "target_upload_handoff.summary_file" in source_url_workflow["runbook"][9]["read"]
     assert source_url_workflow["runbook"][10]["step"] == "closure_decision"
+    assert "policy_application_handoff.applied_request_fields" in source_url_workflow["runbook"][10]["read"]
     assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][10]["read"]
     assert "closure_summary.next_step" in source_url_workflow["runbook"][10]["read"]
     assert source_url_workflow["runbook"][10]["complete_when"] == "live_user_report.report_allowed=true"

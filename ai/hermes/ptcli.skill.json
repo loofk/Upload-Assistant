@@ -110,9 +110,12 @@
       "deployment_check",
       "readiness_bundle",
       "site_policies",
+      "policy_application_handoff",
       "target duplicate check"
     ],
     "completion_evidence": [
+      "policy_application_handoff.ready=true",
+      "policy_application_handoff.missing_request_fields=[]",
       "live_validation_final_report.report_allowed=true",
       "live_validation_final_report.evidence.missing_evidence=[]",
       "live_validation_final_report.blockers=[]",
@@ -130,7 +133,7 @@
     "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
     "must": [
       "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
-      "Read live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
+      "Read policy_application_handoff, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
       "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
       "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
       "Treat status=blocked as recoverable only when job_control_summary.recommended_call, next_step, or job_handoff.recommended_request names a safe tool.",
@@ -138,7 +141,7 @@
     ],
     "must_not": [
       "Do not upload or submit a daily candidate without confirm_upload=true.",
-      "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check.",
+      "Do not bypass site_policies, rule_obligations, policy_execution_handoff, policy_application_handoff, or duplicate_check.",
       "Do not assume rule_review_fingerprint placeholders satisfy manual review.",
       "Do not mark a job complete from status alone; verify live_validation_final_report.report_allowed=true and target uploaded seeding evidence.",
       "Do not retry live upload after a duplicate, rule blocker, or missing uploaded torrent evidence unless the next_step explicitly allows recovery."
@@ -328,12 +331,18 @@
             "policy_execution_handoff.seeding",
             "policy_execution_handoff.transfer_rules",
             "policy_execution_handoff.rule_obligations",
+            "policy_execution_contract",
+            "policy_runtime_contract",
+            "policy_application_handoff.ready",
+            "policy_application_handoff.request_patch",
+            "policy_application_handoff.protected_fields",
             "policy_gap_summary",
             "execution_readiness",
             "agent_summary.policy_recommendations"
           ],
-          "continue_when": "ready=true and policy_execution_handoff.ready=true",
+          "continue_when": "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true",
           "stop_when": [
+            "policy_application_handoff.ready=false",
             "missing rule_review_fingerprint",
             "missing qBittorrent rate limits",
             "missing seeding requirements",
@@ -366,6 +375,7 @@
           "read": [
             "job_id",
             "status",
+            "policy_application_handoff",
             "job_handoff",
             "runtime.status_endpoint",
             "agent_decision",
@@ -388,6 +398,9 @@
           "tool": "get_job_status",
           "read": [
             "status",
+            "policy_application_handoff.ready",
+            "policy_application_handoff.missing_request_fields",
+            "policy_application_handoff.missing_confirmations",
             "job_handoff.action",
             "job_handoff.should_poll",
             "job_handoff.poll_after_seconds",
@@ -510,6 +523,10 @@
           "step": "closure_decision",
           "tool": "get_job_summary",
           "read": [
+            "policy_application_handoff.ready",
+            "policy_application_handoff.applied_request_fields",
+            "policy_application_handoff.missing_request_fields",
+            "policy_application_handoff.missing_protected_fields",
             "live_user_report.ready_for_user_report",
             "live_user_report.report_allowed",
             "live_user_report.report_blocked_reason",
