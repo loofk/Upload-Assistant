@@ -23281,6 +23281,21 @@ def _deployment_daily_candidate_delivery_handoff(
         "ptcli-daily-candidates-notification.json.notification_payload",
         "ptcli-daily-schedule-summary.json.notification_payload",
     ]
+    digest_evidence_refs = [
+        "daily_candidate_batch_publish_payload.items",
+        "daily_candidate_batch_publish_payload.top_item",
+        "daily_candidate_batch_publish_payload.approval_queue",
+        "daily_candidate_batch_publish_payload.tracking",
+        "daily_candidate_batch_publish_payload.completion_report",
+    ]
+    completion_evidence_refs = [
+        "daily_candidate_batch_publish_payload.completion_items[].qbit_enforcement_ready",
+        "daily_candidate_batch_publish_payload.completion_items[].qbit_execution_ready",
+        "daily_candidate_batch_publish_payload.completion_items[].uploaded_seeding_ready",
+        "daily_candidate_batch_publish_payload.completion_report.completed_jobs[].qbit_enforcement_summary",
+        "daily_candidate_batch_publish_payload.completion_report.completed_jobs[].qbit_execution_gate",
+        "daily_candidate_batch_publish_payload.completion_report.completed_jobs[].uploaded_seeding_evidence",
+    ]
     return {
         "kind": "ptcli.daily_candidate_deployment_delivery_handoff",
         "ready": ready,
@@ -23290,6 +23305,24 @@ def _deployment_daily_candidate_delivery_handoff(
         "publish_payload_field": "daily_candidate_batch_publish_payload",
         "notification_payload_field": "notification_payload",
         "publish_payload_sources": publish_payload_sources,
+        "digest_evidence_refs": digest_evidence_refs,
+        "completion_evidence_refs": completion_evidence_refs,
+        "evidence_contract": {
+            "candidate_digest_ready_when": "daily_candidate_batch_publish_payload.ready=true and items or approval_queue are present",
+            "completion_ready_when": "daily_candidate_batch_publish_payload.status=ready_to_report and completion_items[].uploaded_seeding_ready=true",
+            "must_read_before_reporting_completion": completion_evidence_refs,
+            "must_read_before_submitting_candidate": [
+                "daily_candidate_batch_publish_payload.approval_queue.items[].candidate_execution_context",
+                "daily_candidate_batch_publish_payload.approval_queue.items[].submit_request",
+                "daily_candidate_batch_publish_payload.approval_queue.items[].required_overrides",
+            ],
+            "stop_when": [
+                "daily_candidate_batch_publish_payload.blockers is non-empty",
+                "completion_items[].qbit_enforcement_ready=false",
+                "completion_items[].uploaded_seeding_ready=false",
+                "user approval is missing before submit_daily_candidate_job",
+            ],
+        },
         "channels": {
             "ai_pull": {
                 "ready": api_ready,
@@ -23326,11 +23359,12 @@ def _deployment_daily_candidate_delivery_handoff(
         "delivery_final_report": daily_candidate_plan.get("daily_candidate_delivery_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_delivery_final_report"), dict) else {},
         "workflow": [
             {"index": 1, "name": "trigger_daily_candidates", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": api.get("create_jobs", {}).get("request") if isinstance(api.get("create_jobs"), dict) else None, "continue_when": "candidate jobs are queued or complete", "stop_when": "daily_candidate_trigger_handoff.blockers is non-empty"},
-            {"index": 2, "name": "read_publish_payload", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_status.get("request"), "read": ["daily_candidate_batch_publish_payload", "daily_candidate_tracking_report"], "continue_when": "daily_candidate_batch_publish_payload is present", "stop_when": "daily_candidate_batch_publish_payload.blockers is non-empty"},
-            {"index": 3, "name": "deliver_digest", "tool": "ai_pull_or_file_or_webhook", "endpoint": None, "method": None, "read": publish_payload_sources, "continue_when": "digest is visible to the AI/IM/webhook consumer", "stop_when": "no delivery channel can read notification_payload or daily_candidate_batch_publish_payload"},
+            {"index": 2, "name": "read_publish_payload", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_status.get("request"), "read": ["daily_candidate_batch_publish_payload", "daily_candidate_tracking_report", "daily_candidate_batch_publish_payload.completion_report", "daily_candidate_batch_publish_payload.completion_items"], "continue_when": "daily_candidate_batch_publish_payload is present", "stop_when": "daily_candidate_batch_publish_payload.blockers is non-empty"},
+            {"index": 3, "name": "deliver_digest", "tool": "ai_pull_or_file_or_webhook", "endpoint": None, "method": None, "read": publish_payload_sources + digest_evidence_refs, "continue_when": "digest is visible to the AI/IM/webhook consumer", "stop_when": "no delivery channel can read notification_payload or daily_candidate_batch_publish_payload"},
             {"index": 4, "name": "wait_for_user_approval", "tool": "ask_user", "endpoint": None, "method": None, "read": ["approval_queue", "first_approval_prompt", "submit_request"], "continue_when": "user explicitly approves a candidate", "stop_when": "user does not approve or candidate blockers are present"},
+            {"index": 5, "name": "report_completed_retorrents", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_status.get("request"), "read": completion_evidence_refs, "continue_when": "all completed jobs have uploaded_seeding_ready=true or blockers explain why not", "stop_when": "completion evidence is missing"},
         ],
-        "read_order": ["daily_candidate_delivery_handoff", "daily_candidate_trigger_handoff", "daily_candidate_batch_publish_payload", "notification_payload", "daily_candidate_delivery_final_report"],
+        "read_order": ["daily_candidate_delivery_handoff", "daily_candidate_trigger_handoff", "daily_candidate_batch_publish_payload", "daily_candidate_batch_publish_payload.completion_report", "daily_candidate_batch_publish_payload.completion_items", "notification_payload", "daily_candidate_delivery_final_report"],
         "continue_when": "daily_candidate_delivery_handoff.ready=true and one channel has delivered the digest; submit only after explicit user approval",
         "stop_when": "delivery_handoff.blockers is non-empty or any submit action lacks accept_rules=true and confirm_upload=true",
         "safety": {
@@ -25854,7 +25888,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "env", "qbit", "safety", "blockers", "warnings"],
                 "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "qbit", "next_step", "deployment_runbook", "seedbox_live_trial", "warnings"],
                 "daily_candidate_trigger_handoff_fields": ["ready", "status", "action", "read_only", "configured", "configured_schedule_count", "target_count", "publish_payload_field", "compose", "api", "env", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
-                "daily_candidate_delivery_handoff_fields": ["ready", "status", "action", "read_only", "publish_payload_field", "notification_payload_field", "publish_payload_sources", "channels", "delivery_plan", "delivery_final_report", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
+                "daily_candidate_delivery_handoff_fields": ["ready", "status", "action", "read_only", "publish_payload_field", "notification_payload_field", "publish_payload_sources", "digest_evidence_refs", "completion_evidence_refs", "evidence_contract", "channels", "delivery_plan", "delivery_final_report", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],

@@ -21591,6 +21591,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_delivery_handoff" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert "daily_candidate_delivery_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "channels" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_delivery_handoff_fields"]
+        assert "digest_evidence_refs" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_delivery_handoff_fields"]
+        assert "completion_evidence_refs" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_delivery_handoff_fields"]
+        assert "evidence_contract" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_delivery_handoff_fields"]
         assert "max_concurrent_jobs" in tools_by_name["list_jobs"]["response_contract"]["queue_fields"]
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -21885,6 +21888,13 @@ services:
     assert delivery["ready"] is True
     assert delivery["publish_payload_field"] == "daily_candidate_batch_publish_payload"
     assert delivery["notification_payload_field"] == "notification_payload"
+    assert "daily_candidate_batch_publish_payload.completion_report" in delivery["digest_evidence_refs"]
+    assert "daily_candidate_batch_publish_payload.completion_items[].qbit_enforcement_ready" in delivery["completion_evidence_refs"]
+    assert "daily_candidate_batch_publish_payload.completion_report.completed_jobs[].uploaded_seeding_evidence" in delivery["completion_evidence_refs"]
+    assert delivery["evidence_contract"]["candidate_digest_ready_when"].startswith("daily_candidate_batch_publish_payload.ready=true")
+    assert "daily_candidate_batch_publish_payload.approval_queue.items[].submit_request" in delivery["evidence_contract"]["must_read_before_submitting_candidate"]
+    assert delivery["workflow"][4]["name"] == "report_completed_retorrents"
+    assert "daily_candidate_batch_publish_payload.completion_items[].uploaded_seeding_ready" in delivery["workflow"][4]["read"]
     assert delivery["channels"]["ai_pull"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert delivery["channels"]["ai_pull"]["payload_field"] == "daily_candidate_batch_publish_payload"
     assert delivery["channels"]["local_files"]["ready"] is True
@@ -22037,6 +22047,8 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     delivery = payload["daily_candidate_delivery_handoff"]
     assert delivery["kind"] == "ptcli.daily_candidate_deployment_delivery_handoff"
     assert delivery["ready"] is False
+    assert "daily_candidate_batch_publish_payload.completion_items[].qbit_execution_ready" in delivery["completion_evidence_refs"]
+    assert "completion_items[].uploaded_seeding_ready=false" in delivery["evidence_contract"]["stop_when"]
     assert delivery["channels"]["ai_pull"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert delivery["channels"]["local_files"]["payload_field"] == "notification_payload"
     assert delivery["safety"]["publishing_mutates_tracker"] is False
