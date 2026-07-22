@@ -16531,6 +16531,98 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert listed["candidate_submission_handoff"]["policy_execution_handoff"] == policy_execution_handoff
 
 
+def test_daily_candidate_batch_counts_available_submit_requests_by_source_id(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "target_count": 2,
+        "count": 2,
+        "selected_count": 2,
+        "ready_count": 2,
+        "push_items": [
+            {
+                "rank": 1,
+                "source_id": "60635",
+                "title": "First.Release",
+                "can_submit": True,
+                "submit_request": {
+                    "source": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_tracker": "U2",
+                    "target": "MTEAM",
+                    "accept_rules": True,
+                    "confirm_upload": False,
+                },
+            },
+            {
+                "rank": 2,
+                "source_id": "60636",
+                "title": "Second.Release",
+                "can_submit": True,
+                "submit_request": {
+                    "source": "https://u2.dmhy.org/details.php?id=60636",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60636",
+                    "source_tracker": "U2",
+                    "target": "MTEAM",
+                    "accept_rules": True,
+                    "confirm_upload": False,
+                },
+            },
+        ],
+        "blockers": [],
+        "next_actions": [],
+    }
+    candidate_job = store.create(
+        "ptcli.daily_candidates",
+        {"source_tracker": "U2", "target": "MTEAM", "accept_rules": True},
+        ["ptcli", "daily-candidates", "--json"],
+        lambda: {
+            "status": "ok",
+            "ok": True,
+            "count": 2,
+            "ready_count": 2,
+            "digest": digest,
+            "result": {"kind": "ptcli.daily_candidates", "count": 2, "ready_count": 2, "digest": digest, "candidates": [{"status": "ready"}, {"status": "ready"}]},
+            "blockers": [],
+            "next_actions": [],
+        },
+    )
+
+    for index in range(2):
+        store.create(
+            "ptcli.candidate_retorrent",
+            {
+                "mode": "candidate_retorrent",
+                "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                "source_reference": {"tracker": "U2", "source_id": "60635"},
+                "target": "MTEAM",
+                "target_trackers": ["MTEAM"],
+                "candidate_submission": {
+                    "candidate_job_id": candidate_job["job_id"],
+                    "candidate_rank": 1,
+                    "candidate_source_id": "60635",
+                    "candidate_title": f"First.Release.{index}",
+                },
+            },
+            ["ptcli", "retorrent", "--json"],
+            lambda: {"status": "complete", "ok": True, "blockers": [], "next_actions": []},
+        )
+
+    batch = store.daily_candidate_batch({"source_tracker": "U2", "target": "MTEAM"})
+    summary = batch["daily_candidate_batch_summary"]
+
+    assert summary["ready_to_submit_count"] == 2
+    assert summary["submitted_retorrent_job_count"] == 2
+    assert summary["available_submit_request_count"] == 1
+    assert summary["unsubmitted_safe_count"] == 1
+    assert batch["daily_candidate_batch_gate"]["action"] == "submit_candidate"
+    assert batch["daily_candidate_submission_plan"]["safe_to_submit_count"] == 1
+    assert batch["daily_candidate_submission_plan"]["first_submit_request"]["source_id"] == "60636"
+    assert batch["daily_candidate_execution_summary"]["remaining_submit_count"] == 1
+    assert batch["daily_candidate_tracking_report"]["remaining_submit_count"] == 1
+    assert batch["daily_candidate_completion_gate"]["remaining_submit_count"] == 1
+
+
 def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp_path) -> None:
     digest = {
         "kind": "ptcli.daily_candidates_digest",
@@ -19669,6 +19761,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "execution_summary" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "refill_plan" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "submitted_retorrent_job_count" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_summary_fields"]
+    assert "available_submit_request_count" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_summary_fields"]
     assert "action" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_gate_fields"]
     assert "submit_requests" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_plan_fields"]
     assert "shortfall_recovery" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_plan_fields"]
@@ -20223,6 +20316,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_approval_sequence_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "approval_items" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_approval_sequence_fields"]
     assert "submitted_retorrent_job_count" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_summary_fields"]
+    assert "available_submit_request_count" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_summary_fields"]
     assert "first_submitted_job" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_gate_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
