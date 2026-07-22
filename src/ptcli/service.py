@@ -15732,6 +15732,34 @@ def _job_retorrent_stage_handoff(job: dict[str, Any], summary_payload: dict[str,
     duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
     missing_confirmations = _missing_live_confirmations(request)
     blockers = _retorrent_stage_gate_blockers(duplicate_check, duplicate_clear, missing_confirmations, rule_check)
+    material_preparation = _retorrent_stage_material_preparation_handoff(job, payload)
+    if isinstance(material_preparation, dict) and material_preparation.get("ready_for_target_package") is False:
+        material_blockers = list(dict.fromkeys(blockers + _string_list(material_preparation.get("blockers")) + _string_list(material_preparation.get("missing_domains"))))
+        next_step = material_preparation.get("next_step") if isinstance(material_preparation.get("next_step"), dict) else {}
+        return {
+            "kind": "ptcli.retorrent_stage_handoff",
+            "ready": False,
+            "action": "prepare_materials",
+            "reason": "target_upload_materials_missing",
+            "source_info": source_info,
+            "package_dir": package_dir,
+            "duplicate_check": duplicate_check,
+            "rule_check": rule_check,
+            "qbit_evidence": qbit_evidence,
+            "material_options": material_options,
+            "material_preparation_handoff": material_preparation,
+            "recommended_tool": next_step.get("tool") or material_preparation.get("recommended_tool"),
+            "recommended_endpoint": next_step.get("endpoint") or material_preparation.get("recommended_endpoint"),
+            "recommended_method": next_step.get("method") or material_preparation.get("recommended_method"),
+            "recommended_request": next_step.get("request") or material_preparation.get("recommended_request"),
+            "dry_run_request": next_step.get("dry_run_request") or material_preparation.get("dry_run_request"),
+            "execute_request": next_step.get("execute_request") or material_preparation.get("execute_request"),
+            "next_step": next_step,
+            "continue_when": "material_preparation_handoff.ready_for_target_package=true before target package preparation",
+            "stop_when": ["retorrent_stage_handoff.blockers is not empty", "material_preparation_handoff.missing_count>0 after execute_request"],
+            "blockers": material_blockers,
+            "next_actions": _retorrent_stage_next_actions("prepare_materials", material_blockers),
+        }
 
     if package_dir:
         upload_request = _retorrent_stage_target_upload_request(request, package_dir, content_path)
@@ -15794,6 +15822,41 @@ def _job_retorrent_stage_handoff(job: dict[str, Any], summary_payload: dict[str,
         "stop_when": ["retorrent_stage_handoff.blockers is not empty", "duplicate_check.exists=true", "rule_check.ready=false"],
         "blockers": package_blockers,
         "next_actions": _retorrent_stage_next_actions("prepare_target_package", package_blockers),
+    }
+
+
+def _retorrent_stage_material_preparation_handoff(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    report = _job_material_preparation_final_report(job, payload)
+    if not isinstance(report, dict):
+        return None
+    return {
+        "ready": report.get("ready") is True,
+        "ready_for_target_package": report.get("ready_for_target_package") is True,
+        "ready_for_target_upload": report.get("ready_for_target_upload") is True,
+        "verdict": report.get("verdict"),
+        "missing_domains": _string_list(report.get("missing_domains")),
+        "missing_count": report.get("missing_count"),
+        "next_missing_domain": report.get("next_missing_domain"),
+        "recommended_tool": report.get("recommended_tool"),
+        "recommended_endpoint": report.get("recommended_endpoint"),
+        "recommended_method": report.get("recommended_method"),
+        "recommended_request": report.get("recommended_request"),
+        "dry_run_request": report.get("dry_run_request"),
+        "execute_request": report.get("execute_request"),
+        "next_step": {
+            "tool": report.get("recommended_tool"),
+            "endpoint": report.get("recommended_endpoint"),
+            "method": report.get("recommended_method"),
+            "request": report.get("recommended_request"),
+            "dry_run_request": report.get("dry_run_request"),
+            "execute_request": report.get("execute_request"),
+            "reason": "prepare_missing_metadata_description_or_media_materials",
+        },
+        "read": ["material_preparation_final_report", "material_gap_summary", "material_evidence_summary", "materials_handoff"],
+        "continue_when": report.get("complete_when"),
+        "stop_when": report.get("stop_when"),
+        "blockers": _string_list(report.get("blockers")),
+        "next_actions": _string_list(report.get("next_actions")),
     }
 
 
@@ -15987,6 +16050,8 @@ def _retorrent_stage_target_upload_request(request: dict[str, Any], package_dir:
 def _retorrent_stage_next_actions(action: str, blockers: list[str]) -> list[str]:
     if blockers:
         return ["Resolve retorrent_stage_handoff.blockers before continuing to the next target stage."]
+    if action == "prepare_materials":
+        return ["Preview retorrent_stage_handoff.dry_run_request, execute after review, then read material_preparation_handoff before preparing the target package."]
     if action == "prepare_target_package":
         return ["POST retorrent_stage_handoff.recommended_request to /v1/jobs/target/package/prepare, then poll the returned job_id."]
     if action == "target_upload_closure":
@@ -24423,7 +24488,8 @@ def _job_response_contract() -> dict[str, Any]:
         "material_evidence_check_fields": ["domain", "label", "ready", "status", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "resume_overrides", "next_step"],
         "metadata_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "metadata_prepare_handoff", "resume_request", "execute_request", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "materials_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "resume_handoff", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
-        "retorrent_stage_handoff_fields": ["ready", "action", "reason", "source_info", "package_dir", "duplicate_check", "rule_check", "qbit_evidence", "material_options", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "retorrent_stage_handoff_fields": ["ready", "action", "reason", "source_info", "package_dir", "duplicate_check", "rule_check", "qbit_evidence", "material_options", "material_preparation_handoff", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "retorrent_stage_material_preparation_handoff_fields": ["ready", "ready_for_target_package", "ready_for_target_upload", "verdict", "missing_domains", "missing_count", "next_missing_domain", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "next_step", "read", "continue_when", "stop_when", "blockers", "next_actions"],
         "target_package_handoff_fields": ["ready", "job_id", "status", "package_dir", "description_draft", "target_upload_preflight_status", "target_upload_request", "resume_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "material_plan_fields": ["ready", "missing", "next_item", "items"],
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],

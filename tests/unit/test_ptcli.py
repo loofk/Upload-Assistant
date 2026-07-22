@@ -14960,6 +14960,79 @@ def test_source_url_retorrent_job_handoff_prepares_target_package(monkeypatch, t
     assert store.summary(job["job_id"])["retorrent_stage_handoff"]["recommended_request"] == request
 
 
+def test_source_url_retorrent_job_handoff_prepares_missing_materials(monkeypatch, tmp_path) -> None:
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target upload materials missing."],
+            "next_actions": ["Prepare metadata, screenshots, and hosted image evidence."],
+            "source_info": {"tracker": "U2", "torrent_id": "60635", "name": "Example Movie", "imdb_id": "tt1234567"},
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+            "rule_check": {"ready": True, "rule_obligations": [{"tracker": "U2", "scope": "download_and_retorrent"}, {"tracker": "MTEAM", "scope": "upload_and_seed"}], "blockers": []},
+            "evidence": {"torrent_hash": "abc123", "content_path": "/downloads/Example.Movie.2024"},
+            "material_diagnostics": {
+                "present": True,
+                "ready_for_mteam_upload": False,
+                "critical_ready": False,
+                "critical_missing": ["metadata.tmdb", "description.content", "assets.screenshots", "assets.image_host_uploads"],
+                "critical_path": {"ready": False, "next_step": "metadata", "missing": ["metadata.tmdb"]},
+                "description": {
+                    "ready": False,
+                    "has_mediainfo_or_bdinfo": True,
+                    "has_screenshot_bbcode": False,
+                    "bbcode_image_count": 0,
+                    "has_ptgen_description": False,
+                    "external_id_readiness": {"imdb": True, "tmdb": False, "douban": False},
+                    "external_id_missing": ["tmdb", "douban"],
+                },
+                "upload_material_blockers": ["description.external_ids.tmdb", "description.external_ids.douban", "assets.screenshot_coverage"],
+            },
+            "target_preflight_diagnostics": {
+                "ready": False,
+                "payload_ready": False,
+                "materials_ready": False,
+                "metadata_ready": False,
+                "assets_ready": False,
+                "description_ready": False,
+                "missing": ["materials.metadata.tmdb", "materials.assets.screenshots"],
+                "description_missing": ["materials.description.external_ids.tmdb", "materials.description.ptgen"],
+                "blockers": ["target_upload.materials_not_ready"],
+            },
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_source_url_retorrent_job(
+        store,
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "path": "/downloads/Example.Movie.2024",
+            "accept_rules": True,
+            "confirm_upload": True,
+        },
+    )
+
+    handoff = job["retorrent_stage_handoff"]
+    assert handoff["ready"] is False
+    assert handoff["action"] == "prepare_materials"
+    assert handoff["reason"] == "target_upload_materials_missing"
+    assert handoff["recommended_tool"] == "resume_job"
+    assert handoff["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert handoff["dry_run_request"]["dry_run"] is True
+    assert handoff["execute_request"]["job_id"] == job["job_id"]
+    assert handoff["material_preparation_handoff"]["ready_for_target_package"] is False
+    assert handoff["material_preparation_handoff"]["next_missing_domain"] == "metadata_ids"
+    assert "metadata_ids" in handoff["material_preparation_handoff"]["missing_domains"]
+    assert "screenshots" in handoff["material_preparation_handoff"]["missing_domains"]
+    assert "image_host" in handoff["material_preparation_handoff"]["missing_domains"]
+    assert "material_preparation_final_report" in handoff["material_preparation_handoff"]["read"]
+    assert job["material_preparation_final_report"]["verdict"] == "missing_materials"
+
+
 def test_source_url_retorrent_job_handoff_uploads_existing_target_package(monkeypatch, tmp_path) -> None:
     async def fake_retorrent(_request):
         return {
@@ -18817,6 +18890,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_overrides" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_plan_item_fields"]
     assert "materials_resume_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "retorrent_stage_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "material_preparation_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["retorrent_stage_handoff_fields"]
+    assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["retorrent_stage_handoff_fields"]
+    assert "retorrent_stage_material_preparation_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["retorrent_stage_material_preparation_handoff_fields"]
     assert "target_package_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
     assert "staged_requests" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
@@ -20732,6 +20809,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "groups" in tools_by_name["manual_retorrent_job"]["response_contract"]["material_gap_summary_fields"]
         assert "material_preparation_final_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "ready_for_target_upload" in tools_by_name["manual_retorrent_job"]["response_contract"]["material_preparation_final_report_fields"]
+        assert "material_preparation_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["retorrent_stage_handoff_fields"]
+        assert "retorrent_stage_material_preparation_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "material_gap_item_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["material_gap_item_fields"]
         assert "material_evidence_check_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
