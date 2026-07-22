@@ -21924,8 +21924,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
 
 
 def test_static_agent_skill_templates_are_valid_json() -> None:
+    expected_payload = ptcli_service.agent_manifest_payload(base_url="http://127.0.0.1:8080")
     for relative_path in ("ai/openclaw/ptcli.skill.json", "ai/hermes/ptcli.skill.json"):
         payload = json.loads(Path(relative_path).read_text(encoding="utf-8"))
+        assert payload == expected_payload
         assert payload["schema_version"] == "ptcli.agent_manifest.v1"
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
         assert payload["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"

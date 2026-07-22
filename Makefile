@@ -1,4 +1,4 @@
-.PHONY: help lint test check smoke smoke-ptcli smoke-legacy test-live
+.PHONY: help lint test check smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live
 
 PYTHON ?= python3
 
@@ -13,6 +13,12 @@ test: ## 运行 pytest（排除 live 标记的测试）
 	$(PYTHON) -m pytest
 
 check: lint test ## 运行 lint + test
+
+agent-skills-check: ## 校验 OpenClaw/Hermes 静态 skill manifest 与服务契约同步
+	$(PYTHON) scripts/sync_agent_skill_templates.py
+
+agent-skills-sync: ## 生成/同步 OpenClaw/Hermes 静态 skill manifest
+	$(PYTHON) scripts/sync_agent_skill_templates.py --write
 
 smoke: smoke-ptcli ## 快速导入检查（默认验证聚焦版 PT CLI）
 
