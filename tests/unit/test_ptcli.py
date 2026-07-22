@@ -19175,6 +19175,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "seedbox_bootstrap_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "deployment_final_report" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
@@ -19186,6 +19187,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "copy_command" in tool_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
     assert "deployment_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "next_step" in tool_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
+    assert "deployment_final_report_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "recommended_call" in tool_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
     assert "seedbox_bootstrap_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "mkdir_commands" in tool_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
     assert "verification_requests" in tool_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
@@ -19763,6 +19766,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "deployment_runbook" in deployment_schema["properties"]
     assert "deployment_handoff" in deployment_schema["properties"]
     assert "seedbox_bootstrap_handoff" in deployment_schema["properties"]
+    assert "deployment_final_report" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
     assert "agent_handoff" in deployment_schema["properties"]
     source_url_preflight_schema = openapi["paths"]["/v1/retorrent/source-url/preflight"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -20023,6 +20027,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "deployment_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "seedbox_bootstrap_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "deployment_final_report" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
@@ -20034,6 +20039,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "copy_command" in tools_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
         assert "deployment_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "next_step" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
+        assert "deployment_final_report_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "recommended_call" in tools_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
         assert "seedbox_bootstrap_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "mkdir_commands" in tools_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
         assert "verification_requests" in tools_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
@@ -20950,6 +20957,30 @@ services:
     assert payload["deployment_handoff"]["daily_candidates"]["ready"] is True
     assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
     assert payload["deployment_handoff"]["next_step"]["action"] == "run_manual_preflight"
+    final_report = payload["deployment_final_report"]
+    assert final_report["kind"] == "ptcli.deployment_final_report"
+    assert final_report["ready"] is True
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "ready_for_readiness_bundle"
+    assert final_report["docker"]["ptcli_api_service_ready"] is True
+    assert final_report["docker"]["localhost_port"] is True
+    assert final_report["docker"]["start_api_command"].endswith("up -d --build ptcli-api")
+    assert final_report["api"]["health"] == "http://127.0.0.1:8080/health"
+    assert final_report["api"]["token_configured"] is False
+    assert final_report["api"]["auth_recommended"] is True
+    assert final_report["mounts"]["ready"] is True
+    assert final_report["mounts"]["missing_count"] == 0
+    assert final_report["runtime"]["material_tools_ready"] is True
+    assert final_report["qbit"]["configured"] is True
+    assert final_report["workflows"]["manual_retorrent_ready"] is True
+    assert final_report["workflows"]["daily_candidates_ready"] is True
+    assert final_report["recommended_call"]["tool"] == "readiness_bundle"
+    assert final_report["recommended_call"]["endpoint"] == "/v1/readiness/bundle"
+    assert final_report["recommended_call"]["safe_to_call_now"] is True
+    assert final_report["safety"]["mutates_state"] is False
+    assert final_report["safety"]["contacts_trackers"] is False
+    assert final_report["safety"]["contacts_qbittorrent"] is False
+    assert final_report["blockers"] == []
     assert payload["deployment_runbook"]["kind"] == "ptcli.deployment_runbook"
     assert payload["deployment_runbook"]["ready"] is True
     assert payload["deployment_runbook"]["service"] == "ptcli-api"
@@ -21022,6 +21053,18 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["deployment_runbook"]["blockers"]
     assert payload["deployment_handoff"]["manual_retorrent"]["tool"] == "readiness_bundle"
     assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "deployment_check"
+    final_report = payload["deployment_final_report"]
+    assert final_report["kind"] == "ptcli.deployment_final_report"
+    assert final_report["ready"] is False
+    assert final_report["report_allowed"] is False
+    assert final_report["verdict"] == "blocked"
+    assert final_report["recommended_call"]["tool"] == "deployment_check"
+    assert final_report["recommended_call"]["endpoint"] == "/v1/deployment/check"
+    assert final_report["recommended_call"]["safe_to_call_now"] is True
+    assert any("config file is missing" in blocker for blocker in final_report["blockers"])
+    assert final_report["mounts"]["ready"] is False
+    assert final_report["runtime"]["material_tools_ready"] is False
+    assert final_report["qbit"]["configured"] is False
     bootstrap = payload["seedbox_bootstrap_handoff"]
     assert bootstrap["ready"] is False
     assert bootstrap["action"] == "prepare_seedbox_paths_and_env"

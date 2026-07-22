@@ -19838,6 +19838,22 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     seedbox_bootstrap_handoff = _deployment_seedbox_bootstrap_handoff(agent_summary, paths, mounts, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
+    agent_handoff = _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
+    deployment_final_report = _deployment_final_report(
+        ready=ready,
+        paths=paths,
+        mounts=mounts,
+        runtime_tools=runtime_tools,
+        qbit=qbit,
+        daily_candidate_plan=daily_candidate_plan,
+        docker_compose=docker_compose,
+        env_template=env_template,
+        deployment_handoff=deployment_handoff,
+        seedbox_bootstrap_handoff=seedbox_bootstrap_handoff,
+        agent_summary=agent_summary,
+        blockers=blockers,
+        warnings=warnings,
+    )
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -19858,8 +19874,9 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "deployment_runbook": deployment_runbook,
         "deployment_handoff": deployment_handoff,
         "seedbox_bootstrap_handoff": seedbox_bootstrap_handoff,
+        "deployment_final_report": deployment_final_report,
         "agent_summary": agent_summary,
-        "agent_handoff": _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings),
+        "agent_handoff": agent_handoff,
         "connectivity_checked": False,
     }
 
@@ -20311,6 +20328,153 @@ def _deployment_runtime_next_step(manual_ready: bool, daily_ready: bool, compose
     if daily_ready:
         return {"action": "run_daily_candidates", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule"}
     return {"action": "configure_workflows", "tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "warnings": warnings}
+
+
+def _deployment_final_report(
+    *,
+    ready: bool,
+    paths: dict[str, str],
+    mounts: dict[str, Any],
+    runtime_tools: dict[str, Any],
+    qbit: dict[str, Any],
+    daily_candidate_plan: dict[str, Any],
+    docker_compose: dict[str, Any],
+    env_template: dict[str, Any],
+    deployment_handoff: dict[str, Any],
+    seedbox_bootstrap_handoff: dict[str, Any],
+    agent_summary: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    api = deployment_handoff.get("api") if isinstance(deployment_handoff.get("api"), dict) else {}
+    compose_ready = bool(docker_compose.get("ptcli_api_service_ready"))
+    final_ready = bool(ready and compose_ready and agent_summary.get("ready_for_ai"))
+    if final_ready:
+        verdict = "ready_for_readiness_bundle"
+    elif blockers:
+        verdict = "blocked"
+    else:
+        verdict = "compose_or_warning_incomplete"
+    recommended_call = _deployment_final_report_recommended_call(final_ready, compose_ready, blockers, seedbox_bootstrap_handoff, deployment_handoff)
+    return {
+        "kind": "ptcli.deployment_final_report",
+        "ready": final_ready,
+        "report_allowed": final_ready,
+        "verdict": verdict,
+        "deployment_status": "ready" if final_ready else "blocked",
+        "read_only": True,
+        "docker": {
+            "compose_file": paths.get("compose_file") or docker_compose.get("path"),
+            "ptcli_api_service_ready": compose_ready,
+            "daily_scheduler_ready": bool(docker_compose.get("daily_scheduler_service_ready")),
+            "daily_schedule_ready": bool(docker_compose.get("daily_schedule_service_ready")),
+            "localhost_port": bool(docker_compose.get("ptcli_api_localhost_port")),
+            "host_gateway": bool(docker_compose.get("host_gateway")),
+            "start_api_command": (seedbox_bootstrap_handoff.get("compose") or {}).get("start_api") if isinstance(seedbox_bootstrap_handoff.get("compose"), dict) else None,
+            "start_daily_scheduler_command": (seedbox_bootstrap_handoff.get("compose") or {}).get("start_daily_scheduler") if isinstance(seedbox_bootstrap_handoff.get("compose"), dict) else None,
+        },
+        "api": {
+            "base_url": api.get("base_url"),
+            "health": api.get("health"),
+            "openapi": api.get("openapi"),
+            "tools": api.get("tools"),
+            "agent_manifest": api.get("agent_manifest"),
+            "token_configured": bool(api.get("token_configured")),
+            "auth_recommended": bool(api.get("auth_recommended")),
+            "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
+        },
+        "mounts": {
+            "ready": bool(mounts.get("ready")),
+            "missing_count": len(mounts.get("missing") or []),
+            "required": mounts.get("required") if isinstance(mounts.get("required"), list) else [],
+            "missing": mounts.get("missing") if isinstance(mounts.get("missing"), list) else [],
+        },
+        "env": {
+            "template_ready": bool(env_template.get("ready")),
+            "env_present": bool(env_template.get("env_present")),
+            "copy_command": env_template.get("copy_command"),
+            "missing_keys": env_template.get("missing_keys") if isinstance(env_template.get("missing_keys"), list) else [],
+        },
+        "runtime": {
+            "material_tools_ready": bool(runtime_tools.get("ready")),
+            "missing_required": runtime_tools.get("missing_required") if isinstance(runtime_tools.get("missing_required"), list) else [],
+            "job_dir": paths.get("job_dir"),
+            "downloads_path": paths.get("downloads_path"),
+        },
+        "qbit": {
+            "configured": bool(qbit.get("configured")),
+            "client": qbit.get("client"),
+            "url": qbit.get("qbit_url"),
+            "connectivity_checked": bool(qbit.get("connectivity_checked")),
+        },
+        "workflows": {
+            "manual_retorrent_ready": bool(agent_summary.get("manual_workflow_ready")),
+            "daily_candidates_ready": bool(agent_summary.get("daily_workflow_ready")),
+            "daily_schedule_count": daily_candidate_plan.get("count", 0),
+        },
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "live_upload_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site policy ready"],
+            "do_not_expose_without_token": not bool(api.get("token_configured")),
+        },
+        "recommended_call": recommended_call,
+        "read_order": ["deployment_final_report", "deployment_handoff", "seedbox_bootstrap_handoff", "deployment_runbook", "agent_summary", "docker_compose", "mounts", "qbit"],
+        "complete_when": ["deployment_final_report.ready=true", "docker.ptcli_api_service_ready=true", "mounts.ready=true", "qbit.configured=true", "api.health returns status=ok"],
+        "stop_when": ["blockers is non-empty", "docker.ptcli_api_service_ready=false", "config/cookies/downloads/tmp/job paths are missing", "qBittorrent config is missing"],
+        "blockers": blockers if blockers else ([] if compose_ready else ["Docker Compose ptcli-api service is incomplete."]),
+        "warnings": warnings,
+        "next_actions": ["Run readiness_bundle with source/target and explicit confirmations, then follow live_execution_package."] if final_ready else _deployment_final_report_next_actions(compose_ready, blockers, warnings),
+    }
+
+
+def _deployment_final_report_recommended_call(
+    final_ready: bool,
+    compose_ready: bool,
+    blockers: list[str],
+    seedbox_bootstrap_handoff: dict[str, Any],
+    deployment_handoff: dict[str, Any],
+) -> dict[str, Any]:
+    if final_ready:
+        return {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request": {"source_tracker": "U2", "source_id": "60635", "target": "MTEAM", "accept_rules": True, "confirm_upload": True},
+            "safe_to_call_now": True,
+        }
+    if blockers:
+        return {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "request": None, "safe_to_call_now": True, "blockers": blockers}
+    if not compose_ready:
+        next_step = seedbox_bootstrap_handoff.get("next_step") if isinstance(seedbox_bootstrap_handoff.get("next_step"), dict) else {}
+        return {
+            "tool": next_step.get("tool") or "deployment_check",
+            "endpoint": next_step.get("endpoint") or "/v1/deployment/check",
+            "method": next_step.get("method") or "GET",
+            "request": next_step.get("request"),
+            "safe_to_call_now": next_step.get("tool") != "shell",
+            "reason": "repair_docker_compose",
+        }
+    next_step = deployment_handoff.get("next_step") if isinstance(deployment_handoff.get("next_step"), dict) else {}
+    return {
+        "tool": next_step.get("tool") or "deployment_check",
+        "endpoint": next_step.get("endpoint") or "/v1/deployment/check",
+        "method": "GET" if next_step.get("tool") == "deployment_check" else "POST",
+        "request": next_step.get("request"),
+        "safe_to_call_now": True,
+        "reason": "resolve_deployment_warnings",
+    }
+
+
+def _deployment_final_report_next_actions(compose_ready: bool, blockers: list[str], warnings: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve deployment_final_report.blockers, then rerun deployment_check."]
+    if not compose_ready:
+        return ["Repair docker-compose.yml ptcli-api service, then rerun deployment_check before exposing the API to OpenClaw/Hermes."]
+    if warnings:
+        return ["Review deployment_final_report.warnings, then run readiness_bundle before any live retorrent job."]
+    return ["Rerun deployment_check and inspect deployment_final_report.recommended_call."]
 
 
 def _deployment_seedbox_bootstrap_handoff(
@@ -21871,7 +22035,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "seedbox_bootstrap_handoff", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "seedbox_bootstrap_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
@@ -21879,6 +22043,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "env", "qbit", "safety", "blockers", "warnings"],
                 "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "warnings"],
                 "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+                "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
@@ -24270,6 +24435,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "deployment_runbook": {"type": "object"},
             "deployment_handoff": {"type": "object"},
             "seedbox_bootstrap_handoff": {"type": "object"},
+            "deployment_final_report": {"type": "object"},
             "agent_summary": {"type": "object"},
             "agent_handoff": {"type": "object"},
         },
