@@ -16478,6 +16478,18 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert sequence["loop_control"]["refill_request_contract"] == refill_plan["refill_request_contract"]
     assert sequence["loop_control"]["after_step"]["tool"] == "daily_candidate_batch_status"
     assert batch["daily_candidate_tracking_report"]["loop_control"] == sequence["loop_control"]
+    completion_gate = batch["daily_candidate_completion_gate"]
+    assert completion_gate["action"] == "refill_shortfall"
+    assert completion_gate["ready_shortfall_count"] == 9
+    assert completion_gate["refill_handoff"]["kind"] == "ptcli.daily_candidate_completion_refill_handoff"
+    assert completion_gate["refill_handoff"]["ready"] is True
+    assert completion_gate["refill_handoff"]["action"] == "create_refill_job"
+    assert completion_gate["refill_handoff"]["ready_shortfall_count"] == 9
+    assert completion_gate["refill_handoff"]["recommended_tool"] == "daily_candidates_job"
+    assert completion_gate["refill_handoff"]["recommended_request"] == refill_plan["refill_request_contract"]["recommended_request"]
+    assert completion_gate["refill_handoff"]["recommended_call"]["safe_to_call_now"] is True
+    assert completion_gate["refill_handoff"]["dedupe_key"] == "source_tracker,target,source_id"
+    assert completion_gate["recommended_request"] == completion_gate["refill_handoff"]["recommended_request"]
     publish_payload = batch["daily_candidate_batch_publish_payload"]
     assert publish_payload["kind"] == "ptcli.daily_candidate_batch_publish_payload"
     assert publish_payload["status"] == "shortfall"
@@ -19606,9 +19618,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_completion_gate" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_completion_gate_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "complete" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
+    assert "refill_handoff" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
+    assert "daily_candidate_completion_refill_handoff_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "completion_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "daily_candidate_completion_gate_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "completion_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+    assert "daily_candidate_completion_refill_handoff_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
