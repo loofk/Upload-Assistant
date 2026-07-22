@@ -16954,6 +16954,21 @@ def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, 
     assert refill["before"]["candidate_job_count"] == 1
     assert refill["after"]["candidate_job_count"] == 2
     assert refill["progress"]["candidate_job_count_delta"] == 1
+    loop_report = refill["refill_loop_report"]
+    assert loop_report["kind"] == "ptcli.daily_candidate_refill_loop_report"
+    assert loop_report["ready"] is True
+    assert loop_report["action"] == "continue_refill"
+    assert loop_report["refill_job_id"] == refill["refill_job_id"]
+    assert loop_report["before"]["candidate_job_count"] == 1
+    assert loop_report["after"]["candidate_job_count"] == 2
+    assert loop_report["progress"] == refill["progress"]
+    assert loop_report["ready_shortfall_count"] == 18
+    assert loop_report["recommended_tool"] == "daily_candidate_refill_job"
+    assert loop_report["recommended_endpoint"] == "/v1/jobs/candidates/daily/refill"
+    assert loop_report["recommended_request"] == refill["after_batch"]["daily_candidate_refill_plan"]["recommended_request"]
+    assert loop_report["recommended_call"]["safe_to_call_now"] is True
+    assert loop_report["safety"]["submits_candidates"] is False
+    assert loop_report["safety"]["uploads_torrents"] is False
     assert refill["followup"]["tool"] == "daily_candidate_batch_status"
     assert refill["followup"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert refill["after_batch"]["daily_candidate_batch_summary"]["candidate_job_count"] == 2

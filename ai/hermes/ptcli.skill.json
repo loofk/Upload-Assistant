@@ -15585,6 +15585,7 @@
           "before_batch",
           "after_batch",
           "followup",
+          "refill_loop_report",
           "blockers",
           "next_actions"
         ],
@@ -15602,6 +15603,32 @@
           "endpoint",
           "method",
           "request"
+        ],
+        "refill_loop_report_fields": [
+          "ready",
+          "status",
+          "action",
+          "refill_job_id",
+          "refill_job_status",
+          "refill_request",
+          "before",
+          "after",
+          "progress",
+          "target_met",
+          "safe_to_submit_count",
+          "ready_shortfall_count",
+          "followup",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "recommended_call",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {

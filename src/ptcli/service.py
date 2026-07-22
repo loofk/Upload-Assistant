@@ -3030,6 +3030,26 @@ def _daily_candidate_refill_job_result(
     after_ready_count = int(after_summary.get("ready_to_submit_count") or after_summary.get("ready_count") or 0)
     job_id = refill_job.get("job_id") if isinstance(refill_job, dict) else None
     ok = bool(refill_job) and not blockers
+    progress = {
+        "candidate_job_count_delta": after_job_count - before_job_count,
+        "ready_count_delta": after_ready_count - before_ready_count,
+    }
+    followup = {
+        "tool": "daily_candidate_batch_status",
+        "endpoint": "/v1/jobs/candidates/daily/batch",
+        "method": "GET",
+        "request": after_batch.get("filters"),
+    }
+    refill_loop_report = _daily_candidate_refill_loop_report(
+        ok=ok,
+        before_batch=before_batch,
+        after_batch=after_batch,
+        refill_job=refill_job,
+        refill_request=refill_request,
+        progress=progress,
+        followup=followup,
+        blockers=blockers,
+    )
     return {
         "kind": "ptcli.daily_candidate_refill_job_result",
         "status": "ok" if ok else "blocked",
@@ -3049,17 +3069,12 @@ def _daily_candidate_refill_job_result(
             "ready_shortfall_count": (after_batch.get("daily_candidate_refill_plan") or {}).get("ready_shortfall_count") if isinstance(after_batch.get("daily_candidate_refill_plan"), dict) else None,
         },
         "progress": {
-            "candidate_job_count_delta": after_job_count - before_job_count,
-            "ready_count_delta": after_ready_count - before_ready_count,
+            **progress,
         },
         "before_batch": before_batch,
         "after_batch": after_batch,
-        "followup": {
-            "tool": "daily_candidate_batch_status",
-            "endpoint": "/v1/jobs/candidates/daily/batch",
-            "method": "GET",
-            "request": after_batch.get("filters"),
-        },
+        "followup": followup,
+        "refill_loop_report": refill_loop_report,
         "continue_when": "after_batch.daily_candidate_refill_plan.ready_shortfall_count reaches 0, or created refill jobs expose new safe candidates for user-approved submission.",
         "stop_when": [
             "blockers is non-empty",
@@ -3084,6 +3099,163 @@ def _daily_candidate_batch_source_ids(summary: dict[str, Any]) -> list[str]:
         for candidate in _daily_candidate_batch_item_candidates(item):
             _append_unique_string(source_ids, candidate.get("source_id"))
     return source_ids
+
+
+def _daily_candidate_refill_loop_report(
+    *,
+    ok: bool,
+    before_batch: dict[str, Any],
+    after_batch: dict[str, Any],
+    refill_job: dict[str, Any] | None,
+    refill_request: dict[str, Any] | None,
+    progress: dict[str, Any],
+    followup: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    before_state = _daily_candidate_refill_loop_state(before_batch)
+    after_state = _daily_candidate_refill_loop_state(after_batch)
+    action = _daily_candidate_refill_loop_action(ok, after_batch, after_state, progress, blockers)
+    recommended_call = _daily_candidate_refill_loop_recommended_call(action, after_batch, followup)
+    return {
+        "kind": "ptcli.daily_candidate_refill_loop_report",
+        "ready": ok and action in {"submit_available", "continue_refill", "poll_jobs", "deliver_digest", "report_target_met"},
+        "status": "ready" if ok and not blockers else "blocked",
+        "action": action,
+        "refill_job_id": refill_job.get("job_id") if isinstance(refill_job, dict) else None,
+        "refill_job_status": refill_job.get("status") if isinstance(refill_job, dict) else None,
+        "refill_request": refill_request,
+        "before": before_state,
+        "after": after_state,
+        "progress": progress,
+        "target_met": after_state.get("ready_shortfall_count") == 0,
+        "safe_to_submit_count": after_state.get("safe_to_submit_count"),
+        "ready_shortfall_count": after_state.get("ready_shortfall_count"),
+        "followup": followup,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "recommended_call": recommended_call,
+        "read_order": ["refill_loop_report", "after_batch.daily_candidate_batch_publish_payload", "after_batch.daily_candidate_submission_plan", "after_batch.daily_candidate_refill_plan", "after_batch.daily_candidate_tracking_report"],
+        "continue_when": _daily_candidate_refill_loop_continue_when(action),
+        "stop_when": _daily_candidate_refill_loop_stop_when(action),
+        "safety": {
+            "creates_candidate_scan_jobs": action == "continue_refill",
+            "submits_candidates": False,
+            "uploads_torrents": False,
+            "submit_requires_user_approval": True,
+            "live_upload_requires_confirm_upload": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_refill_loop_next_actions(action, after_state, blockers),
+    }
+
+
+def _daily_candidate_refill_loop_state(batch: dict[str, Any]) -> dict[str, Any]:
+    summary = batch.get("daily_candidate_batch_summary") if isinstance(batch.get("daily_candidate_batch_summary"), dict) else {}
+    submission_plan = batch.get("daily_candidate_submission_plan") if isinstance(batch.get("daily_candidate_submission_plan"), dict) else {}
+    refill_plan = batch.get("daily_candidate_refill_plan") if isinstance(batch.get("daily_candidate_refill_plan"), dict) else {}
+    tracking = batch.get("daily_candidate_tracking_report") if isinstance(batch.get("daily_candidate_tracking_report"), dict) else {}
+    return {
+        "candidate_job_count": int(summary.get("candidate_job_count") or 0),
+        "ready_count": int(submission_plan.get("ready_count") or summary.get("ready_to_submit_count") or summary.get("ready_count") or 0),
+        "safe_to_submit_count": int(submission_plan.get("safe_to_submit_count") or summary.get("unsubmitted_safe_count") or 0),
+        "submitted_retorrent_job_count": int(submission_plan.get("submitted_retorrent_job_count") or summary.get("submitted_retorrent_job_count") or 0),
+        "running_count": int(tracking.get("running_count") or summary.get("running_count") or 0),
+        "blocked_count": int(tracking.get("blocked_count") or summary.get("blocked_count") or 0),
+        "ready_shortfall_count": int(refill_plan.get("ready_shortfall_count") or tracking.get("ready_shortfall_count") or 0),
+        "target_count": int(refill_plan.get("target_count") or submission_plan.get("target_count") or tracking.get("target_count") or 0),
+        "refill_action": refill_plan.get("action"),
+        "tracking_action": tracking.get("action"),
+        "submission_action": submission_plan.get("action"),
+    }
+
+
+def _daily_candidate_refill_loop_action(ok: bool, after_batch: dict[str, Any], after_state: dict[str, Any], progress: dict[str, Any], blockers: list[str]) -> str:
+    if blockers or not ok:
+        return "resolve_blockers"
+    if int(after_state.get("safe_to_submit_count") or 0) > 0:
+        return "submit_available"
+    if int(after_state.get("running_count") or 0) > 0:
+        return "poll_jobs"
+    refill_plan = after_batch.get("daily_candidate_refill_plan") if isinstance(after_batch.get("daily_candidate_refill_plan"), dict) else {}
+    refill_handoff = refill_plan.get("refill_job_handoff") if isinstance(refill_plan.get("refill_job_handoff"), dict) else {}
+    if int(after_state.get("ready_shortfall_count") or 0) > 0 and refill_handoff.get("ready") is True and int(progress.get("candidate_job_count_delta") or 0) > 0:
+        return "continue_refill"
+    if int(after_state.get("ready_shortfall_count") or 0) == 0:
+        return "deliver_digest"
+    if int(progress.get("candidate_job_count_delta") or 0) == 0:
+        return "stop_no_progress"
+    return "inspect_batch"
+
+
+def _daily_candidate_refill_loop_recommended_call(action: str, after_batch: dict[str, Any], followup: dict[str, Any]) -> dict[str, Any]:
+    if action == "submit_available":
+        submission_plan = after_batch.get("daily_candidate_submission_plan") if isinstance(after_batch.get("daily_candidate_submission_plan"), dict) else {}
+        return {
+            "tool": submission_plan.get("recommended_tool") or "submit_daily_candidate_job",
+            "endpoint": submission_plan.get("recommended_endpoint"),
+            "method": submission_plan.get("recommended_method") or "POST",
+            "request": submission_plan.get("recommended_request"),
+            "safe_to_call_now": False,
+            "requires_user_review": True,
+            "reason": "user_must_approve_daily_candidate_before_submit",
+        }
+    if action == "continue_refill":
+        refill_plan = after_batch.get("daily_candidate_refill_plan") if isinstance(after_batch.get("daily_candidate_refill_plan"), dict) else {}
+        return {
+            "tool": "daily_candidate_refill_job",
+            "endpoint": "/v1/jobs/candidates/daily/refill",
+            "method": "POST",
+            "request": refill_plan.get("recommended_request"),
+            "safe_to_call_now": bool(refill_plan.get("ready")),
+            "requires_user_review": False,
+            "reason": "continue_daily_candidate_shortfall_refill",
+        }
+    if action == "poll_jobs":
+        return {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": followup.get("request"), "safe_to_call_now": True, "requires_user_review": False, "reason": "poll_daily_candidate_batch"}
+    if action in {"deliver_digest", "report_target_met"}:
+        return {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": followup.get("request"), "safe_to_call_now": True, "requires_user_review": False, "reason": "read_daily_candidate_publish_payload"}
+    return {**followup, "safe_to_call_now": action == "inspect_batch", "requires_user_review": False, "reason": action}
+
+
+def _daily_candidate_refill_loop_continue_when(action: str) -> str | None:
+    if action == "submit_available":
+        return "the user approves refill_loop_report.recommended_request, then submit_daily_candidate_job creates a retorrent job"
+    if action == "continue_refill":
+        return "another daily_candidate_refill_job increases safe_to_submit_count or reaches ready_shortfall_count=0"
+    if action == "poll_jobs":
+        return "after_batch.daily_candidate_tracking_report.running_count reaches 0"
+    if action == "deliver_digest":
+        return "after_batch.daily_candidate_batch_publish_payload is delivered through daily_candidate_delivery or CLI daily-schedule"
+    return None
+
+
+def _daily_candidate_refill_loop_stop_when(action: str) -> list[str]:
+    base = ["refill_loop_report.blockers is non-empty"]
+    if action == "submit_available":
+        return [*base, "user approval missing", "confirm_upload missing"]
+    if action == "continue_refill":
+        return [*base, "progress.candidate_job_count_delta=0", "after.ready_shortfall_count stops decreasing and no new safe candidates appear"]
+    if action == "poll_jobs":
+        return [*base, "submitted or candidate jobs fail/cancel"]
+    return [*base, "action=stop_no_progress"]
+
+
+def _daily_candidate_refill_loop_next_actions(action: str, after_state: dict[str, Any], blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve refill_loop_report.blockers before continuing daily candidate refill."]
+    if action == "submit_available":
+        return [f"Ask the user to approve one of {after_state.get('safe_to_submit_count')} refill candidate(s), then call submit_daily_candidate_job."]
+    if action == "continue_refill":
+        return [f"Call daily_candidate_refill_job again to fill {after_state.get('ready_shortfall_count')} missing ready candidate(s)."]
+    if action == "poll_jobs":
+        return ["Refresh daily_candidate_batch_status until pending candidate or retorrent jobs settle."]
+    if action == "deliver_digest":
+        return ["Deliver after_batch.daily_candidate_batch_publish_payload, then wait for explicit user approval before submitting candidates."]
+    if action == "stop_no_progress":
+        return ["Stop automatic refill and report that no new candidate job was added by the last refill attempt."]
+    return ["Inspect refill_loop_report.after and after_batch before deciding the next daily candidate action."]
 
 
 def _append_unique_string(items: list[str], value: Any) -> None:
@@ -29280,10 +29452,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Read the current daily-candidate batch and create one additional discovery job only when refill_job_handoff.safe_to_call_now=true. This helps fill the daily target without submitting or uploading torrents.",
             "input_schema": daily_candidate_batch_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "created", "refill_job", "refill_job_id", "refill_request", "before", "after", "progress", "before_batch", "after_batch", "followup", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "created", "refill_job", "refill_job_id", "refill_request", "before", "after", "progress", "before_batch", "after_batch", "followup", "refill_loop_report", "blockers", "next_actions"],
                 "before_after_fields": ["candidate_job_count", "ready_count", "ready_shortfall_count"],
                 "progress_fields": ["candidate_job_count_delta", "ready_count_delta"],
                 "followup_fields": ["tool", "endpoint", "method", "request"],
+                "refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
             },
             "workflow_hints": {"read_before": "daily_candidate_batch_status", "repeat_until": "after.ready_shortfall_count=0 or blockers is non-empty", "submit_with": "submit_daily_candidate_job only after user approval"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
@@ -31757,6 +31930,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "before_batch": {"type": "object"},
             "after_batch": {"type": "object"},
             "followup": {"type": "object"},
+            "refill_loop_report": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
