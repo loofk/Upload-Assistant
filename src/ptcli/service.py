@@ -1451,6 +1451,7 @@ async def materials_prepare_payload(request: dict[str, Any] | None = None) -> di
         "stages": stages,
         "material_options": material_options,
         "material_evidence": _materials_prepare_evidence(material_options),
+        "materials_prepare_handoff": handoff,
         "resume_handoff": handoff,
         "recommended_request": handoff.get("recommended_request"),
         "blockers": blockers,
@@ -14824,6 +14825,8 @@ def _job_target_upload_service_gate(job: dict[str, Any], summary_payload: dict[s
 
 def _materials_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
     blockers = [] if context["actions"] else ["No material preparation action was requested."]
+    existing_options = _materials_prepare_existing_options(context)
+    handoff = _materials_prepare_handoff(context, existing_options, not blockers, blockers)
     request_template = {
         "path": context.get("path") or "/downloads/content",
         "output_dir": context["output_dir"],
@@ -14847,9 +14850,10 @@ def _materials_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any
         "output_dir": context["output_dir"],
         "planned_actions": context["actions"],
         "stages": [{"stage": action.replace("_", "-"), "ok": True, "dry_run": True} for action in context["actions"]],
-        "material_options": _materials_prepare_existing_options(context),
-        "material_evidence": _materials_prepare_evidence(_materials_prepare_existing_options(context)),
-        "resume_handoff": _materials_prepare_handoff(context, _materials_prepare_existing_options(context), not blockers, blockers),
+        "material_options": existing_options,
+        "material_evidence": _materials_prepare_evidence(existing_options),
+        "materials_prepare_handoff": handoff,
+        "resume_handoff": handoff,
         "recommended_request": request_template,
         "blockers": blockers,
         "next_actions": _materials_prepare_next_actions(not blockers, blockers),
@@ -34334,10 +34338,11 @@ def _qbit_wait_response_contract() -> dict[str, Any]:
 
 def _materials_prepare_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "dry_run", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "request", "output_dir", "stages", "material_options", "material_evidence", "resume_handoff", "recommended_request", "blockers", "next_actions", "safety"],
+        "required_fields": ["status", "ok", "dry_run", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "request", "output_dir", "stages", "material_options", "material_evidence", "materials_prepare_handoff", "resume_handoff", "recommended_request", "blockers", "next_actions", "safety"],
         "stage_fields": ["stage", "ok", "result", "message"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "screenshot_files", "image_host_file", "image_host", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"],
         "material_evidence_fields": ["path", "exists", "size_bytes", "sha1"],
+        "materials_prepare_handoff_fields": ["ready", "recommended_tool", "recommended_endpoint", "method", "parent_job_id", "material_options", "accepted_override_keys", "recommended_request", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "next_step", "target_job_request_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "resume_handoff_fields": ["ready", "recommended_tool", "recommended_endpoint", "method", "parent_job_id", "material_options", "accepted_override_keys", "recommended_request", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "next_step", "target_job_request_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "safety": ["does_not_contact_trackers", "does_not_upload_to_tracker", "may_contact_image_host", "writes_files", "dry_run"],
     }
@@ -35921,6 +35926,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "stages": {"type": "array", "items": {"type": "object"}},
             "material_options": {"type": "object"},
             "material_evidence": {"type": "object"},
+            "materials_prepare_handoff": {"type": "object"},
             "resume_handoff": {"type": "object"},
             "recommended_request": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
