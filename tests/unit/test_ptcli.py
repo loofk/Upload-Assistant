@@ -13748,8 +13748,22 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["material_preparation_final_report"]["media"]["screenshots_ready"] is True
     assert job["material_preparation_final_report"]["recommended_tool"] == "resume_job"
     assert job["material_preparation_final_report"]["dry_run_request"] == job["material_gap_summary"]["dry_run_request"]
+    chain = job["material_chain_handoff"]
+    assert chain["kind"] == "ptcli.material_chain_handoff"
+    assert chain["ready_for_target_upload"] is False
+    assert chain["action"] == "resolve_material_blockers"
+    assert chain["next_step"]["domain"] == "source_content"
+    chain_steps = {step["domain"]: step for step in chain["steps"]}
+    assert chain_steps["metadata_ids"]["label"] == "IMDb/TMDb/Douban ids"
+    assert chain_steps["ptgen_description"]["label"] == "PTGen/Douban description"
+    assert chain_steps["screenshots"]["ready"] is True
+    assert chain_steps["image_host"]["label"] == "Image-hosted screenshots"
+    assert chain_steps["target_description"]["evidence_ref"] == "material_preparation_final_report.target_payload.description_ready"
+    assert chain["recommended_call"]["reason"] == "source_content"
+    assert chain["safety"]["does_not_skip_image_host"] is True
     assert job["job_handoff"]["material_gap_summary"] == job["material_gap_summary"]
     assert job["job_handoff"]["material_preparation_final_report"] == job["material_preparation_final_report"]
+    assert job["job_handoff"]["material_chain_handoff"] == chain
     assert "material_gap_summary" in job["job_control_summary"]["read_order"]
     assert "material_preparation_final_report" in job["job_control_summary"]["read_order"]
     assert job["agent_decision"]["materials_handoff"] == job["materials_handoff"]
@@ -17511,8 +17525,16 @@ def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -
     assert gap_summary["recommended_tool"] == "resume_job"
     assert gap_summary["dry_run_request"]["dry_run"] is True
     assert gap_summary["execute_request"]["metadata_file"] == "/tmp/materials/metadata.json"
+    chain = job["material_chain_handoff"]
+    assert chain["kind"] == "ptcli.material_chain_handoff"
+    assert chain["next_step"]["domain"] == "metadata_ids"
+    assert chain["recommended_call"]["tool"] == "resume_job"
+    assert chain["steps"][1]["domain"] == "metadata_ids"
+    assert chain["steps"][2]["domain"] == "ptgen_description"
+    assert chain["steps"][5]["domain"] == "image_host"
     assert job["job_handoff"]["material_gap_summary"] == gap_summary
     assert job["job_handoff"]["material_preparation_final_report"] == job["material_preparation_final_report"]
+    assert job["job_handoff"]["material_chain_handoff"] == chain
     assert "material_gap_summary" in job["job_control_summary"]["read_order"]
     assert "material_preparation_final_report" in job["job_control_summary"]["read_order"]
 
@@ -20783,6 +20805,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_evidence_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "material_chain_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -20790,6 +20813,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_evidence_summary" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "material_chain_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -20797,10 +20821,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_evidence_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "material_chain_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "material_chain_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "material_chain_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "steps" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]
+    assert "material_chain_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "evidence_ref" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_step_fields"]
     assert "material_evidence_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -21197,6 +21227,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_batch_loop_control_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_batch_publish_payload_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_publish_card_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "material_chain_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "daily_candidate_refill_plan_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "refill_job_handoff" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "daily_candidate_batch_sequence_fields" in tool_by_name["list_jobs"]["response_contract"]
@@ -21994,6 +22025,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     target_upload_job_schema = openapi["paths"]["/v1/jobs/target/upload"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "target_upload_service_gate" in target_upload_job_schema["properties"]
     assert "target_upload_handoff" in target_upload_job_schema["properties"]
+    assert "material_chain_handoff" in target_upload_job_schema["properties"]
     summary_check_request_schema = openapi["paths"]["/v1/summary/check"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert summary_check_request_schema["required"] == ["summary_file"]
     summary_check_schema = openapi["paths"]["/v1/summary/check"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -22003,6 +22035,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_submission_final_report" in summary_check_schema["properties"]
     assert "delivery_audit" in summary_check_schema["properties"]
     assert "service" in summary_check_schema["properties"]
+    assert "material_chain_handoff" in summary_schema["properties"]
     assert "runtime" in summary_schema["properties"]
     assert "status_endpoint" in summary_schema["properties"]
     assert "summary_endpoint" in summary_schema["properties"]
