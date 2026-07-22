@@ -13132,9 +13132,10 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
     closure_handoff = _job_closure_handoff(job, payload if isinstance(payload, dict) else None)
     qbit_handoff = _job_qbit_handoff(job, payload if isinstance(payload, dict) else None)
     candidate_submission_summary = _job_candidate_submission_summary(job, payload if isinstance(payload, dict) else None)
+    policy_config_apply_handoff = _job_policy_config_apply_handoff(job)
 
-    action, phase, reason = _job_recovery_decision(status, runtime, job_handoff, materials_handoff, target_upload_handoff, closure_handoff, resume_plan, candidate_submission_summary)
-    next_step = _job_recovery_next_step(action, job_handoff, materials_handoff, target_upload_handoff, closure_handoff, resume_execution, runtime)
+    action, phase, reason = _job_recovery_decision(status, runtime, job_handoff, materials_handoff, target_upload_handoff, closure_handoff, resume_plan, candidate_submission_summary, policy_config_apply_handoff)
+    next_step = _job_recovery_next_step(action, job_handoff, materials_handoff, target_upload_handoff, closure_handoff, resume_execution, runtime, policy_config_apply_handoff)
     recommended_request = next_step.get("request") if isinstance(next_step, dict) else None
     dry_run_request = _job_recovery_dry_run_request(action, materials_handoff, resume_execution, resume_requirements, recommended_request)
     execute_request = _job_recovery_execute_request(action, materials_handoff, resume_execution, resume_requirements)
@@ -13148,7 +13149,7 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
         "phase": phase,
         "action": action,
         "reason": reason,
-        "ready": action in {"poll", "preview_resume", "execute_resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_target_payload", "repair_qbit", "read_summary"},
+        "ready": action in {"poll", "preview_resume", "execute_resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_target_payload", "repair_qbit", "read_summary", "configure_policy"},
         "should_poll": bool(runtime.get("should_poll")),
         "should_resume": action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit"},
         "resume_preview_required": action in {"preview_resume", "prepare_materials", "repair_target_payload", "repair_qbit"},
@@ -13158,11 +13159,12 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
         "recommended_request": recommended_request,
         "dry_run_request": dry_run_request,
         "execute_request": execute_request,
+        "policy_config_apply_handoff": policy_config_apply_handoff,
         "status_endpoint": runtime.get("status_endpoint"),
         "summary_endpoint": runtime.get("summary_endpoint"),
         "resume_endpoint": runtime.get("resume_endpoint"),
         "poll_after_seconds": runtime.get("poll_after_seconds"),
-        "gates": _job_recovery_gates(runtime, resume_plan, materials_handoff, target_upload_handoff, closure_handoff, qbit_handoff),
+        "gates": _job_recovery_gates(runtime, resume_plan, materials_handoff, target_upload_handoff, closure_handoff, qbit_handoff, policy_config_apply_handoff),
         "handoff_sources": {
             "job_handoff_action": job_handoff.get("action"),
             "resume_recommended": bool(resume_plan.get("recommended")),
@@ -13171,9 +13173,12 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
             "target_upload_action": target_upload_handoff.get("action") if isinstance(target_upload_handoff, dict) else None,
             "closure_action": closure_handoff.get("action") if isinstance(closure_handoff, dict) else None,
             "candidate_submission_action": candidate_submission_summary.get("execution_state") if isinstance(candidate_submission_summary, dict) else None,
+            "policy_config_apply_ready": policy_config_apply_handoff.get("ready") if isinstance(policy_config_apply_handoff, dict) else None,
+            "policy_config_apply_action": policy_config_apply_handoff.get("action") if isinstance(policy_config_apply_handoff, dict) else None,
         },
         "read_fields": [
             "recovery_handoff",
+            "policy_config_apply_handoff",
             "job_handoff",
             "resume_execution_handoff",
             "resume_requirements",
@@ -13202,9 +13207,10 @@ def _job_blocked_recovery_report(job: dict[str, Any], payload: dict[str, Any] | 
     materials_handoff = _job_materials_handoff(job, payload)
     target_upload_handoff = _job_target_upload_handoff(job, payload)
     closure_handoff = _job_closure_handoff(job, payload)
+    policy_config_apply_handoff = _job_policy_config_apply_handoff(job)
     duplicate_check = _job_duplicate_check(job)
     action = _job_blocked_recovery_action(status, runtime, recovery_handoff, resume_final_report, duplicate_check)
-    blockers = _job_blocked_recovery_blockers(job, recovery_handoff, resume_final_report, materials_handoff, target_upload_handoff, closure_handoff, duplicate_check)
+    blockers = _job_blocked_recovery_blockers(job, recovery_handoff, resume_final_report, materials_handoff, target_upload_handoff, closure_handoff, duplicate_check, policy_config_apply_handoff)
     recommended_call = _job_blocked_recovery_recommended_call(job_id, action, recovery_handoff, resume_final_report, runtime, blockers)
     recoverable = _job_blocked_recovery_recoverable(action, recommended_call, blockers)
     return {
@@ -13226,9 +13232,11 @@ def _job_blocked_recovery_report(job: dict[str, Any], payload: dict[str, Any] | 
         "recommended_call": recommended_call,
         "dry_run_request": recovery_handoff.get("dry_run_request") or resume_final_report.get("dry_run_request"),
         "execute_request": recovery_handoff.get("execute_request") or resume_final_report.get("execute_request"),
-        "blocked_domains": _job_blocked_recovery_domains(materials_handoff, target_upload_handoff, closure_handoff, duplicate_check, blockers),
+        "policy_config_apply_handoff": policy_config_apply_handoff,
+        "blocked_domains": _job_blocked_recovery_domains(materials_handoff, target_upload_handoff, closure_handoff, duplicate_check, blockers, policy_config_apply_handoff),
         "read_order": [
             "blocked_recovery_report",
+            "policy_config_apply_handoff",
             "recovery_handoff",
             "job_control_summary",
             "resume_final_report",
@@ -13248,6 +13256,8 @@ def _job_blocked_recovery_report(job: dict[str, Any], payload: dict[str, Any] | 
             "materials_ready": materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None,
             "target_upload_ready": target_upload_handoff.get("ready_for_live_upload") if isinstance(target_upload_handoff, dict) else None,
             "closure_action": closure_handoff.get("action") if isinstance(closure_handoff, dict) else None,
+            "policy_config_apply_ready": policy_config_apply_handoff.get("ready") if isinstance(policy_config_apply_handoff, dict) else None,
+            "policy_config_apply_action": policy_config_apply_handoff.get("action") if isinstance(policy_config_apply_handoff, dict) else None,
         },
         "blockers": blockers,
         "next_actions": _job_blocked_recovery_next_actions(action, recommended_call, blockers, job_id),
@@ -13264,7 +13274,7 @@ def _job_blocked_recovery_action(status: str, runtime: dict[str, Any], recovery_
     if status == "cancelled":
         return "stop_cancelled"
     recovery_action = str(recovery_handoff.get("action") or "")
-    if recovery_action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "prepare_target_package", "target_upload_closure"}:
+    if recovery_action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "prepare_target_package", "target_upload_closure", "configure_policy"}:
         return recovery_action
     resume_action = str(resume_final_report.get("action") or "")
     if resume_action in {"preview_resume", "execute_resume", "poll", "read_summary"}:
@@ -13305,7 +13315,7 @@ def _job_blocked_recovery_recommended_call(
     resume_call = resume_final_report.get("recommended_call") if isinstance(resume_final_report.get("recommended_call"), dict) else {}
     if resume_call.get("tool") and action in {"preview_resume", "execute_resume"}:
         return dict(resume_call)
-    if action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "prepare_target_package", "target_upload_closure"} and recovery_handoff.get("recommended_tool"):
+    if action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "prepare_target_package", "target_upload_closure", "configure_policy"} and recovery_handoff.get("recommended_tool"):
         return {
             "tool": recovery_handoff.get("recommended_tool"),
             "endpoint": recovery_handoff.get("recommended_endpoint"),
@@ -13313,8 +13323,10 @@ def _job_blocked_recovery_recommended_call(
             "request": recovery_handoff.get("recommended_request"),
             "dry_run_request": recovery_handoff.get("dry_run_request"),
             "execute_request": recovery_handoff.get("execute_request"),
-            "safe_to_call_now": action == "poll" or (action in {"prepare_target_package", "target_upload_closure"} and not blockers),
-            "requires_user_review": action not in {"poll", "read_summary"},
+            "safe_to_call_now": (action == "configure_policy" and recovery_handoff.get("recommended_tool") in {"site_policies", "site_policy_rule_review"})
+            or action == "poll"
+            or (action in {"prepare_target_package", "target_upload_closure"} and not blockers),
+            "requires_user_review": action not in {"poll", "read_summary", "configure_policy"},
             "reason": f"recovery_handoff.{action}",
         }
     return {
@@ -13333,7 +13345,7 @@ def _job_blocked_recovery_recommended_call(
 def _job_blocked_recovery_recoverable(action: str, recommended_call: dict[str, Any], blockers: list[str]) -> bool:
     if action in {"poll", "read_summary", "stop_duplicate", "stop_cancelled", "failed"}:
         return False
-    if action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "prepare_target_package", "target_upload_closure"}:
+    if action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "prepare_target_package", "target_upload_closure", "configure_policy"}:
         return bool(recommended_call.get("tool") or recommended_call.get("dry_run_request") or recommended_call.get("execute_request"))
     return bool(recommended_call.get("tool") and not blockers)
 
@@ -13346,6 +13358,7 @@ def _job_blocked_recovery_blockers(
     target_upload_handoff: dict[str, Any],
     closure_handoff: dict[str, Any],
     duplicate_check: dict[str, Any],
+    policy_config_apply_handoff: dict[str, Any] | None,
 ) -> list[str]:
     blockers = [
         *_string_list(job.get("blockers")),
@@ -13354,6 +13367,7 @@ def _job_blocked_recovery_blockers(
         *_string_list(materials_handoff.get("blockers") if isinstance(materials_handoff, dict) else []),
         *_string_list(target_upload_handoff.get("blockers") if isinstance(target_upload_handoff, dict) else []),
         *_string_list(closure_handoff.get("blockers") if isinstance(closure_handoff, dict) else []),
+        *_string_list(policy_config_apply_handoff.get("blockers") if isinstance(policy_config_apply_handoff, dict) else []),
     ]
     if duplicate_check.get("exists") is True:
         blockers.append("duplicate_check.exists")
@@ -13366,6 +13380,7 @@ def _job_blocked_recovery_domains(
     closure_handoff: dict[str, Any],
     duplicate_check: dict[str, Any],
     blockers: list[str],
+    policy_config_apply_handoff: dict[str, Any] | None,
 ) -> list[str]:
     domains: list[str] = []
     if duplicate_check.get("exists") is True:
@@ -13376,6 +13391,8 @@ def _job_blocked_recovery_domains(
         domains.append("target_upload")
     if isinstance(closure_handoff, dict) and closure_handoff.get("complete") is False:
         domains.append("closure")
+    if isinstance(policy_config_apply_handoff, dict) and policy_config_apply_handoff.get("ready") is False:
+        domains.append("site_policy_config")
     for blocker in blockers:
         text = str(blocker)
         if "qbit" in text.lower():
@@ -13396,6 +13413,8 @@ def _job_blocked_recovery_complete_when(action: str) -> list[str]:
         return ["job_final_report.report_allowed=true or live_user_report.report_allowed=true"]
     if action == "stop_duplicate":
         return ["duplicate_check.exists=true has been reported to the user"]
+    if action == "configure_policy":
+        return ["policy_config_apply_handoff.verification succeeds", "policy_repair_gate.ready=true", "policy_execution_sequence.ready=true"]
     return ["resume dry-run has been reviewed", "follow-up child job reaches complete", "job_final_report.report_allowed=true"]
 
 
@@ -13409,6 +13428,8 @@ def _job_blocked_recovery_stop_when(action: str, recovery_handoff: dict[str, Any
     ]
     if duplicate_check.get("exists") is True or action == "stop_duplicate":
         stop_when.append("duplicate_check.exists=true")
+    if action == "configure_policy":
+        stop_when.append("policy_config_apply_handoff.blockers remains non-empty")
     if action in {"stop_cancelled", "failed", "resolve_blockers"}:
         stop_when.append(f"blocked_recovery_report.action={action}")
     return list(dict.fromkeys(stop_when))
@@ -13423,6 +13444,8 @@ def _job_blocked_recovery_next_actions(action: str, recommended_call: dict[str, 
         return ["Report duplicate_check evidence and do not resume or upload."]
     if action in {"preview_resume", "prepare_materials", "repair_target_payload", "repair_qbit"} and recommended_call.get("dry_run_request"):
         return ["Call blocked_recovery_report.recommended_call.dry_run_request or recommended_request first; review preview before execute_request."]
+    if action == "configure_policy":
+        return ["Call blocked_recovery_report.recommended_call if it is site_policies or site_policy_rule_review; otherwise apply policy_config_apply_handoff.edit_config manually, then rerun verification."]
     if action == "execute_resume" and recommended_call.get("execute_request"):
         return ["Execute blocked_recovery_report.recommended_call.execute_request only after user review, then poll the child job."]
     if recommended_call.get("tool") and not blockers:
@@ -13444,7 +13467,7 @@ def _job_control_summary(job: dict[str, Any], payload: dict[str, Any] | None = N
     action = _job_control_action(status, runtime, job_handoff, recovery_handoff, completion_report, closure_summary)
     recommended_call = _job_control_recommended_call(job_handoff, recovery_handoff, completion_report, closure_summary)
     blockers = _job_control_blockers(job, recovery_handoff, completion_report, closure_summary)
-    ready = action in {"poll", "read_summary"} or (action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"} and not blockers)
+    ready = action in {"poll", "read_summary", "configure_policy"} or (action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"} and not blockers)
     if action in {"stop", "stop_duplicate", "blocked", "failed", "cancelled"}:
         ready = False
     return {
@@ -14013,10 +14036,10 @@ def _job_control_action(
     if runtime.get("should_poll"):
         return "poll"
     completion_status = str(completion_report.get("status") or "")
-    if completion_report.get("ready_for_user_report") is True:
-        return "read_summary"
     if completion_status == "duplicate_stopped" or closure_summary.get("action") == "stop_duplicate":
         return "stop_duplicate"
+    if completion_report.get("ready_for_user_report") is True:
+        return "read_summary"
     if status == "cancelled":
         return "cancelled"
     if status == "failed":
@@ -14026,7 +14049,7 @@ def _job_control_action(
         return "resume_preview"
     if recovery_action == "execute_resume":
         return "resume_execute"
-    if recovery_action in {"prepare_target_package", "target_upload_closure", "repair_qbit", "read_summary", "stop", "poll"}:
+    if recovery_action in {"prepare_target_package", "target_upload_closure", "repair_qbit", "read_summary", "stop", "poll", "configure_policy"}:
         return recovery_action
     job_action = str(job_handoff.get("action") or "")
     if job_action in {"prepare_materials", "prepare_target_package", "target_upload_closure", "resume", "done", "stop", "stop_duplicate", "collect_confirmations", "configure_policy"}:
@@ -14071,7 +14094,7 @@ def _job_control_recommended_call(
     if recovery_handoff.get("recommended_tool"):
         return {
             "ready": True,
-            "safe_to_call_now": recovery_handoff.get("action") == "poll",
+            "safe_to_call_now": recovery_handoff.get("action") in {"poll", "configure_policy"},
             "tool": recovery_handoff.get("recommended_tool"),
             "endpoint": recovery_handoff.get("recommended_endpoint"),
             "method": recovery_handoff.get("recommended_method"),
@@ -14080,9 +14103,9 @@ def _job_control_recommended_call(
             "status": recovery_handoff.get("status"),
             "dry_run_request": recovery_handoff.get("dry_run_request"),
             "execute_request": recovery_handoff.get("execute_request"),
-            "requires_user_review": recovery_handoff.get("resume_preview_required") is True,
+            "requires_user_review": recovery_handoff.get("resume_preview_required") is True and recovery_handoff.get("action") != "configure_policy",
             "gates": recovery_handoff.get("gates") if isinstance(recovery_handoff.get("gates"), dict) else {},
-            "safety": {"safe_to_call_now": recovery_handoff.get("action") == "poll", "do_not_call_when": _string_list(recovery_handoff.get("stop_when"))},
+            "safety": {"safe_to_call_now": recovery_handoff.get("action") in {"poll", "configure_policy"}, "do_not_call_when": _string_list(recovery_handoff.get("stop_when"))},
             "stop_when": _string_list(recovery_handoff.get("stop_when")),
         }
     return None
@@ -14095,7 +14118,7 @@ def _job_control_state(action: str, status: str) -> str:
         return "complete"
     if action.startswith("stop") or action in {"cancelled", "failed"}:
         return "terminal"
-    if action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_qbit"}:
+    if action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_qbit", "configure_policy"}:
         return "action_required"
     if status == "blocked":
         return "blocked"
@@ -14119,6 +14142,8 @@ def _job_control_blockers(
 
 def _job_control_read_order(action: str) -> list[str]:
     base = ["job_control_summary", "live_completion_gate", "job_handoff", "recovery_handoff", "seedbox_live_validation_completion_report"]
+    if action == "configure_policy":
+        return [*base, "policy_config_apply_handoff", "policy_application_handoff", "site_policy_rule_review", "blockers", "next_actions"]
     if action in {"resume_preview", "resume_execute", "prepare_materials", "repair_qbit"}:
         return [*base, "resume_execution_handoff", "resume_requirements", "materials_handoff", "qbit_handoff"]
     if action in {"read_summary", "stop_duplicate"}:
@@ -14135,6 +14160,8 @@ def _job_control_continue_when(action: str, recovery_handoff: dict[str, Any], jo
         return "resume preview returns ok=true; review command_argv, gates, and ignored_overrides before execute_request"
     if action == "resume_execute":
         return "execute_request creates a child job; poll child job_control_summary"
+    if action == "configure_policy":
+        return "policy_config_apply_handoff.verification succeeds and policy_execution_sequence.ready=true"
     return recovery_handoff.get("continue_when") or job_handoff.get("continue_when") or (completion_report.get("complete_when") if isinstance(completion_report.get("complete_when"), str) else None)
 
 
@@ -14153,6 +14180,8 @@ def _job_control_stop_when(
     ]
     if action in {"stop_duplicate", "cancelled", "failed"}:
         stop_when.append(f"job_control_summary.action={action}")
+    if action == "configure_policy":
+        stop_when.append("policy_config_apply_handoff.blockers remains non-empty")
     return list(dict.fromkeys(stop_when))
 
 
@@ -14176,6 +14205,8 @@ def _job_control_next_actions(action: str, recommended_call: dict[str, Any] | No
         return ["Call job_control_summary.dry_run_request first, review command_argv and safety gates, then use execute_request only after user approval."]
     if action == "resume_execute":
         return ["Submit job_control_summary.execute_request and poll the returned child job."]
+    if action == "configure_policy":
+        return ["Call job_control_summary.recommended_call to review/apply site policy config, then rerun policy verification before any live tracker call."]
     if recommended_call and recommended_call.get("tool"):
         return [f"Call job_control_summary.recommended_call.tool={recommended_call.get('tool')} only when safe_to_call_now=true or after required user review."]
     return ["Inspect job_control_summary.sources, blockers, and read_order before choosing the next job call."]
@@ -14192,6 +14223,7 @@ def _job_final_report(job: dict[str, Any], payload: dict[str, Any] | None = None
     recommended_call = control.get("recommended_call") if isinstance(control.get("recommended_call"), dict) else {}
     blockers = _job_final_report_blockers(job, control, progress, live_report, manual_report, closure_summary)
     verdict = _job_final_report_verdict(status, control, live_report, manual_report, closure_summary, blockers)
+    final_recommended_call = _job_final_report_recommended_call(job_id, verdict, control, live_report, manual_report) if verdict == "duplicate_stopped" or not recommended_call else recommended_call
     report_allowed = bool(live_report.get("report_allowed") is True or verdict in {"duplicate_stopped", "failed", "cancelled"})
     ready_for_user_report = bool(live_report.get("ready_for_user_report") is True or verdict == "duplicate_stopped")
     return {
@@ -14241,7 +14273,7 @@ def _job_final_report(job: dict[str, Any], payload: dict[str, Any] | None = None
             "action": closure_summary.get("action"),
             "ready_for_report": closure_summary.get("ready_for_report"),
         },
-        "recommended_call": recommended_call if recommended_call else _job_final_report_recommended_call(job_id, verdict, control, live_report, manual_report),
+        "recommended_call": final_recommended_call,
         "read_order": ["job_final_report", "job_control_summary", "live_user_report", "manual_retorrent_final_report", "job_progress_handoff", "closure_summary", "recovery_handoff", "job_handoff"],
         "complete_when": ["job_final_report.verdict=ready_to_report", "live_user_report.report_allowed=true", "live_user_report.evidence.missing_evidence=[]", "closure_summary.complete=true"],
         "stop_when": ["job_final_report.verdict=duplicate_stopped", "job_final_report.verdict=blocked", "job_final_report.verdict=failed", "job_final_report.verdict=cancelled", "blockers is non-empty"],
@@ -14343,6 +14375,7 @@ def _job_recovery_decision(
     closure_handoff: dict[str, Any] | None,
     resume_plan: dict[str, Any],
     candidate_submission_summary: dict[str, Any] | None,
+    policy_config_apply_handoff: dict[str, Any] | None,
 ) -> tuple[str, str, str]:
     if runtime.get("should_poll"):
         return "poll", "runtime", "job_not_terminal"
@@ -14367,6 +14400,8 @@ def _job_recovery_decision(
         return "prepare_materials", "materials", "materials_resume_recommended"
     if resume_plan.get("recommended"):
         return "preview_resume", "resume", "resume_plan_recommended"
+    if isinstance(policy_config_apply_handoff, dict) and policy_config_apply_handoff.get("ready") is False and _string_list(policy_config_apply_handoff.get("blockers")):
+        return "configure_policy", "site_policy_config", "policy_config_apply_handoff.blocked"
     if job_handoff.get("action") == "done":
         return "read_summary", "complete", "job_handoff_done"
     if job_handoff.get("action") in {"stop", "stop_duplicate", "collect_confirmations", "configure_policy"}:
@@ -14382,11 +14417,23 @@ def _job_recovery_next_step(
     closure_handoff: dict[str, Any] | None,
     resume_execution: dict[str, Any],
     runtime: dict[str, Any],
+    policy_config_apply_handoff: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if action == "poll":
         return {"tool": "get_job_status", "endpoint": runtime.get("status_endpoint"), "method": "GET", "request": None, "reason": "poll_running_job"}
     if action == "read_summary":
         return {"tool": "get_job_summary", "endpoint": runtime.get("summary_endpoint"), "method": "GET", "request": None, "reason": "read_terminal_summary"}
+    if action == "configure_policy" and isinstance(policy_config_apply_handoff, dict):
+        next_step = policy_config_apply_handoff.get("next_step") if isinstance(policy_config_apply_handoff.get("next_step"), dict) else {}
+        verification = policy_config_apply_handoff.get("verification") if isinstance(policy_config_apply_handoff.get("verification"), dict) else {}
+        return {
+            "tool": next_step.get("tool") or verification.get("tool") or "site_policies",
+            "endpoint": next_step.get("endpoint") or verification.get("endpoint") or "/v1/site-policies",
+            "method": next_step.get("method") or verification.get("method") or "POST",
+            "request": next_step.get("request") or verification.get("request"),
+            "reason": "policy_config_apply_handoff",
+            "policy_config_apply_handoff": policy_config_apply_handoff,
+        }
     if action in {"prepare_target_package", "target_upload_closure"}:
         return {
             "tool": job_handoff.get("recommended_tool"),
@@ -14452,6 +14499,7 @@ def _job_recovery_gates(
     target_upload_handoff: dict[str, Any] | None,
     closure_handoff: dict[str, Any] | None,
     qbit_handoff: dict[str, Any] | None,
+    policy_config_apply_handoff: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "terminal": bool(runtime.get("terminal")),
@@ -14463,6 +14511,7 @@ def _job_recovery_gates(
         "uploaded_seeding_ready": target_upload_handoff.get("uploaded_seeding_ready") if isinstance(target_upload_handoff, dict) else None,
         "closure_complete": closure_handoff.get("complete") if isinstance(closure_handoff, dict) else None,
         "qbit_ready": qbit_handoff.get("ready") if isinstance(qbit_handoff, dict) else None,
+        "policy_config_apply_ready": policy_config_apply_handoff.get("ready") if isinstance(policy_config_apply_handoff, dict) else None,
     }
 
 
@@ -14499,6 +14548,8 @@ def _job_recovery_stop_when(action: str) -> list[str]:
         return ["job status becomes blocked, failed, or cancelled"]
     if action == "read_summary":
         return ["closure_summary.blockers is non-empty"]
+    if action == "configure_policy":
+        return ["policy_config_apply_handoff.blockers is non-empty after verification", "manual_review.required=true without site_policy_rule_review.ready=true"]
     if action == "stop":
         return ["current blockers require user action before automation continues"]
     return common
@@ -14511,6 +14562,8 @@ def _job_recovery_next_actions(action: str, next_step: dict[str, Any], blockers:
         return ["Call recovery_handoff.dry_run_request first, review command_argv and site-rule gates, then use execute_request only after approval."]
     if action == "read_summary":
         return ["Read recovery_handoff.summary_endpoint and report closure_summary/evidence."]
+    if action == "configure_policy":
+        return ["Follow recovery_handoff.policy_config_apply_handoff: complete manual review/edit_config when required, then run verification before resuming live automation."]
     if blockers:
         return ["Resolve recovery_handoff.blockers before continuing automation."]
     if next_step.get("tool"):
@@ -27273,8 +27326,9 @@ def _job_response_contract() -> dict[str, Any]:
         "job_control_summary_source_fields": ["job_handoff_action", "recovery_action", "recovery_phase", "completion_status", "closure_action", "closure_complete"],
         "recommended_call_fields": ["ready", "safe_to_call_now", "tool", "endpoint", "method", "request", "action", "status", "dry_run_request", "execute_request", "requires_user_review", "gates", "safety", "stop_when"],
         "recommended_call_gate_fields": ["dry_run_preview", "execute_available", "requires_rules", "requires_upload_confirmation", "accept_rules_present", "confirm_upload_present", "live_execute_requested", "safe_to_call_now", "missing"],
-        "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
-        "blocked_recovery_report_fields": ["ready", "recoverable", "action", "status", "job_id", "job_kind", "terminal", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "blocked_domains", "read_order", "complete_when", "stop_when", "sources", "blockers", "next_actions"],
+        "recovery_actions": ["poll", "preview_resume", "execute_resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_target_payload", "repair_qbit", "configure_policy", "read_summary", "stop_duplicate", "stop_cancelled", "failed", "resolve_blockers", "inspect"],
+        "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "policy_config_apply_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
+        "blocked_recovery_report_fields": ["ready", "recoverable", "action", "status", "job_id", "job_kind", "terminal", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "policy_config_apply_handoff", "blocked_domains", "read_order", "complete_when", "stop_when", "sources", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
@@ -27782,9 +27836,9 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "preflight",
                     "tool": "source_url_retorrent_preflight",
-                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "policy_execution_handoff", "duplicate_check", "duplicate_check_handoff", "one_call_handoff", "job_creation_handoff.request", "next_step", "blockers"],
+                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "policy_execution_handoff", "policy_config_apply_handoff", "duplicate_check", "duplicate_check_handoff", "one_call_handoff", "job_creation_handoff.request", "next_step", "blockers"],
                     "continue_when": "ready_to_create_job=true",
-                    "stop_when": ["source_reference.error is present", "policy_execution_handoff.ready=false", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing", "deployment.ready=false"],
+                    "stop_when": ["source_reference.error is present", "policy_config_apply_handoff.ready=false", "policy_execution_handoff.ready=false", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing", "deployment.ready=false"],
                 },
                 {
                     "step": "readiness_bundle",
@@ -27796,9 +27850,9 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "policy_audit",
                     "tool": "site_policies",
-                    "read": ["ready", "policy_execution_summary.ready", "policy_execution_handoff.ready", "policy_execution_handoff.qbit", "policy_execution_handoff.seeding", "policy_execution_handoff.transfer_rules", "policy_execution_handoff.rule_obligations", "policy_execution_contract", "policy_runtime_contract", "policy_application_handoff.ready", "policy_application_handoff.request_patch", "policy_application_handoff.protected_fields", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
-                    "continue_when": "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true",
-                    "stop_when": ["policy_application_handoff.ready=false", "missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
+                    "read": ["ready", "policy_execution_summary.ready", "policy_execution_handoff.ready", "policy_execution_handoff.qbit", "policy_execution_handoff.seeding", "policy_execution_handoff.transfer_rules", "policy_execution_handoff.rule_obligations", "policy_execution_contract", "policy_runtime_contract", "policy_application_handoff.ready", "policy_application_handoff.request_patch", "policy_application_handoff.protected_fields", "policy_config_apply_handoff.ready", "policy_config_apply_handoff.verification", "policy_config_apply_handoff.edit_config", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
+                    "continue_when": "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true and policy_config_apply_handoff.ready=true",
+                    "stop_when": ["policy_config_apply_handoff.ready=false", "policy_application_handoff.ready=false", "missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
                 },
                 {
                     "step": "duplicate_check",
@@ -27812,14 +27866,14 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "submit_job",
                     "tool": "source_url_retorrent_job",
                     "request_from": "source_url_retorrent_preflight.job_creation_handoff.request after duplicate_check.exists=false",
-                    "read": ["job_id", "status", "policy_application_handoff", "job_handoff", "runtime.status_endpoint", "agent_decision", "closure_summary", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
+                    "read": ["job_id", "status", "policy_application_handoff", "policy_config_apply_handoff", "job_handoff", "recovery_handoff", "runtime.status_endpoint", "agent_decision", "closure_summary", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
                     "continue_when": "job_id is present",
                     "stop_when": ["job_handoff.action=stop", "closure_handoff.action=stop_duplicate", "closure_handoff.action=configure_policy", "closure_handoff.action=collect_confirmations"],
                 },
                 {
                     "step": "poll",
                     "tool": "get_job_status",
-                    "read": ["status", "policy_application_handoff.ready", "policy_application_handoff.missing_request_fields", "policy_application_handoff.missing_confirmations", "job_handoff.action", "job_handoff.should_poll", "job_handoff.poll_after_seconds", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "runtime.should_poll", "agent_decision", "seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "blockers", "next_actions"],
+                    "read": ["status", "policy_application_handoff.ready", "policy_application_handoff.missing_request_fields", "policy_application_handoff.missing_confirmations", "policy_config_apply_handoff.ready", "job_handoff.action", "job_handoff.should_poll", "job_handoff.poll_after_seconds", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "recovery_handoff.action", "blocked_recovery_report.action", "runtime.should_poll", "agent_decision", "seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "blockers", "next_actions"],
                     "continue_when": "job_handoff.action!=wait and status not in queued,running",
                     "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
                     "stop_when": ["job_handoff.action=stop", "status=blocked", "status=failed", "status=cancelled"],
@@ -27863,7 +27917,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "closure_decision",
                     "tool": "get_job_summary",
-                    "read": ["policy_application_handoff.ready", "policy_application_handoff.applied_request_fields", "policy_application_handoff.missing_request_fields", "policy_application_handoff.missing_protected_fields", "live_user_report.ready_for_user_report", "live_user_report.report_allowed", "live_user_report.report_blocked_reason", "live_user_report.recommended_call", "live_user_report.evidence.missing_evidence", "seedbox_live_validation_completion_report.status", "seedbox_live_validation_completion_report.ready_for_user_report", "seedbox_live_validation_completion_report.recommended_call", "seedbox_live_validation_completion_report.missing_evidence", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "job_handoff.blockers", "closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
+                    "read": ["policy_application_handoff.ready", "policy_application_handoff.applied_request_fields", "policy_application_handoff.missing_request_fields", "policy_application_handoff.missing_protected_fields", "policy_config_apply_handoff", "blocked_recovery_report.recommended_call", "live_user_report.ready_for_user_report", "live_user_report.report_allowed", "live_user_report.report_blocked_reason", "live_user_report.recommended_call", "live_user_report.evidence.missing_evidence", "seedbox_live_validation_completion_report.status", "seedbox_live_validation_completion_report.ready_for_user_report", "seedbox_live_validation_completion_report.recommended_call", "seedbox_live_validation_completion_report.missing_evidence", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "job_handoff.blockers", "closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
                     "complete_when": "live_user_report.report_allowed=true",
                     "resume_with": "job_handoff when job_handoff.action=resume; pass only job_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
                     "stop_when": ["seedbox_live_validation_completion_report.status=duplicate_stopped", "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null", "job_handoff.action=stop", "closure_summary.action=stop_duplicate", "closure_summary.action=collect_confirmations without explicit user confirmation", "closure_summary.action=configure_policy", "closure_summary.action=resolve_blockers and recommended_tool is null"],

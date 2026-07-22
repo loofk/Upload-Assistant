@@ -14573,6 +14573,55 @@ def test_retorrent_execute_blocks_before_live_payload_when_policy_enforcement_no
     assert payload["result"]["mutates_network"] is False
 
 
+def test_manual_retorrent_job_recovery_prioritizes_policy_config_handoff(monkeypatch, tmp_path) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True},
+            }
+        }
+    }
+    called = False
+
+    async def fail_retorrent_payload(_args):
+        nonlocal called
+        called = True
+        raise AssertionError("retorrent_payload must not run when policy config is blocked")
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setattr(ptcli_service, "retorrent_payload", fail_retorrent_payload)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
+    )
+    summary = store.summary(job["job_id"])
+
+    assert called is False
+    assert job["status"] == "blocked"
+    assert job["policy_config_apply_handoff"]["ready"] is False
+    assert job["recovery_handoff"]["action"] == "configure_policy"
+    assert job["recovery_handoff"]["phase"] == "site_policy_config"
+    assert job["recovery_handoff"]["recommended_tool"] == "site_policy_rule_review"
+    assert job["recovery_handoff"]["gates"]["policy_config_apply_ready"] is False
+    assert "policy_config_apply_handoff" in job["recovery_handoff"]["read_fields"]
+    assert job["blocked_recovery_report"]["action"] == "configure_policy"
+    assert job["blocked_recovery_report"]["recommended_tool"] == "site_policy_rule_review"
+    assert "site_policy_config" in job["blocked_recovery_report"]["blocked_domains"]
+    assert job["blocked_recovery_report"]["recommended_call"]["reason"] == "recovery_handoff.configure_policy"
+    assert "policy_config_apply_handoff" in job["blocked_recovery_report"]["read_order"]
+    assert summary["recovery_handoff"] == job["recovery_handoff"]
+    assert summary["blocked_recovery_report"] == job["blocked_recovery_report"]
+
+
 def test_retorrent_execute_runs_live_payload_when_policy_enforcement_ready(monkeypatch) -> None:
     config = {
         "PTCLI": {
@@ -19450,6 +19499,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "blocked_recovery_report_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recoverable" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+    assert "configure_policy" in tool_by_name["get_job_status"]["response_contract"]["recovery_actions"]
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -19613,6 +19664,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recovery_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
     assert "execute_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
     assert "handoff_sources" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
     assert "recommended_tool" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "resume_recommended" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
@@ -20633,7 +20685,8 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert "live_readiness.policy_execution_handoff" in ready["steps"][1]["read"]
     assert "policy_execution_handoff.ready" in ready["steps"][2]["read"]
     assert "policy_application_handoff.ready" in ready["steps"][2]["read"]
-    assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true"
+    assert "policy_config_apply_handoff.ready" in ready["steps"][2]["read"]
+    assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true and policy_config_apply_handoff.ready=true"
     assert ready["steps"][3]["tool"] == "retorrent_check"
     assert ready["steps"][3]["request"]["source"] == ready["request_template"]["source_url"]
     assert ready["steps"][4]["request"] == ready["request_template"]
@@ -20736,18 +20789,28 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "one_call_handoff" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_handoff" in source_url_workflow["runbook"][0]["read"]
+    assert "policy_config_apply_handoff" in source_url_workflow["runbook"][0]["read"]
+    assert "policy_config_apply_handoff.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
     assert source_url_workflow["runbook"][1]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
     assert "live_readiness.policy_execution_summary" in source_url_workflow["runbook"][1]["read"]
     assert "live_readiness.policy_execution_handoff" in source_url_workflow["runbook"][1]["read"]
     assert "policy_execution_handoff.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
     assert "policy_application_handoff.request_patch" in source_url_workflow["runbook"][2]["read"]
-    assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true"
+    assert "policy_config_apply_handoff.ready" in source_url_workflow["runbook"][2]["read"]
+    assert "policy_config_apply_handoff.edit_config" in source_url_workflow["runbook"][2]["read"]
+    assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true and policy_application_handoff.ready=true and policy_config_apply_handoff.ready=true"
+    assert "policy_config_apply_handoff.ready=false" in source_url_workflow["runbook"][2]["stop_when"]
     assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
     assert source_url_workflow["runbook"][3]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
     assert "job_handoff" in source_url_workflow["runbook"][4]["read"]
     assert "policy_application_handoff" in source_url_workflow["runbook"][4]["read"]
+    assert "policy_config_apply_handoff" in source_url_workflow["runbook"][4]["read"]
+    assert "recovery_handoff" in source_url_workflow["runbook"][4]["read"]
     assert "job_handoff.action=stop" in source_url_workflow["runbook"][4]["stop_when"]
     assert "job_handoff.action" in source_url_workflow["runbook"][5]["read"]
+    assert "policy_config_apply_handoff.ready" in source_url_workflow["runbook"][5]["read"]
+    assert "recovery_handoff.action" in source_url_workflow["runbook"][5]["read"]
+    assert "blocked_recovery_report.action" in source_url_workflow["runbook"][5]["read"]
     assert "policy_application_handoff.missing_request_fields" in source_url_workflow["runbook"][5]["read"]
     assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
     assert source_url_workflow["runbook"][6]["step"] == "prepare_metadata"
@@ -20766,6 +20829,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "target_upload_handoff.summary_file" in source_url_workflow["runbook"][9]["read"]
     assert source_url_workflow["runbook"][10]["step"] == "closure_decision"
     assert "policy_application_handoff.applied_request_fields" in source_url_workflow["runbook"][10]["read"]
+    assert "policy_config_apply_handoff" in source_url_workflow["runbook"][10]["read"]
+    assert "blocked_recovery_report.recommended_call" in source_url_workflow["runbook"][10]["read"]
     assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][10]["read"]
     assert "closure_summary.next_step" in source_url_workflow["runbook"][10]["read"]
     assert source_url_workflow["runbook"][10]["complete_when"] == "live_user_report.report_allowed=true"
@@ -21549,6 +21614,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "blocked_recovery_report_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "recoverable" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
         assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+        assert "policy_config_apply_handoff" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+        assert "configure_policy" in tools_by_name["get_job_status"]["response_contract"]["recovery_actions"]
         assert "job_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "job_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "job_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -21564,6 +21631,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "recovery_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
         assert "execute_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+        assert "policy_config_apply_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
         assert "handoff_sources" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
         assert "resume_requirements" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
