@@ -3808,6 +3808,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
     extension_validation_matrix = _sites_extension_validation_matrix(capability_matrix, policy_matrix, extension_plan, flow_matrix, context)
     extension_handoff = _sites_extension_handoff(extension_plan, extension_validation_matrix, flow_matrix, context)
     adapter_coverage_summary = _sites_adapter_coverage_summary(capability_matrix, policy_matrix, flow_matrix, extension_plan, extension_validation_matrix, context)
+    reference_adapter_report = _sites_reference_adapter_report(capability_matrix, capabilities, base.get("flows") if isinstance(base.get("flows"), list) else [], flow_matrix, adapter_coverage_summary, extension_validation_matrix, context)
     tracker_rollout_handoff = _sites_tracker_rollout_handoff(adapter_coverage_summary, extension_plan, extension_validation_matrix, flow_matrix, context)
     adapter_extension_final_report = _sites_adapter_extension_final_report(adapter_coverage_summary, extension_plan, extension_validation_matrix, extension_handoff, tracker_rollout_handoff, context)
     site_extension_readiness_final_report = _sites_site_extension_readiness_final_report(
@@ -3834,6 +3835,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
         "policy_gap_summary": policy_gap_summary,
         "policy_execution_summary": _site_policy_execution_summary(policy_matrix, policy_gap_summary, execution_readiness, policy_handoff, report),
         "adapter_coverage_summary": adapter_coverage_summary,
+        "reference_adapter_report": reference_adapter_report,
         "extension_plan": extension_plan,
         "extension_validation_matrix": extension_validation_matrix,
         "extension_handoff": extension_handoff,
@@ -6857,6 +6859,170 @@ def _sites_adapter_coverage_next_actions(next_item: dict[str, Any] | None, reque
     if live_reference_sources:
         return ["Use live_reference_sources_to_mteam as tested adapter references before adding more Chinese PT sites."]
     return ["Implement one source adapter and one target upload adapter, then rerun /v1/sites with source_tracker and target."]
+
+
+def _sites_reference_adapter_report(
+    capability_matrix: list[dict[str, Any]],
+    all_capabilities: dict[str, Any],
+    all_flows: list[dict[str, Any]],
+    flow_matrix: list[dict[str, Any]],
+    adapter_coverage_summary: dict[str, Any],
+    extension_validation_matrix: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Expose U2/CHD/MTEAM as the AI-readable adapter extension baseline."""
+    capability_by_tracker = {str(item.get("tracker")): item for item in capability_matrix if item.get("tracker")}
+    all_capability_items = {
+        tracker: _site_capability_matrix_item(tracker, capability if isinstance(capability, dict) else {}, None)
+        for tracker, capability in all_capabilities.items()
+        if tracker in CHINESE_PT_TRACKERS
+    }
+    validation_items = extension_validation_matrix.get("items") if isinstance(extension_validation_matrix.get("items"), list) else []
+    validation_by_tracker = {str(item.get("tracker")): item for item in validation_items if isinstance(item, dict) and item.get("tracker")}
+    requested_trackers = _string_list(context.get("trackers"))
+    reference_trackers = [tracker for tracker in ("U2", "CHD", "MTEAM") if tracker in capability_by_tracker or tracker in CHINESE_PT_TRACKERS]
+    reference_profiles = {
+        tracker: _sites_reference_adapter_profile(tracker, capability_by_tracker.get(tracker) or all_capability_items.get(tracker), validation_by_tracker.get(tracker), requested=tracker in capability_by_tracker)
+        for tracker in reference_trackers
+    }
+    reference_flows = _sites_reference_flows_to_mteam(flow_matrix, all_flows)
+    requested_flow = adapter_coverage_summary.get("requested_flow") if isinstance(adapter_coverage_summary.get("requested_flow"), dict) else {}
+    missing_by_tracker = adapter_coverage_summary.get("missing_by_tracker") if isinstance(adapter_coverage_summary.get("missing_by_tracker"), dict) else {}
+    extension_backlog = _sites_reference_extension_backlog(adapter_coverage_summary.get("items", []))
+    ready = all(profile.get("ready_for_reference_role") is True for profile in reference_profiles.values() if profile.get("requested_in_payload") is True or profile.get("tracker") in {"U2", "CHD", "MTEAM"})
+    return {
+        "kind": "ptcli.reference_adapter_report",
+        "ready": ready,
+        "requested_trackers": requested_trackers,
+        "reference_trackers": reference_trackers,
+        "reference_roles": {
+            "U2": "nexusphp_source_reference",
+            "CHD": "nexusphp_source_reference",
+            "MTEAM": "api_target_reference",
+        },
+        "reference_profiles": reference_profiles,
+        "reference_flows_to_mteam": reference_flows,
+        "requested_flow": requested_flow,
+        "coverage_counts": adapter_coverage_summary.get("coverage_counts") if isinstance(adapter_coverage_summary.get("coverage_counts"), dict) else {},
+        "extension_backlog": extension_backlog,
+        "missing_by_tracker": missing_by_tracker,
+        "extension_checklist": [
+            "Add tracker host/base URL and source-info parsing adapter.",
+            "Add source torrent download adapter with cookie/passkey/API credential evidence.",
+            "Add daily candidate discovery adapter that returns title, size, publish time, promotion/free state, and metadata hints.",
+            "Add or confirm SITE_POLICIES rule fingerprint, rate limits, automation switches, and seeding obligations.",
+            "For a target tracker, add duplicate check, upload payload, uploaded torrent download, and qBittorrent seeding evidence.",
+            "Prove the concrete source->target flow with readiness_bundle and source_url_retorrent_preflight before live automation.",
+        ],
+        "continue_when": "reference_profiles.U2, reference_profiles.CHD, and reference_profiles.MTEAM are ready, then copy their contracts for the next Chinese PT adapter.",
+        "stop_when": "requested_flow.blockers is non-empty or any tracker has missing source/target/policy components.",
+        "safety": {
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "does_not_upload": True,
+            "rules_not_inferred": True,
+        },
+        "next_actions": _sites_reference_adapter_next_actions(requested_flow, extension_backlog, missing_by_tracker),
+    }
+
+
+def _sites_reference_adapter_profile(tracker: str, capability_item: dict[str, Any] | None, validation_item: dict[str, Any] | None, *, requested: bool) -> dict[str, Any]:
+    adapter = capability_item.get("adapter_profile") if isinstance(capability_item, dict) and isinstance(capability_item.get("adapter_profile"), dict) else {}
+    validation_checks = validation_item.get("checks") if isinstance(validation_item, dict) and isinstance(validation_item.get("checks"), list) else []
+    role = "api_target_reference" if tracker == "MTEAM" else "nexusphp_source_reference"
+    source_ready = bool(adapter.get("source_info")) and bool(adapter.get("source_download"))
+    target_ready = bool(adapter.get("target_upload"))
+    ready_for_role = target_ready if tracker == "MTEAM" else source_ready
+    return {
+        "tracker": tracker,
+        "role": role,
+        "requested_in_payload": requested,
+        "ready_for_reference_role": ready_for_role,
+        "source_info_adapter": adapter.get("source_info_adapter"),
+        "source_download_adapter": adapter.get("source_download_adapter"),
+        "target_upload_adapter": adapter.get("target_upload_adapter"),
+        "candidate_discovery_adapter": _sites_reference_candidate_adapter(tracker, adapter),
+        "duplicate_check_adapter": "mteam_api" if tracker == "MTEAM" and target_ready else None,
+        "upload_payload_adapter": "mteam_prepare_package" if tracker == "MTEAM" and target_ready else None,
+        "credential_requirements": _string_list(adapter.get("credential_requirements")),
+        "required_evidence": _site_extension_required_evidence(["target"] if tracker == "MTEAM" else ["source"]),
+        "validation_ready": isinstance(validation_item, dict) and validation_item.get("ready") is True,
+        "validation_checks": [
+            {
+                "name": check.get("name"),
+                "ready": check.get("ready") is True,
+                "required_evidence": _string_list(check.get("required_evidence")),
+                "blockers": _string_list(check.get("blockers")),
+            }
+            for check in validation_checks
+            if isinstance(check, dict)
+        ],
+        "copy_for_new_site": [
+            "Keep adapter parsing/downloading code separate from rule policy config.",
+            "Return hash/path/size evidence for every mutable artifact.",
+            "Expose unknown or manual rule decisions as blockers instead of auto-approving them.",
+        ],
+    }
+
+
+def _sites_reference_candidate_adapter(tracker: str, adapter: dict[str, Any]) -> str | None:
+    if tracker == "MTEAM" and adapter.get("source_info") and adapter.get("source_download"):
+        return "mteam_api_search_or_recent"
+    if adapter.get("source_info") and adapter.get("source_download"):
+        return "nexusphp_recent_or_search_html"
+    return None
+
+
+def _sites_reference_flows_to_mteam(flow_matrix: list[dict[str, Any]], all_flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    flows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for flow in [*flow_matrix, *all_flows]:
+        if not isinstance(flow, dict) or flow.get("source_tracker") not in {"U2", "CHD"} or flow.get("target_tracker") != "MTEAM":
+            continue
+        key = (str(flow.get("source_tracker")), str(flow.get("target_tracker")))
+        if key in seen:
+            continue
+        flows.append(flow)
+        seen.add(key)
+    return sorted(flows, key=lambda item: str(item.get("source_tracker")))
+
+
+def _sites_reference_extension_backlog(raw_items: Any) -> list[dict[str, Any]]:
+    backlog: list[dict[str, Any]] = []
+    if not isinstance(raw_items, list):
+        return backlog
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        item = _sites_reference_extension_backlog_item(raw_item)
+        if item.get("missing_components"):
+            backlog.append(item)
+    return backlog
+
+
+def _sites_reference_extension_backlog_item(item: dict[str, Any]) -> dict[str, Any]:
+    tracker = str(item.get("tracker") or "")
+    missing = _string_list(item.get("missing_components"))
+    return {
+        "tracker": tracker,
+        "missing_components": missing,
+        "next_tool": item.get("next_tool"),
+        "next_endpoint": item.get("next_endpoint"),
+        "next_action": item.get("next_action") or (f"{tracker}: fill {missing[0]}." if missing else None),
+    }
+
+
+def _sites_reference_adapter_next_actions(requested_flow: dict[str, Any], extension_backlog: list[dict[str, Any]], missing_by_tracker: dict[str, Any]) -> list[str]:
+    flow_blockers = _string_list(requested_flow.get("blockers"))
+    if flow_blockers:
+        return [f"Resolve requested flow first: {flow_blockers[0]}"]
+    if extension_backlog:
+        first = extension_backlog[0]
+        return [str(first.get("next_action") or f"{first.get('tracker')}: complete adapter/policy extension backlog.")]
+    if missing_by_tracker:
+        tracker, missing = next(iter(missing_by_tracker.items()))
+        return [f"{tracker}: complete missing adapter components: {', '.join(_string_list(missing))}."]
+    return ["Use U2/CHD/MTEAM reference_profiles as adapter templates, then validate the next concrete Chinese PT source->MTEAM flow."]
 
 
 def _sites_extension_plan(capability_matrix: list[dict[str, Any]], policy_matrix: list[dict[str, Any]], flow_matrix: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
@@ -31290,13 +31456,15 @@ def _summary_check_response_contract() -> dict[str, Any]:
 
 def _sites_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "site_policy_profiles", "site_policy_execution_profiles", "policy_matrix", "policy_execution_summary", "adapter_coverage_summary", "extension_plan", "extension_validation_matrix", "extension_handoff", "tracker_rollout_handoff", "adapter_extension_final_report", "site_extension_readiness_final_report", "flow_matrix", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "site_policy_profiles", "site_policy_execution_profiles", "policy_matrix", "policy_execution_summary", "adapter_coverage_summary", "reference_adapter_report", "extension_plan", "extension_validation_matrix", "extension_handoff", "tracker_rollout_handoff", "adapter_extension_final_report", "site_extension_readiness_final_report", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
         "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist", "adapter_contract"],
         "adapter_contract_fields": ["reference_adapters", "source_info_contract", "source_download_contract", "target_upload_contract", "policy_contract", "validation_contract", "done_when"],
         "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "config_audit", "template", "flat_template", "structured_template", "current_values", "next_actions"],
         "adapter_coverage_summary_fields": ["ready", "requested_trackers", "source_ready_trackers", "target_ready_trackers", "live_reference_sources_to_mteam", "reference_flows", "requested_flow", "coverage_counts", "adapter_type_counts", "items", "missing_by_tracker", "priority_next", "continue_when", "stop_when", "next_actions"],
         "adapter_coverage_item_fields": ["tracker", "roles", "ready", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "source_ready", "target_upload", "target_upload_adapter", "target_ready", "policy_ready", "validation_ready", "full_live_closure_to_mteam", "credential_requirements", "missing_components", "priority", "next_tool", "next_endpoint", "next_action"],
+        "reference_adapter_report_fields": ["ready", "requested_trackers", "reference_trackers", "reference_roles", "reference_profiles", "reference_flows_to_mteam", "requested_flow", "coverage_counts", "extension_backlog", "missing_by_tracker", "extension_checklist", "continue_when", "stop_when", "safety", "next_actions"],
+        "reference_adapter_profile_fields": ["tracker", "role", "requested_in_payload", "ready_for_reference_role", "source_info_adapter", "source_download_adapter", "target_upload_adapter", "candidate_discovery_adapter", "duplicate_check_adapter", "upload_payload_adapter", "credential_requirements", "required_evidence", "validation_ready", "validation_checks", "copy_for_new_site"],
         "requested_flow_fields": ["source_tracker", "target_tracker", "ready", "reference_flow", "source_ready", "target_ready", "blockers"],
         "extension_plan_fields": ["ready", "trackers", "ready_sources", "ready_targets", "reference_sources_to_mteam", "items", "next_item", "blockers", "next_actions"],
         "extension_item_fields": ["tracker", "source_ready", "target_ready", "full_live_closure_to_mteam", "has_reference_flow", "implemented_roles", "adapter_contract", "missing_components", "checklist", "blockers", "next_action"],
@@ -32734,6 +32902,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_gap_summary": {"type": "object"},
             "policy_execution_summary": {"type": "object"},
             "adapter_coverage_summary": {"type": "object"},
+            "reference_adapter_report": {"type": "object"},
             "extension_plan": {"type": "object"},
             "extension_validation_matrix": {"type": "object"},
             "extension_handoff": {"type": "object"},

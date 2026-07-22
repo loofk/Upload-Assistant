@@ -19197,6 +19197,28 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert coverage["items"][0]["source_ready"] is True
     assert coverage["items"][1]["tracker"] == "MTEAM"
     assert coverage["items"][1]["target_ready"] is True
+    reference_report = payload["reference_adapter_report"]
+    assert reference_report["kind"] == "ptcli.reference_adapter_report"
+    assert reference_report["ready"] is True
+    assert reference_report["reference_trackers"] == ["U2", "CHD", "MTEAM"]
+    assert reference_report["reference_roles"]["U2"] == "nexusphp_source_reference"
+    assert reference_report["reference_roles"]["CHD"] == "nexusphp_source_reference"
+    assert reference_report["reference_roles"]["MTEAM"] == "api_target_reference"
+    assert {flow["source_tracker"] for flow in reference_report["reference_flows_to_mteam"]} == {"U2", "CHD"}
+    assert reference_report["requested_flow"] == coverage["requested_flow"]
+    assert reference_report["reference_profiles"]["U2"]["requested_in_payload"] is True
+    assert reference_report["reference_profiles"]["U2"]["ready_for_reference_role"] is True
+    assert reference_report["reference_profiles"]["U2"]["candidate_discovery_adapter"] == "nexusphp_recent_or_search_html"
+    assert reference_report["reference_profiles"]["CHD"]["requested_in_payload"] is False
+    assert reference_report["reference_profiles"]["CHD"]["source_download_adapter"] == "nexusphp_passkey"
+    assert reference_report["reference_profiles"]["MTEAM"]["ready_for_reference_role"] is True
+    assert reference_report["reference_profiles"]["MTEAM"]["target_upload_adapter"] == "mteam_api"
+    assert reference_report["reference_profiles"]["MTEAM"]["duplicate_check_adapter"] == "mteam_api"
+    assert reference_report["reference_profiles"]["MTEAM"]["upload_payload_adapter"] == "mteam_prepare_package"
+    assert reference_report["extension_backlog"] == []
+    assert reference_report["safety"]["does_not_contact_trackers"] is True
+    assert reference_report["safety"]["rules_not_inferred"] is True
+    assert "Add daily candidate discovery adapter" in reference_report["extension_checklist"][2]
     validation_matrix = payload["extension_validation_matrix"]
     assert validation_matrix["kind"] == "ptcli.site_extension_validation_matrix"
     assert validation_matrix["ready"] is True
@@ -21372,12 +21394,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_execution_profiles" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "adapter_coverage_summary" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "reference_adapter_report" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "tracker_rollout_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "adapter_extension_final_report" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
     assert "adapter_coverage_summary_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "reference_adapter_report_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "reference_adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "adapter_coverage_item_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "requested_flow_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "priority_next" in tool_by_name["site_profiles"]["response_contract"]["adapter_coverage_summary_fields"]
@@ -21708,6 +21733,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_profiles" in site_profiles_schema["properties"]
     assert "site_policy_execution_profiles" in site_profiles_schema["properties"]
     assert "adapter_coverage_summary" in site_profiles_schema["properties"]
+    assert "reference_adapter_report" in site_profiles_schema["properties"]
     assert "extension_plan" in site_profiles_schema["properties"]
     assert "extension_validation_matrix" in site_profiles_schema["properties"]
     assert "extension_handoff" in site_profiles_schema["properties"]
