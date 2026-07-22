@@ -19227,11 +19227,19 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
         assert request["check_submission"]["mode"] == "inline_check_and_submit"
         assert request["check_submission"]["duplicate_check"]["exists"] is False
         assert request["live_validation_submission"] == live_validation_submission
+        job_request = {**request, "qbit_download_limit": 20 * 1024 * 1024, "uploaded_qbit_upload_limit": 2 * 1024 * 1024}
         return {
             "job_id": "abc123",
             "status": "queued",
             "ok": False,
-            "request": request,
+            "request": job_request,
+            "policy_qbit_defaults": {"applied": {"qbit_download_limit": 20 * 1024 * 1024, "uploaded_qbit_upload_limit": 2 * 1024 * 1024}, "sources": {"qbit_download_limit": "site_policy:U2", "uploaded_qbit_upload_limit": "site_policy:MTEAM"}},
+            "policy_runtime_contract": {"kind": "ptcli.policy_runtime_contract", "ready": True},
+            "policy_application_handoff": {"kind": "ptcli.job_policy_application_handoff", "ready": True, "missing_request_fields": []},
+            "policy_application_report": {"kind": "ptcli.policy_application_report", "ready_for_live_audit": True, "missing_request_fields": [], "recommended_call": {"tool": "resume_job", "endpoint": "/v1/jobs/abc123/resume"}},
+            "qbit_plan": {"source": {"download_limit": 20 * 1024 * 1024}, "uploaded": {"upload_limit": 2 * 1024 * 1024}},
+            "qbit_enforcement_summary": {"kind": "ptcli.qbit_enforcement_summary", "ready": False, "pending_roles": ["source", "uploaded"], "mismatch_roles": []},
+            "qbit_execution_gate": {"kind": "ptcli.qbit_execution_gate", "ready": False, "pending_roles": ["source", "uploaded"], "mismatch_roles": []},
             "runtime": {"status_endpoint": "/v1/jobs/abc123"},
             "live_validation_submission": request["live_validation_submission"],
             "live_validation_followup": {"kind": "ptcli.live_validation_followup", "action": "poll"},
@@ -19271,6 +19279,17 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
     assert payload["check_and_submit_gate"]["confirm_upload"] is True
     assert payload["check_and_submit_gate"]["recommended_tool"] == "get_job_status"
     assert payload["check_and_submit_gate"]["recommended_request"] == {"job_id": "abc123"}
+    policy_report = payload["check_and_submit_policy_report"]
+    assert policy_report["kind"] == "ptcli.check_and_submit_policy_report"
+    assert policy_report["ready"] is True
+    assert policy_report["policy_application_ready"] is True
+    assert policy_report["policy_runtime_ready"] is True
+    assert policy_report["applied_qbit_defaults"] == {"qbit_download_limit": 20 * 1024 * 1024, "uploaded_qbit_upload_limit": 2 * 1024 * 1024}
+    assert policy_report["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert policy_report["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert policy_report["pending_qbit_roles"] == ["source", "uploaded"]
+    assert policy_report["missing_request_fields"] == []
+    assert "qbit_enforcement_summary.ready=true after source/uploaded torrents are injected" in policy_report["complete_when"]
     final_report = payload["check_and_submit_final_report"]
     assert final_report["kind"] == "ptcli.check_and_submit_final_report"
     assert final_report["ready"] is True
@@ -19283,6 +19302,8 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
     assert final_report["submission"]["status_endpoint"] == "/v1/jobs/abc123"
     assert final_report["confirmations"]["accept_rules"] is True
     assert final_report["confirmations"]["confirm_upload"] is True
+    assert final_report["policy"] == policy_report
+    assert "check_and_submit_policy_report" in final_report["read_order"]
     assert final_report["recommended_call"]["tool"] == "get_job_status"
     assert final_report["recommended_call"]["request"] == {"job_id": "abc123"}
     assert final_report["blockers"] == []
@@ -19348,6 +19369,9 @@ async def test_source_url_check_and_submit_stops_on_duplicate(monkeypatch) -> No
     assert payload["check_and_submit_gate"]["duplicate_exists"] is True
     assert payload["check_and_submit_gate"]["recommended_tool"] is None
     assert payload["check_and_submit_gate"]["first_blocker"] == "duplicate_check.exists"
+    assert payload["check_and_submit_policy_report"]["ready"] is False
+    assert payload["check_and_submit_policy_report"]["job_id"] is None
+    assert payload["check_and_submit_policy_report"]["policy_application_ready"] is False
     final_report = payload["check_and_submit_final_report"]
     assert final_report["kind"] == "ptcli.check_and_submit_final_report"
     assert final_report["ready"] is False
@@ -19836,12 +19860,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_check_and_submit"]["input_schema"]["required"] == ["source_url", "target"]
     assert "check_and_submit_gate" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "manual_retorrent_sequence" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
+    assert "check_and_submit_policy_report" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_final_report" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_gate_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_sequence_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
+    assert "check_and_submit_policy_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_final_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_step_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "action" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
+    assert "applied_qbit_defaults" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_policy_report_fields"]
     assert "verdict" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
     assert "sequence_next_tool" in tool_by_name["source_url_check_and_submit"]["response_contract"]["agent_summary_fields"]
     assert "runs_duplicate_check_before_job_creation" in tool_by_name["source_url_check_and_submit"]["response_contract"]["safety"]
@@ -21193,6 +21220,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     check_submit_schema = openapi["paths"]["/v1/jobs/retorrent/from-url/check-and-submit"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "check_and_submit_gate" in check_submit_schema["properties"]
     assert "manual_retorrent_sequence" in check_submit_schema["properties"]
+    assert "check_and_submit_policy_report" in check_submit_schema["properties"]
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_execution_summary" in site_policy_schema["properties"]
@@ -21426,6 +21454,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "duplicate_check" in source_url_check_submit_schema["properties"]
     assert "submitted_job" in source_url_check_submit_schema["properties"]
     assert "check_and_submit_gate" in source_url_check_submit_schema["properties"]
+    assert "check_and_submit_policy_report" in source_url_check_submit_schema["properties"]
     assert "check_and_submit_final_report" in source_url_check_submit_schema["properties"]
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_digest" in schedule_jobs_schema["properties"]
@@ -22118,11 +22147,14 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_check_and_submit"]["path"] == "/v1/jobs/retorrent/from-url/check-and-submit"
         assert "check_and_submit_gate" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "manual_retorrent_sequence" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
+        assert "check_and_submit_policy_report" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_final_report" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_gate_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "manual_retorrent_sequence_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
+        assert "check_and_submit_policy_report_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "check_and_submit_final_report_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "action" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
+        assert "applied_qbit_defaults" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_policy_report_fields"]
         assert "verdict" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
         assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
         assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]

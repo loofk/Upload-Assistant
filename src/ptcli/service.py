@@ -1880,7 +1880,7 @@ def _source_url_preflight_one_call_handoff(manual_job_template: dict[str, Any] |
         "does_check_duplicates_before_submit": True,
         "creates_job_only_when_duplicate_clear": True,
         "requires_before_call": ["accept_rules=true", "confirm_upload=true", "site policy ready", "source_url resolved", "target present"],
-        "read": ["check_and_submit_gate", "duplicate_check", "job_id", "status_endpoint", "summary_endpoint", "check_and_submit_final_report", "blockers"],
+        "read": ["check_and_submit_gate", "duplicate_check", "job_id", "status_endpoint", "summary_endpoint", "check_and_submit_policy_report", "check_and_submit_final_report", "blockers"],
         "continue_when": "check_and_submit_gate.duplicate_clear=true and job_id is returned",
         "stop_when": ["duplicate_check.exists=true", "check_and_submit_gate.action=resolve_gate_blockers", "blockers is non-empty"],
         "after_submit": {
@@ -2054,7 +2054,8 @@ def _source_url_check_and_submit_response(
     ready = bool(submitted_job and not blockers)
     gate_summary = _source_url_check_and_submit_gate_summary(duplicate_check, handoff, submitted_job, blockers)
     manual_sequence = _source_url_check_and_submit_manual_sequence(gate_summary, duplicate_check, handoff, submitted_job, blockers)
-    final_report = _source_url_check_and_submit_final_report(gate_summary, duplicate_check, handoff, submitted_job, manual_sequence, blockers)
+    policy_report = _source_url_check_and_submit_policy_report(submitted_job, handoff, blockers)
+    final_report = _source_url_check_and_submit_final_report(gate_summary, duplicate_check, handoff, submitted_job, manual_sequence, policy_report, blockers)
     return {
         "kind": "ptcli.source_url_check_and_submit",
         "status": "ok" if ready else "blocked",
@@ -2070,6 +2071,7 @@ def _source_url_check_and_submit_response(
         "summary_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}/summary" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
         "check_and_submit_gate": gate_summary,
         "manual_retorrent_sequence": manual_sequence,
+        "check_and_submit_policy_report": policy_report,
         "check_and_submit_final_report": final_report,
         "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers, manual_sequence),
         "blockers": blockers,
@@ -2226,6 +2228,7 @@ def _source_url_check_and_submit_final_report(
     handoff: dict[str, Any] | None,
     submitted_job: dict[str, Any] | None,
     manual_sequence: dict[str, Any],
+    policy_report: dict[str, Any],
     blockers: list[str],
 ) -> dict[str, Any]:
     job_id = submitted_job.get("job_id") if isinstance(submitted_job, dict) else None
@@ -2280,13 +2283,70 @@ def _source_url_check_and_submit_final_report(
             "sequence_phase": manual_sequence.get("phase"),
             "sequence_next_step": manual_sequence.get("next_step") if isinstance(manual_sequence.get("next_step"), dict) else None,
         },
+        "policy": policy_report,
         "recommended_call": recommended_call,
-        "read_order": ["check_and_submit_final_report", "check_and_submit_gate", "duplicate_check", "submit_if_clear_handoff", "manual_retorrent_sequence", "submitted_job"],
+        "read_order": ["check_and_submit_final_report", "check_and_submit_policy_report", "check_and_submit_gate", "duplicate_check", "submit_if_clear_handoff", "manual_retorrent_sequence", "submitted_job"],
         "complete_when": ["check_and_submit_final_report.verdict=submitted_poll and job_id is present", "then poll status_endpoint until terminal and read summary_endpoint"],
         "stop_when": ["duplicate_check.exists=true", "check_and_submit_final_report.verdict=blocked", "blockers is non-empty"],
         "blockers": blockers,
         "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
     }
+
+
+def _source_url_check_and_submit_policy_report(submitted_job: dict[str, Any] | None, handoff: dict[str, Any] | None, blockers: list[str]) -> dict[str, Any]:
+    job = submitted_job if isinstance(submitted_job, dict) else {}
+    submit_request = handoff.get("request") if isinstance(handoff, dict) and isinstance(handoff.get("request"), dict) else {}
+    policy_application_report = job.get("policy_application_report") if isinstance(job.get("policy_application_report"), dict) else {}
+    policy_application_handoff = job.get("policy_application_handoff") if isinstance(job.get("policy_application_handoff"), dict) else {}
+    policy_runtime_contract = job.get("policy_runtime_contract") if isinstance(job.get("policy_runtime_contract"), dict) else {}
+    qbit_enforcement_summary = job.get("qbit_enforcement_summary") if isinstance(job.get("qbit_enforcement_summary"), dict) else {}
+    qbit_execution_gate = job.get("qbit_execution_gate") if isinstance(job.get("qbit_execution_gate"), dict) else {}
+    policy_qbit_defaults = job.get("policy_qbit_defaults") if isinstance(job.get("policy_qbit_defaults"), dict) else submit_request.get("policy_qbit_defaults") if isinstance(submit_request.get("policy_qbit_defaults"), dict) else {}
+    applied_defaults = policy_qbit_defaults.get("applied") if isinstance(policy_qbit_defaults.get("applied"), dict) else {}
+    missing_request_fields = _string_list(policy_application_handoff.get("missing_request_fields")) or _string_list(policy_application_report.get("missing_request_fields"))
+    pending_qbit_roles = _string_list(qbit_enforcement_summary.get("pending_roles")) or _string_list(qbit_execution_gate.get("pending_roles"))
+    mismatch_qbit_roles = _string_list(qbit_enforcement_summary.get("mismatch_roles")) or _string_list(qbit_execution_gate.get("mismatch_roles"))
+    ready = bool(job) and not blockers and policy_application_handoff.get("ready") is True and not missing_request_fields
+    return {
+        "kind": "ptcli.check_and_submit_policy_report",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "job_id": job.get("job_id"),
+        "policy_application_ready": policy_application_handoff.get("ready") is True,
+        "policy_runtime_ready": policy_runtime_contract.get("ready") is True,
+        "policy_qbit_defaults": policy_qbit_defaults or None,
+        "applied_qbit_defaults": applied_defaults,
+        "qbit_plan": job.get("qbit_plan") if isinstance(job.get("qbit_plan"), dict) else None,
+        "qbit_enforcement_summary": qbit_enforcement_summary or None,
+        "qbit_execution_gate": qbit_execution_gate or None,
+        "policy_application_handoff": policy_application_handoff or None,
+        "policy_application_report": policy_application_report or None,
+        "missing_request_fields": missing_request_fields,
+        "pending_qbit_roles": pending_qbit_roles,
+        "mismatch_qbit_roles": mismatch_qbit_roles,
+        "request_fields": {key: (job.get("request") or {}).get(key) for key in ("qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit") if isinstance(job.get("request"), dict) and (job.get("request") or {}).get(key) is not None},
+        "next_step": policy_application_report.get("recommended_call") if isinstance(policy_application_report.get("recommended_call"), dict) else qbit_execution_gate.get("next_step") if isinstance(qbit_execution_gate.get("next_step"), dict) else None,
+        "complete_when": [
+            "policy_application_handoff.ready=true",
+            "policy_application_handoff.missing_request_fields=[]",
+            "qbit_enforcement_summary.ready=true after source/uploaded torrents are injected",
+        ],
+        "stop_when": ["policy_application_handoff.ready=false", "policy_application_handoff.missing_request_fields is non-empty", "qbit_rate_limit_repair_plan.action=repair_limits"],
+        "blockers": blockers + missing_request_fields + mismatch_qbit_roles,
+        "next_actions": _source_url_check_and_submit_policy_report_next_actions(ready, pending_qbit_roles, missing_request_fields, blockers),
+    }
+
+
+def _source_url_check_and_submit_policy_report_next_actions(ready: bool, pending_qbit_roles: list[str], missing_request_fields: list[str], blockers: list[str]) -> list[str]:
+    if ready and pending_qbit_roles:
+        return ["Poll the submitted job, then read qbit_enforcement_summary/qbit_rate_limit_repair_plan after source and uploaded torrents are injected."]
+    if ready:
+        return ["Poll the submitted job and verify qBittorrent rate-limit evidence before reporting live completion."]
+    if missing_request_fields:
+        return ["Recreate or resume the job with policy_application_handoff.request_patch fields before live upload."]
+    if blockers:
+        return ["Resolve check_and_submit_policy_report.blockers before retrying check-and-submit."]
+    return ["Submit only through source_url_check_and_submit so policy defaults and qBittorrent limits are captured on the job."]
 
 
 def _source_url_check_and_submit_final_report_call(verdict: str, gate_summary: dict[str, Any], job_id: str | None, submit_request: dict[str, Any]) -> dict[str, Any]:
@@ -29424,14 +29484,15 @@ def _source_url_preflight_response_contract() -> dict[str, Any]:
 
 def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "check_and_submit_final_report", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "check_and_submit_policy_report", "check_and_submit_final_report", "agent_summary", "blockers", "next_actions"],
         "status_values": ["ok", "blocked"],
         "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
         "check_and_submit_gate_fields": ["ready", "action", "duplicate_searched", "duplicate_clear", "duplicate_exists", "duplicate_count", "submit_ready", "accept_rules", "confirm_upload", "job_created", "job_id", "status_endpoint", "summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "manual_retorrent_sequence_fields": ["ready", "phase", "job_id", "submit_request", "duplicate_gate", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers"],
         "manual_retorrent_step_fields": ["step", "tool", "endpoint", "request", "request_from", "read", "continue_when", "repeat_when", "stop_when", "complete_when"],
-        "check_and_submit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "submission", "confirmations", "control", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "check_and_submit_policy_report_fields": ["ready", "status", "job_id", "policy_application_ready", "policy_runtime_ready", "policy_qbit_defaults", "applied_qbit_defaults", "qbit_plan", "qbit_enforcement_summary", "qbit_execution_gate", "policy_application_handoff", "policy_application_report", "missing_request_fields", "pending_qbit_roles", "mismatch_qbit_roles", "request_fields", "next_step", "complete_when", "stop_when", "blockers", "next_actions"],
+        "check_and_submit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "submission", "confirmations", "control", "policy", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "sequence_phase", "sequence_next_tool", "blocker_count"],
         "safety": ["runs_duplicate_check_before_job_creation", "stops_when_duplicate_exists", "live_upload_requires_accept_rules_and_confirm_upload"],
     }
@@ -30509,6 +30570,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "summary_endpoint": {"type": ["string", "null"]},
             "check_and_submit_gate": {"type": "object"},
             "manual_retorrent_sequence": {"type": "object"},
+            "check_and_submit_policy_report": {"type": "object"},
             "check_and_submit_final_report": {"type": "object"},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
