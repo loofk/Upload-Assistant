@@ -13792,6 +13792,17 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["seedbox_live_validation_completion_report"]["checks"]["source_torrent_hash_present"] is True
     assert job["seedbox_live_validation_completion_report"]["checks"]["uploaded_seeding_ready"] is False
     assert "uploaded_seeding_ready" in job["seedbox_live_validation_completion_report"]["missing_evidence"]
+    diagnostics = job["seedbox_live_validation_completion_report"]["evidence_diagnostics"]
+    assert diagnostics["kind"] == "ptcli.seedbox_live_evidence_diagnostics"
+    assert diagnostics["ready"] is False
+    assert diagnostics["status"] == "blocked"
+    assert diagnostics["next_phase"] == "target_prepare"
+    assert diagnostics["next_evidence"] == "metadata_and_description_ready"
+    diagnostic_items = {item["name"]: item for item in diagnostics["items"]}
+    assert diagnostic_items["target_qbit_seeding"]["phase"] == "target_seed"
+    assert "uploaded_seeding_ready" in diagnostic_items["target_qbit_seeding"]["missing_checks"]
+    assert diagnostics["phase_summary"]["target_seed"]["ready"] is False
+    assert "uploaded_seeding_ready" in diagnostics["phase_summary"]["target_seed"]["missing_checks"]
     assert job["seedbox_live_validation_completion_report"]["recommended_tool"] == "resume_job"
     assert job["seedbox_live_validation_completion_report"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
     assert job["seedbox_live_validation_completion_report"]["dry_run_request"] == job["material_evidence_summary"]["dry_run_request"]
@@ -13810,6 +13821,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["live_completion_gate"]["recommended_call"] == job["seedbox_live_validation_completion_report"]["recommended_call"]
     assert job["live_completion_gate"]["dry_run_request"] == job["material_evidence_summary"]["dry_run_request"]
     assert "uploaded_seeding_ready" in job["live_completion_gate"]["missing_evidence"]
+    assert job["live_completion_gate"]["evidence_diagnostics"] == diagnostics
     assert job["live_completion_gate"]["evidence_status"]["closure_complete"] is False
     assert job["live_completion_gate"]["evidence_status"]["source_torrent_hash_present"] is True
     assert job["live_completion_gate"]["read_order"][0] == "live_completion_gate"
@@ -13820,6 +13832,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["live_user_report"]["source"]["torrent_hash"] == "a" * 40
     assert job["live_user_report"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert "uploaded_seeding_ready" in job["live_user_report"]["evidence"]["missing_evidence"]
+    assert job["live_user_report"]["evidence"]["diagnostics"] == diagnostics
     assert "target.uploaded_torrent_hash" in job["live_user_report"]["evidence"]["required_fields"]
     assert job["live_user_report"]["recommended_tool"] == "resume_job"
     assert job["live_user_report"]["read_order"][0] == "live_user_report"
@@ -20364,12 +20377,18 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_gates" in tool_by_name["manual_retorrent_job"]["response_contract"]["completion_report_fields"]
     assert "seedbox_live_validation_completion_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "missing_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
+    assert "evidence_diagnostics" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
+    assert "seedbox_live_evidence_diagnostics_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "next_phase" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_evidence_diagnostics_fields"]
+    assert "seedbox_live_evidence_diagnostic_item_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "missing_checks" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_evidence_diagnostic_item_fields"]
     assert "recommended_call" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
     assert "execute_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
     assert "complete_when" in tool_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
     assert "live_completion_gate_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "evidence_status" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_completion_gate_fields"]
+    assert "evidence_diagnostics" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_completion_gate_fields"]
     assert "read_order" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_completion_gate_fields"]
     assert "live_user_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "report_allowed" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_user_report_fields"]

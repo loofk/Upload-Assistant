@@ -22126,6 +22126,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
         "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") is True if isinstance(qbit_enforcement_summary, dict) else None,
     }
     missing_evidence = [key for key, value in checks.items() if value is False]
+    evidence_diagnostics = _job_seedbox_live_evidence_diagnostics(checks, missing_evidence, blockers)
     ready_for_user_report = (
         closure_summary.get("complete") is True
         and not blockers
@@ -22168,6 +22169,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
         "summary_file": job.get("summary_file") or _job_summary_file(job),
         "checks": checks,
         "missing_evidence": missing_evidence,
+        "evidence_diagnostics": evidence_diagnostics,
         "duplicate_check": {
             "searched": duplicate_check.get("searched"),
             "exists": duplicate_check.get("exists"),
@@ -22224,6 +22226,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
             "seedbox_live_validation_completion_report.status",
             "seedbox_live_validation_completion_report.checks",
             "seedbox_live_validation_completion_report.missing_evidence",
+            "seedbox_live_validation_completion_report.evidence_diagnostics",
             "closure_summary",
             "target_upload_handoff",
             "qbit_enforcement_summary",
@@ -22239,6 +22242,98 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
         "blockers": blockers,
         "next_actions": _seedbox_live_validation_completion_next_actions(status, recommended, missing_evidence, blockers),
     }
+
+
+def _job_seedbox_live_evidence_diagnostics(checks: dict[str, Any], missing_evidence: list[str], blockers: list[str]) -> dict[str, Any]:
+    matrix = _seedbox_live_evidence_matrix()
+    check_map = {
+        "source_torrent_downloaded": ["source_torrent_hash_present"],
+        "source_qbit_complete": ["source_content_path_present", "qbit_enforcement_ready"],
+        "metadata_and_description_ready": ["materials_ready"],
+        "media_assets_ready": ["materials_ready"],
+        "target_duplicate_clear": ["duplicate_clear"],
+        "target_upload_created": ["target_uploaded_torrent_hash_present", "uploaded_torrent_path_present"],
+        "target_qbit_seeding": ["target_injected_torrent_hash_present", "uploaded_seeding_ready", "qbit_enforcement_ready"],
+        "final_user_report_allowed": ["job_complete", "closure_complete", "closure_blockers_clear"],
+    }
+    items: list[dict[str, Any]] = []
+    for item in matrix:
+        name = str(item.get("name") or "")
+        related_checks = check_map.get(name, [])
+        missing_checks = [check for check in related_checks if checks.get(check) is False]
+        unknown_checks = [check for check in related_checks if checks.get(check) is None]
+        phase_blockers = list(missing_checks)
+        if name == "final_user_report_allowed":
+            phase_blockers.extend(blockers)
+            if missing_evidence:
+                phase_blockers.append("missing_evidence_clear")
+        ready = not missing_checks and (name != "final_user_report_allowed" or (not blockers and not missing_evidence))
+        status = "ready" if ready else "blocked"
+        if unknown_checks and ready:
+            status = "unknown"
+        items.append(
+            {
+                "name": name,
+                "phase": item.get("phase"),
+                "ready": ready,
+                "status": status,
+                "produced_by": item.get("produced_by"),
+                "required_fields": item.get("required_fields") if isinstance(item.get("required_fields"), list) else [],
+                "related_checks": related_checks,
+                "missing_checks": missing_checks,
+                "unknown_checks": unknown_checks,
+                "blockers": list(dict.fromkeys(str(blocker) for blocker in phase_blockers if str(blocker).strip())),
+                "read_from": item.get("read_from") if isinstance(item.get("read_from"), list) else [],
+            }
+        )
+    phase_summary = _job_seedbox_live_evidence_phase_summary(items)
+    blocked_items = [item for item in items if item.get("ready") is not True]
+    next_item = blocked_items[0] if blocked_items else None
+    return {
+        "kind": "ptcli.seedbox_live_evidence_diagnostics",
+        "ready": not blocked_items and not blockers and not missing_evidence,
+        "status": "ready" if not blocked_items and not blockers and not missing_evidence else "blocked",
+        "next_phase": next_item.get("phase") if isinstance(next_item, dict) else None,
+        "next_evidence": next_item.get("name") if isinstance(next_item, dict) else None,
+        "blocked_count": len(blocked_items),
+        "ready_count": len(items) - len(blocked_items),
+        "total_count": len(items),
+        "items": items,
+        "phase_summary": phase_summary,
+        "missing_evidence": missing_evidence,
+        "blockers": blockers,
+        "next_actions": _job_seedbox_live_evidence_diagnostics_next_actions(next_item, missing_evidence, blockers),
+    }
+
+
+def _job_seedbox_live_evidence_phase_summary(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for item in items:
+        phase = str(item.get("phase") or "unknown")
+        phase_summary = summary.setdefault(phase, {"ready": True, "ready_count": 0, "blocked_count": 0, "items": [], "missing_checks": [], "blockers": []})
+        phase_summary["items"].append(item.get("name"))
+        if item.get("ready") is True:
+            phase_summary["ready_count"] += 1
+        else:
+            phase_summary["ready"] = False
+            phase_summary["blocked_count"] += 1
+            phase_summary["missing_checks"].extend(_string_list(item.get("missing_checks")))
+            phase_summary["blockers"].extend(_string_list(item.get("blockers")))
+        phase_summary["missing_checks"] = list(dict.fromkeys(phase_summary["missing_checks"]))
+        phase_summary["blockers"] = list(dict.fromkeys(phase_summary["blockers"]))
+    return summary
+
+
+def _job_seedbox_live_evidence_diagnostics_next_actions(next_item: dict[str, Any] | None, missing_evidence: list[str], blockers: list[str]) -> list[str]:
+    if not next_item and not missing_evidence and not blockers:
+        return ["Evidence diagnostics are ready; read live_validation_completion_audit before reporting completion."]
+    if isinstance(next_item, dict) and next_item.get("name"):
+        return [f"Repair evidence phase {next_item.get('phase')} / {next_item.get('name')}; missing checks: {', '.join(_string_list(next_item.get('missing_checks')) or _string_list(next_item.get('blockers')))}."]
+    if missing_evidence:
+        return [f"Collect missing live evidence: {', '.join(missing_evidence)}."]
+    if blockers:
+        return ["Resolve live evidence blockers before reporting completion."]
+    return ["Reread seedbox_live_validation_completion_report before deciding the next action."]
 
 
 def _job_live_completion_gate(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -22274,6 +22369,7 @@ def _job_live_completion_gate(job: dict[str, Any], summary_payload: dict[str, An
             "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else None,
         },
         "missing_evidence": _string_list(completion_report.get("missing_evidence")),
+        "evidence_diagnostics": completion_report.get("evidence_diagnostics") if isinstance(completion_report.get("evidence_diagnostics"), dict) else None,
         "evidence_refs": [
             "seedbox_live_validation_completion_report",
             "closure_summary",
@@ -22366,6 +22462,7 @@ def _job_live_user_report(job: dict[str, Any], summary_payload: dict[str, Any] |
             "uploaded_torrent_path": evidence.get("uploaded_torrent_path"),
             "required_fields": _live_user_report_required_fields(),
             "missing_evidence": missing_evidence,
+            "diagnostics": validation.get("evidence_diagnostics") if isinstance(validation.get("evidence_diagnostics"), dict) else None,
         },
         "report_outline": _live_user_report_outline(ready),
         "read_order": ["live_user_report", "live_completion_gate", "seedbox_live_validation_completion_report", "closure_summary", "qbit_enforcement_summary"],
@@ -30367,8 +30464,10 @@ def _job_response_contract() -> dict[str, Any]:
         "closure_summary_fields": ["complete", "ready_for_report", "completion_report", "action", "gates", "source", "target", "duplicate_check", "materials", "policy", "qbit", "evidence", "next_step", "recommended_tool", "blockers", "next_actions"],
         "closure_material_fields": ["ready", "blockers", "evidence_summary"],
         "completion_report_fields": ["complete", "ready_for_user_report", "verdict", "required_gates", "missing_gates", "source", "target", "duplicate_check", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "blockers", "next_actions", "report_when"],
-        "seedbox_live_validation_completion_report_fields": ["ready", "ready_for_user_report", "status", "job_id", "job_status", "summary_file", "checks", "missing_evidence", "duplicate_check", "materials", "policy", "qbit", "source", "target", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "read_fields", "complete_when", "stop_when", "blockers", "next_actions"],
-        "live_completion_gate_fields": ["ready", "ready_for_user_report", "status", "action", "job_id", "job_status", "summary_file", "duplicate_check", "evidence_status", "missing_evidence", "evidence_refs", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "seedbox_live_validation_completion_report_fields": ["ready", "ready_for_user_report", "status", "job_id", "job_status", "summary_file", "checks", "missing_evidence", "evidence_diagnostics", "duplicate_check", "materials", "policy", "qbit", "source", "target", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "read_fields", "complete_when", "stop_when", "blockers", "next_actions"],
+        "seedbox_live_evidence_diagnostics_fields": ["ready", "status", "next_phase", "next_evidence", "blocked_count", "ready_count", "total_count", "items", "phase_summary", "missing_evidence", "blockers", "next_actions"],
+        "seedbox_live_evidence_diagnostic_item_fields": ["name", "phase", "ready", "status", "produced_by", "required_fields", "related_checks", "missing_checks", "unknown_checks", "blockers", "read_from"],
+        "live_completion_gate_fields": ["ready", "ready_for_user_report", "status", "action", "job_id", "job_status", "summary_file", "duplicate_check", "evidence_status", "missing_evidence", "evidence_diagnostics", "evidence_refs", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_user_report_fields": ["ready", "ready_for_user_report", "verdict", "job_id", "job_status", "summary_file", "report_allowed", "report_blocked_reason", "source", "target", "duplicate_check", "qbit", "evidence", "report_outline", "read_order", "complete_when", "stop_when", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "blockers", "next_actions"],
         "live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "job_id", "job_status", "summary_file", "source", "target", "duplicate_check", "qbit", "evidence", "report_outline", "audit", "read_order", "complete_when", "stop_when", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "blockers", "next_actions"],
         "live_validation_completion_audit_fields": ["ready", "report_allowed", "verdict", "job_id", "job_status", "summary_file", "checks", "failed_checks", "missing_evidence", "source", "target", "duplicate_check", "qbit", "report_refs", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
