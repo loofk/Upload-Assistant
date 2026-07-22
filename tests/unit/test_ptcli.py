@@ -16163,6 +16163,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_refill_plan["kind"] == "ptcli.daily_candidate_refill_plan"
     assert blocked_refill_plan["action"] == "resolve_blockers"
     assert blocked_refill_plan["blocked_source_ids"] == ["60635"]
+    assert blocked_refill_plan["exclude_source_ids_hint"] == ["60635"]
+    assert blocked_refill_plan["refill_request_contract"]["kind"] == "ptcli.daily_candidate_refill_request_contract"
+    assert blocked_refill_plan["refill_request_contract"]["excluded_source_ids"] == ["60635"]
+    assert blocked_refill_plan["refill_request_contract"]["safe_to_call_now"] is False
     blocked_sequence = list_payload["daily_candidate_batch_sequence"]
     assert blocked_sequence["kind"] == "ptcli.daily_candidate_batch_sequence"
     assert blocked_sequence["action"] == "resolve_blockers"
@@ -16197,6 +16201,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_tracking["can_submit_now"] is False
     assert blocked_tracking["recommended_tool"] == "site_policies"
     assert blocked_tracking["recommended_call"]["safe_to_call_now"] is False
+    assert blocked_tracking["refill_request_contract"] == blocked_refill_plan["refill_request_contract"]
     assert blocked_tracking["blockers"][0].startswith("submitted_job.")
     batch_status = store.daily_candidate_batch({"source_tracker": "U2", "target": "MTEAM"})
     assert batch_status["kind"] == "ptcli.daily_candidate_batch_status"
@@ -16240,6 +16245,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert empty_batch["daily_candidate_tracking_report"]["action"] == "create_daily_candidates"
     assert empty_batch["daily_candidate_tracking_report"]["should_refill"] is True
     assert empty_batch["daily_candidate_tracking_report"]["recommended_tool"] == "daily_candidates_job"
+    assert empty_batch["daily_candidate_tracking_report"]["recommended_request"]["source_tracker"] == "CHD"
+    assert empty_batch["daily_candidate_tracking_report"]["recommended_request"]["target"] == ["MTEAM"]
+    assert empty_batch["daily_candidate_refill_plan"]["refill_request_contract"]["safe_to_call_now"] is True
+    assert empty_batch["daily_candidate_refill_plan"]["refill_request_contract"]["recommended_request"] == empty_batch["daily_candidate_tracking_report"]["recommended_request"]
     assert summary["candidate_submission"] == retorrent_job["candidate_submission"]
     assert summary["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert summary["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
@@ -16314,6 +16323,11 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert refill_plan["recommended_tool"] == "daily_candidates_job"
     assert refill_plan["recommended_endpoint"] == "/v1/jobs/candidates/daily"
     assert refill_plan["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "accept_rules": True, "check_dupes": True}
+    assert refill_plan["refill_request_contract"]["kind"] == "ptcli.daily_candidate_refill_request_contract"
+    assert refill_plan["refill_request_contract"]["ready"] is True
+    assert refill_plan["refill_request_contract"]["ready_shortfall_count"] == 9
+    assert refill_plan["refill_request_contract"]["recommended_request"] == refill_plan["recommended_request"]
+    assert refill_plan["refill_request_contract"]["safe_to_call_now"] is True
     assert "rerun returns no new safe candidates" in refill_plan["stop_when"][0]
 
 
@@ -18869,6 +18883,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
         assert key in source_url_properties
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+    assert "exclude_source_ids" in tool_by_name["daily_candidates_job"]["input_schema"]["properties"]
     assert tool_by_name["daily_candidate_batch_status"]["path"] == "/v1/jobs/candidates/daily/batch"
     assert tool_by_name["daily_candidate_batch_status"]["method"] == "GET"
     assert "source_tracker" in tool_by_name["daily_candidate_batch_status"]["input_schema"]["properties"]
@@ -18893,6 +18908,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "blocked_jobs" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_execution_summary_fields"]
     assert "pagination_supported" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "exclude_source_ids_hint" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+    assert "refill_request_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+    assert "daily_candidate_refill_request_contract_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "excluded_source_ids" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
+    assert "safe_to_call_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
     assert "daily_candidate_batch_sequence_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "steps" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_sequence_fields"]
     assert "daily_candidate_approval_sequence_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
@@ -18902,6 +18921,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_tracking_report_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "can_submit_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
     assert "recommended_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
+    assert "refill_request_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
     assert "daily_candidate_tracking_report" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_tracking_report_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_approval_item_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
@@ -19327,6 +19347,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_tracking_report" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_tracking_report_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "should_refill" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_tracking_report_fields"]
+    assert "daily_candidate_refill_request_contract_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_refill_plan_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_batch_sequence_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_approval_sequence_fields" in tool_by_name["list_jobs"]["response_contract"]
@@ -20881,6 +20902,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "shortfall_recovery" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
         assert "daily_candidate_shortfall_recovery_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "shortfall_items" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
+        assert "exclude_source_ids" in tools_by_name["daily_candidates_job"]["input_schema"]["properties"]
         assert "delivery_handoff_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "approval_queue" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
         assert "approval_prompts" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
@@ -21283,6 +21305,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_tracking_report" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
         assert "daily_candidate_tracking_report_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "recommended_call" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
+        assert "refill_request_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+        assert "daily_candidate_refill_request_contract_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
         assert "max_concurrent_jobs" in tools_by_name["list_jobs"]["response_contract"]["queue_fields"]
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]

@@ -10554,6 +10554,13 @@
             "type": "boolean",
             "default": true
           },
+          "exclude_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
+          },
           "base_dir": {
             "type": "string"
           },
@@ -11062,6 +11069,13 @@
           "check_dupes": {
             "type": "boolean",
             "default": true
+          },
+          "exclude_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
           },
           "base_dir": {
             "type": "string"
@@ -14867,6 +14881,13 @@
                   "type": "boolean",
                   "default": true
                 },
+                "exclude_source_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
+                },
                 "base_dir": {
                   "type": "string"
                 },
@@ -14976,6 +14997,13 @@
                 "check_dupes": {
                   "type": "boolean",
                   "default": true
+                },
+                "exclude_source_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
                 },
                 "base_dir": {
                   "type": "string"
@@ -15727,6 +15755,7 @@
           "running_source_ids",
           "blocked_source_ids",
           "exclude_source_ids_hint",
+          "refill_request_contract",
           "pagination_supported",
           "dedupe_strategy",
           "recommended_tool",
@@ -15863,8 +15892,32 @@
           "recommended_method",
           "recommended_request",
           "recommended_call",
+          "refill_request_contract",
           "read_order",
           "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "daily_candidate_refill_request_contract_fields": [
+          "ready",
+          "action",
+          "target_count",
+          "ready_count",
+          "ready_shortfall_count",
+          "scan_count",
+          "scan_exhausted",
+          "excluded_source_ids",
+          "submitted_source_ids",
+          "dedupe_key",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "safe_to_call_now",
+          "requires_user_review",
+          "read_before_call",
+          "continue_when",
           "stop_when",
           "blockers",
           "next_actions"
@@ -24942,6 +24995,7 @@
           "running_source_ids",
           "blocked_source_ids",
           "exclude_source_ids_hint",
+          "refill_request_contract",
           "pagination_supported",
           "dedupe_strategy",
           "recommended_tool",
@@ -25078,8 +25132,32 @@
           "recommended_method",
           "recommended_request",
           "recommended_call",
+          "refill_request_contract",
           "read_order",
           "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "daily_candidate_refill_request_contract_fields": [
+          "ready",
+          "action",
+          "target_count",
+          "ready_count",
+          "ready_shortfall_count",
+          "scan_count",
+          "scan_exhausted",
+          "excluded_source_ids",
+          "submitted_source_ids",
+          "dedupe_key",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "safe_to_call_now",
+          "requires_user_review",
+          "read_before_call",
+          "continue_when",
           "stop_when",
           "blockers",
           "next_actions"
@@ -30586,6 +30664,13 @@
                   "type": "boolean",
                   "default": true
                 },
+                "exclude_source_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
+                },
                 "base_dir": {
                   "type": "string"
                 },
@@ -31088,6 +31173,13 @@
                 "check_dupes": {
                   "type": "boolean",
                   "default": true
+                },
+                "exclude_source_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
                 },
                 "base_dir": {
                   "type": "string"
