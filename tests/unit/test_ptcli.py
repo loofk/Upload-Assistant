@@ -16931,6 +16931,28 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["notification_payload"]["daily_candidate_delivery_final_report"] == delivery_final_report
     assert payload["delivery_handoff"]["daily_candidate_delivery_final_report"] == delivery_final_report
     assert payload["daily_candidate_delivery_plan"]["daily_candidate_delivery_final_report"] == delivery_final_report
+    run_handoff = payload["daily_candidate_run_handoff"]
+    assert run_handoff["kind"] == "ptcli.daily_candidate_run_handoff"
+    assert run_handoff["ready"] is True
+    assert run_handoff["status"] == "ready"
+    assert run_handoff["action"] == "submit_candidate"
+    assert run_handoff["verdict"] == "ready_for_user_approval"
+    assert run_handoff["target_count"] == 10
+    assert run_handoff["selected_count"] == 1
+    assert run_handoff["safe_to_submit_count"] == 1
+    assert run_handoff["shortfall_count"] == 9
+    assert run_handoff["publish"]["request"] == {"notification_payload_ref": "notification_payload"}
+    assert run_handoff["submit"]["tool"] == "submit_daily_candidate_job"
+    assert run_handoff["submit"]["requires_user_approval"] is True
+    assert run_handoff["submit"]["first_submit_request"] == delivery_final_report["submission"]["first_submit_request"]
+    assert run_handoff["next_step"]["tool"] == "submit_daily_candidate_job"
+    assert run_handoff["next_step"]["reason"] == "submit_candidate_after_user_approval"
+    assert run_handoff["safety"]["publish_uploads"] is False
+    assert run_handoff["safety"]["submit_requires_human_approval"] is True
+    assert payload["schedule_digest"]["daily_candidate_run_handoff"] == run_handoff
+    assert payload["notification_payload"]["daily_candidate_run_handoff"] == run_handoff
+    assert payload["delivery_handoff"]["daily_candidate_run_handoff"] == run_handoff
+    assert payload["daily_candidate_delivery_plan"]["daily_candidate_run_handoff"] == run_handoff
     assert payload["notification_payload"]["submit_items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert payload["agent_decision"]["can_submit_any"] is True
@@ -19367,6 +19389,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_delivery_plan" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_schedule_execution_context_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "first_candidate_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_schedule_execution_context_fields"]
@@ -19375,6 +19398,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_delivery_final_report_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "delivery" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_final_report_fields"]
     assert "recommended_call" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_final_report_fields"]
+    assert "daily_candidate_run_handoff_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "submit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
+    assert "publish" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
     assert "daily_schedule_gate_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "action" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
     assert "daily_candidate_delivery_plan_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -19390,6 +19416,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "target_met" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -19404,9 +19431,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
+    assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
     assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
+    assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
     assert "daily_candidate_batch_report_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "shortfall_recovery" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
     assert "daily_candidate_shortfall_recovery_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -20033,6 +20062,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_schedule_gate" in schedule_jobs_schema["properties"]
     assert "daily_candidate_delivery_plan" in schedule_jobs_schema["properties"]
     assert "daily_candidate_delivery_final_report" in schedule_jobs_schema["properties"]
+    assert "daily_candidate_run_handoff" in schedule_jobs_schema["properties"]
     assert "daily_candidate_final_report" in schedule_jobs_schema["properties"]
     assert "agent_decision" in schedule_jobs_schema["properties"]
     batch_status_schema = openapi["paths"]["/v1/jobs/candidates/daily/batch"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -20690,6 +20720,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_delivery_plan" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "daily_candidate_schedule_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+        assert "daily_candidate_run_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "daily_candidate_schedule_execution_context_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "first_candidate_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_schedule_execution_context_fields"]
         assert "daily_schedule_gate_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -20701,6 +20732,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_delivery_final_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
         assert "daily_candidate_delivery_final_report_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "recommended_call" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_final_report_fields"]
+        assert "daily_candidate_run_handoff_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "submit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "approval_queue" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -20708,6 +20741,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "first_approval_prompt" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "daily_candidate_schedule_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "daily_candidate_run_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "top_safe_candidates" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "daily_candidate_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "candidate_control_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -20725,8 +20759,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "decision_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "daily_candidate_batch_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
+        assert "daily_candidate_run_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
         assert "daily_candidate_batch_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
+        assert "daily_candidate_run_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
         assert "daily_candidate_report_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "first_submit_request" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_report_fields"]
         assert "daily_candidate_batch_report_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]

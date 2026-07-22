@@ -2548,6 +2548,11 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
     notification_payload["daily_candidate_delivery_final_report"] = daily_candidate_delivery_final_report
     delivery_handoff["daily_candidate_delivery_final_report"] = daily_candidate_delivery_final_report
     daily_candidate_delivery_plan["daily_candidate_delivery_final_report"] = daily_candidate_delivery_final_report
+    daily_candidate_run_handoff = _daily_candidate_run_handoff(schedule_digest, notification_payload, delivery_handoff, daily_candidate_delivery_plan, daily_candidate_delivery_final_report, daily_candidate_schedule_execution_context, blockers)
+    schedule_digest["daily_candidate_run_handoff"] = daily_candidate_run_handoff
+    notification_payload["daily_candidate_run_handoff"] = daily_candidate_run_handoff
+    delivery_handoff["daily_candidate_run_handoff"] = daily_candidate_run_handoff
+    daily_candidate_delivery_plan["daily_candidate_run_handoff"] = daily_candidate_run_handoff
     candidate_control_summary = schedule_digest.get("candidate_control_summary") if isinstance(schedule_digest.get("candidate_control_summary"), dict) else None
     return {
         "kind": "ptcli.daily_candidate_schedule_jobs",
@@ -2565,6 +2570,7 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
         "daily_candidate_delivery_plan": daily_candidate_delivery_plan,
         "daily_candidate_delivery_final_report": daily_candidate_delivery_final_report,
         "daily_candidate_schedule_execution_context": daily_candidate_schedule_execution_context,
+        "daily_candidate_run_handoff": daily_candidate_run_handoff,
         "daily_candidate_final_report": daily_candidate_final_report,
         "agent_decision": agent_decision,
         "blockers": blockers,
@@ -8061,6 +8067,176 @@ def _daily_candidate_delivery_final_next_actions(action: str, pending_count: int
     if shortfall_count:
         return [f"Daily candidate delivery is short by {shortfall_count}; rerun the recommended shortfall request if available."]
     return ["Inspect daily_candidate_delivery_final_report.read_order before choosing the next daily candidate action."]
+
+
+def _daily_candidate_run_handoff(
+    schedule_digest: dict[str, Any],
+    notification_payload: dict[str, Any],
+    delivery_handoff: dict[str, Any],
+    delivery_plan: dict[str, Any],
+    delivery_final: dict[str, Any],
+    execution_context: dict[str, Any],
+    source_blockers: list[str],
+) -> dict[str, Any]:
+    """Top-level daily candidate control surface for AI agents."""
+    blockers = list(
+        dict.fromkeys(
+            _string_list(source_blockers)
+            + _string_list(schedule_digest.get("blockers"))
+            + _string_list(delivery_handoff.get("blockers"))
+            + _string_list(delivery_plan.get("blockers"))
+            + _string_list(delivery_final.get("blockers"))
+            + _string_list(execution_context.get("blockers"))
+        )
+    )
+    action = str(delivery_final.get("action") or delivery_plan.get("action") or execution_context.get("action") or "inspect_empty")
+    counts = delivery_final.get("counts") if isinstance(delivery_final.get("counts"), dict) else {}
+    pending_count = _first_int(counts.get("pending_job_count"), delivery_plan.get("pending_job_count"), execution_context.get("pending_job_count"), schedule_digest.get("pending_job_count"))
+    shortfall_count = _first_int(counts.get("shortfall_count"), delivery_plan.get("shortfall_count"), execution_context.get("shortfall_count"), schedule_digest.get("shortfall_count"))
+    publish_step = _daily_candidate_run_publish_step(notification_payload, delivery_handoff, delivery_plan)
+    submit_step = _daily_candidate_run_submit_step(delivery_final, delivery_plan, execution_context)
+    poll_step = _daily_candidate_run_poll_step(schedule_digest)
+    shortfall_step = _daily_candidate_run_shortfall_step(delivery_final, delivery_plan, execution_context, schedule_digest)
+    next_step = _daily_candidate_run_next_step(action, blockers, pending_count, shortfall_count, publish_step, submit_step, poll_step, shortfall_step)
+    publish_ready = bool(delivery_final.get("delivery", {}).get("publish_ready")) if isinstance(delivery_final.get("delivery"), dict) else bool(delivery_plan.get("publish_ready") or notification_payload.get("ready"))
+    submission_ready = bool(delivery_final.get("submission", {}).get("ready")) if isinstance(delivery_final.get("submission"), dict) else bool(delivery_plan.get("submission_ready"))
+    ready = not blockers and action in {"publish_notification", "submit_candidate", "rerun_for_shortfall", "poll_jobs"}
+    return {
+        "kind": "ptcli.daily_candidate_run_handoff",
+        "ready": ready,
+        "status": "ready" if ready else "blocked" if blockers else "pending",
+        "action": action,
+        "verdict": delivery_final.get("verdict"),
+        "target_count": _first_int(counts.get("target_count"), delivery_plan.get("target_count"), schedule_digest.get("target_count")),
+        "selected_count": _first_int(counts.get("selected_count"), delivery_plan.get("selected_count"), schedule_digest.get("selected_count")),
+        "ready_count": _first_int(counts.get("ready_count"), delivery_plan.get("ready_count"), schedule_digest.get("ready_count")),
+        "safe_to_submit_count": _first_int(counts.get("safe_to_submit_count"), delivery_plan.get("safe_to_submit_count"), schedule_digest.get("submit_request_count")),
+        "shortfall_count": shortfall_count,
+        "pending_job_count": pending_count,
+        "publish": publish_step,
+        "submit": submit_step,
+        "poll": poll_step,
+        "shortfall_recovery": shortfall_step,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_method": next_step.get("method"),
+        "recommended_request": next_step.get("request"),
+        "read_order": ["daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "daily_candidate_schedule_execution_context", "delivery_handoff", "notification_payload", "schedule_digest.submission_handoff"],
+        "complete_when": ["daily_candidate_run_handoff.ready=true", "daily_candidate_run_handoff.pending_job_count=0", "daily_candidate_delivery_final_report.report_allowed=true"],
+        "stop_when": [
+            "daily_candidate_run_handoff.blockers is non-empty",
+            "daily_candidate_run_handoff.action='submit_candidate' and explicit user approval is missing",
+            "daily_candidate_run_handoff.action='publish_notification' means do not submit or upload",
+        ],
+        "safety": {
+            "publish_mutates_tracker": False,
+            "publish_uploads": False,
+            "submit_mutates_tracker": action == "submit_candidate",
+            "submit_requires_human_approval": action == "submit_candidate",
+            "submit_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "candidate_execution_context.ready=true"],
+            "does_not_bypass_site_rules": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_run_next_actions(action, pending_count, shortfall_count, blockers, publish_ready, submission_ready),
+    }
+
+
+def _daily_candidate_run_publish_step(notification_payload: dict[str, Any], delivery_handoff: dict[str, Any], delivery_plan: dict[str, Any]) -> dict[str, Any]:
+    ready = bool(notification_payload.get("ready") or delivery_handoff.get("publish_ready") or delivery_plan.get("publish_ready"))
+    return {
+        "ready": ready,
+        "tool": "publish_notification",
+        "endpoint": None,
+        "method": None,
+        "request": {"notification_payload_ref": "notification_payload"} if ready else None,
+        "payload_ref": "notification_payload" if notification_payload else None,
+        "continue_when": "notification_payload.ready=true",
+        "stop_when": ["publishing this payload must not call submit_daily_candidate_job"],
+    }
+
+
+def _daily_candidate_run_submit_step(delivery_final: dict[str, Any], delivery_plan: dict[str, Any], execution_context: dict[str, Any]) -> dict[str, Any]:
+    submission = delivery_final.get("submission") if isinstance(delivery_final.get("submission"), dict) else {}
+    first_submit = submission.get("first_submit_request") if isinstance(submission.get("first_submit_request"), dict) else delivery_plan.get("first_submit_request") if isinstance(delivery_plan.get("first_submit_request"), dict) else execution_context.get("first_submit_request") if isinstance(execution_context.get("first_submit_request"), dict) else None
+    return {
+        "ready": bool(submission.get("ready") or delivery_plan.get("submission_ready")),
+        "tool": submission.get("recommended_tool") or delivery_plan.get("recommended_tool") or execution_context.get("recommended_tool"),
+        "endpoint": submission.get("recommended_endpoint") or delivery_plan.get("recommended_endpoint") or execution_context.get("recommended_endpoint"),
+        "method": submission.get("recommended_method") or delivery_plan.get("recommended_method") or execution_context.get("recommended_method") or "POST",
+        "request": submission.get("recommended_request") or delivery_plan.get("recommended_request") or execution_context.get("recommended_request"),
+        "first_submit_request": first_submit,
+        "requires_user_approval": True,
+        "required_user_inputs": ["explicit candidate approval", "accept_rules=true", "confirm_upload=true"],
+        "continue_when": "user explicitly approves first_submit_request and candidate_execution_context.ready=true",
+        "stop_when": ["user approval missing", "confirm_upload is not true", "candidate policy_execution_handoff.ready=false"],
+    }
+
+
+def _daily_candidate_run_poll_step(schedule_digest: dict[str, Any]) -> dict[str, Any]:
+    running_jobs = schedule_digest.get("running_jobs") if isinstance(schedule_digest.get("running_jobs"), list) else []
+    first_job = running_jobs[0] if running_jobs and isinstance(running_jobs[0], dict) else {}
+    return {
+        "ready": bool(running_jobs),
+        "tool": "get_job_status",
+        "endpoint": first_job.get("status_endpoint") or "/v1/jobs/{job_id}",
+        "method": "GET",
+        "request": {"job_id": first_job.get("retorrent_job_id") or first_job.get("job_id")} if first_job else None,
+        "running_jobs": running_jobs,
+        "continue_when": "pending_job_count becomes 0, then reread daily_candidate_run_handoff",
+    }
+
+
+def _daily_candidate_run_shortfall_step(delivery_final: dict[str, Any], delivery_plan: dict[str, Any], execution_context: dict[str, Any], schedule_digest: dict[str, Any]) -> dict[str, Any]:
+    shortfall = delivery_final.get("shortfall_recovery") if isinstance(delivery_final.get("shortfall_recovery"), dict) else delivery_plan.get("shortfall_recovery") if isinstance(delivery_plan.get("shortfall_recovery"), dict) else execution_context.get("shortfall_recovery") if isinstance(execution_context.get("shortfall_recovery"), dict) else schedule_digest.get("daily_candidate_batch_report", {}).get("shortfall_recovery") if isinstance(schedule_digest.get("daily_candidate_batch_report"), dict) else {}
+    return {
+        "ready": bool(shortfall),
+        "tool": shortfall.get("recommended_tool"),
+        "endpoint": shortfall.get("recommended_endpoint"),
+        "method": shortfall.get("recommended_method"),
+        "request": shortfall.get("recommended_request"),
+        "recommended_overrides": shortfall.get("recommended_overrides"),
+        "continue_when": "shortfall_recovery returns more safe candidates or scan is exhausted",
+    }
+
+
+def _daily_candidate_run_next_step(
+    action: str,
+    blockers: list[str],
+    pending_count: int,
+    shortfall_count: int,
+    publish_step: dict[str, Any],
+    submit_step: dict[str, Any],
+    poll_step: dict[str, Any],
+    shortfall_step: dict[str, Any],
+) -> dict[str, Any]:
+    if blockers:
+        return {"tool": "inspect_blockers", "endpoint": None, "method": None, "request": {"blockers": blockers}, "reason": "daily_candidate_blocked"}
+    if pending_count and poll_step.get("ready"):
+        return {**poll_step, "reason": "poll_pending_candidate_jobs"}
+    if action == "submit_candidate" and submit_step.get("ready"):
+        return {**submit_step, "reason": "submit_candidate_after_user_approval"}
+    if action == "publish_notification" and publish_step.get("ready"):
+        return {**publish_step, "reason": "publish_daily_candidate_digest"}
+    if shortfall_count and shortfall_step.get("ready"):
+        return {**shortfall_step, "reason": "rerun_for_shortfall"}
+    if publish_step.get("ready"):
+        return {**publish_step, "reason": "publish_available_digest"}
+    return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": None, "reason": "create_or_refresh_daily_candidates"}
+
+
+def _daily_candidate_run_next_actions(action: str, pending_count: int, shortfall_count: int, blockers: list[str], publish_ready: bool, submission_ready: bool) -> list[str]:
+    if blockers:
+        return ["Resolve daily_candidate_run_handoff.blockers before publishing or submitting candidates."]
+    if pending_count:
+        return [f"Poll {pending_count} pending candidate job(s), then reread daily_candidate_run_handoff."]
+    if action == "submit_candidate" and submission_ready:
+        return ["Report daily_candidate_run_handoff.submit.first_submit_request to the user and call recommended_tool only after explicit approval."]
+    if action == "publish_notification" and publish_ready:
+        return ["Publish daily_candidate_run_handoff.publish.request; this does not upload or submit torrents."]
+    if shortfall_count:
+        return [f"Use daily_candidate_run_handoff.shortfall_recovery to try filling {shortfall_count} missing ready candidate(s)."]
+    return ["Inspect daily_candidate_run_handoff.read_order before choosing the next daily candidate action."]
 
 
 def _daily_candidate_schedule_delivery_plan_next_actions(action: str, shortfall_count: int, pending_count: int) -> list[str]:
@@ -23500,19 +23676,20 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Create one daily-candidate discovery job per enabled schedule entry and return job_ids for polling. This only scans candidates and never uploads.",
             "input_schema": candidate_schedule_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_delivery_final_report", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "agent_decision", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_delivery_final_report", "daily_candidate_schedule_execution_context", "daily_candidate_run_handoff", "daily_candidate_final_report", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
-                "digest_fields": ["items", "push_items", "push_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "candidate_control_summary", "daily_candidate_schedule_execution_context", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "digest_fields": ["items", "push_items", "push_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "candidate_control_summary", "daily_candidate_schedule_execution_context", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
                 "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "publish_cards", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "candidate_control_summary", "decision_summary", "submission_ready", "recommended_action"],
                 "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "pending_job_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "candidate_control_summary_fields": _candidate_response_contract()["candidate_control_summary_fields"],
                 "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
-                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
-                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
+                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
+                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_schedule_gate_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "pending_job_count", "publish_ready", "submission_ready", "notification_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
                 "daily_candidate_delivery_plan_fields": ["ready", "action", "status", "publish_ready", "submission_ready", "notification_ready", "target_met", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "recommended_tool", "recommended_endpoint", "recommended_request", "publish_request", "first_submit_request", "safe_to_publish", "recommended_action_safety", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_schedule_execution_context_fields": ["ready", "action", "schedule_job_count", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "target_met", "approval_queue_ready", "publish_ready", "submission_ready", "notification_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_candidate_execution_context", "approval_queue", "submission_handoff_ref", "notification_payload_ref", "publish_request", "shortfall_recovery", "required_user_inputs", "missing_user_inputs", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_run_handoff_fields": ["ready", "status", "action", "verdict", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "publish", "submit", "poll", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "notification", "approval", "submission", "shortfall_recovery", "audit", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_delivery_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "notification", "submission", "safety", "audit", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "pending_job_count", "recommended_count", "items", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "submit_tool", "submit_endpoint_template", "requires_confirmation", "continue_when", "stop_when", "blockers", "next_actions"],
@@ -25800,6 +25977,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_delivery_plan": {"type": "object"},
             "daily_candidate_delivery_final_report": {"type": "object"},
             "daily_candidate_schedule_execution_context": {"type": "object"},
+            "daily_candidate_run_handoff": {"type": "object"},
             "daily_candidate_final_report": {"type": "object"},
             "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
