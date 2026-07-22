@@ -14883,6 +14883,24 @@ def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_e
     assert job["qbit_execution_gate"]["recommended_tool"] == "resume_job"
     assert job["qbit_execution_gate"]["recommended_endpoint"].endswith(f"/v1/jobs/{job['job_id']}/resume")
     assert job["qbit_execution_gate"]["dry_run_request"] == {"dry_run": True}
+    assert job["job_handoff"]["qbit_limit_audit"] == job["qbit_limit_audit"]
+    assert job["job_handoff"]["qbit_handoff"] == job["qbit_handoff"]
+    assert job["job_handoff"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
+    assert job["job_handoff"]["qbit_execution_gate"] == job["qbit_execution_gate"]
+    assert job["recovery_handoff"]["handoff_sources"]["qbit_limit_ready"] is False
+    assert job["recovery_handoff"]["handoff_sources"]["qbit_enforcement_ready"] is False
+    assert job["recovery_handoff"]["handoff_sources"]["qbit_execution_ready"] is False
+    assert "qbit_limit_audit" in job["recovery_handoff"]["read_fields"]
+    assert "qbit_enforcement_summary" in job["recovery_handoff"]["read_fields"]
+    assert "qbit_execution_gate" in job["recovery_handoff"]["read_fields"]
+    assert job["blocked_recovery_report"]["qbit_limit_audit"] == job["qbit_limit_audit"]
+    assert job["blocked_recovery_report"]["qbit_handoff"] == job["qbit_handoff"]
+    assert job["blocked_recovery_report"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
+    assert job["blocked_recovery_report"]["qbit_execution_gate"] == job["qbit_execution_gate"]
+    assert job["blocked_recovery_report"]["sources"]["qbit_limit_ready"] is False
+    assert job["blocked_recovery_report"]["sources"]["qbit_enforcement_ready"] is False
+    assert job["blocked_recovery_report"]["sources"]["qbit_execution_ready"] is False
+    assert "qbit_execution_gate" in job["blocked_recovery_report"]["read_order"]
 
 
 def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path) -> None:
@@ -19544,6 +19562,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "material_gap_summary" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "material_preparation_final_report" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "qbit_limit_audit" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "qbit_enforcement_summary" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "job_control_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -19554,6 +19575,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recoverable" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+    assert "qbit_limit_audit" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+    assert "qbit_enforcement_summary" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+    assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "configure_policy" in tool_by_name["get_job_status"]["response_contract"]["recovery_actions"]
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
