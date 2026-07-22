@@ -20697,6 +20697,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_workflow_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "compose_deployable" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "api_auth_recommended" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "api_auth_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "api_publicly_exposed" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "api_exposure_blocked" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "env_template_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_host_path_envs" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "deployment_env_fields" in tool_by_name["deployment_check"]["response_contract"]
@@ -20717,6 +20720,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "docker_compose_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "ptcli_api_service_ready" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "ptcli_api_healthcheck" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
+    assert "ptcli_api_public_port" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "host_path_envs" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert tool_by_name["goal_progress"]["path"] == "/v1/goal/progress"
@@ -21737,6 +21741,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_workflow_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "compose_deployable" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "api_auth_recommended" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "api_auth_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "api_publicly_exposed" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "api_exposure_blocked" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "env_template_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_host_path_envs" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "deployment_env_fields" in tools_by_name["deployment_check"]["response_contract"]
@@ -21757,6 +21764,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "docker_compose_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "ptcli_api_service_ready" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
         assert "ptcli_api_healthcheck" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
+        assert "ptcli_api_public_port" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
         assert "host_path_envs" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
         assert "manual_retorrent" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert tools_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
@@ -22796,6 +22804,7 @@ services:
     assert payload["docker_compose"]["ptcli_api_service_ready"] is True
     assert payload["docker_compose"]["ptcli_api_healthcheck"] is True
     assert payload["docker_compose"]["ptcli_api_localhost_port"] is True
+    assert payload["docker_compose"]["ptcli_api_public_port"] is False
     assert payload["docker_compose"]["host_path_envs"] is True
     assert payload["docker_compose"]["downloads_mount"] is True
     assert payload["queue"]["max_concurrent_jobs"] == 2
@@ -22806,6 +22815,9 @@ services:
     assert payload["agent_summary"]["compose_deployable"] is True
     assert payload["agent_summary"]["api_local_only"] is True
     assert payload["agent_summary"]["api_auth_recommended"] is True
+    assert payload["agent_summary"]["api_publicly_exposed"] is False
+    assert payload["agent_summary"]["api_auth_ready"] is True
+    assert payload["agent_summary"]["api_exposure_blocked"] is False
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
     assert payload["agent_summary"]["docker_compose_api_ready"] is True
     assert payload["agent_summary"]["docker_compose_host_path_envs"] is True
@@ -22820,6 +22832,8 @@ services:
     assert payload["deployment_handoff"]["api"]["tools"] == "http://127.0.0.1:8080/v1/tools"
     assert payload["deployment_handoff"]["api"]["localhost_bound"] is True
     assert payload["deployment_handoff"]["api"]["auth_recommended"] is True
+    assert payload["deployment_handoff"]["api"]["auth_ready"] is True
+    assert payload["deployment_handoff"]["api"]["exposure_blocked"] is False
     assert payload["deployment_handoff"]["env"]["template_ready"] is True
     assert payload["deployment_handoff"]["env"]["copy_command"] == "cp .env.ptcli.example .env"
     assert payload["deployment_handoff"]["manual_retorrent"]["ready"] is True
@@ -22884,6 +22898,9 @@ services:
     assert final_report["api"]["health"] == "http://127.0.0.1:8080/health"
     assert final_report["api"]["token_configured"] is False
     assert final_report["api"]["auth_recommended"] is True
+    assert final_report["api"]["auth_ready"] is True
+    assert final_report["api"]["publicly_exposed"] is False
+    assert final_report["api"]["exposure_blocked"] is False
     assert final_report["mounts"]["ready"] is True
     assert final_report["mounts"]["missing_count"] == 0
     assert final_report["runtime"]["material_tools_ready"] is True
@@ -22896,6 +22913,7 @@ services:
     assert final_report["safety"]["mutates_state"] is False
     assert final_report["safety"]["contacts_trackers"] is False
     assert final_report["safety"]["contacts_qbittorrent"] is False
+    assert final_report["safety"]["api_exposure_gate"] == "ready"
     assert final_report["blockers"] == []
     assert payload["deployment_runbook"]["kind"] == "ptcli.deployment_runbook"
     assert payload["deployment_runbook"]["ready"] is True
@@ -22975,6 +22993,72 @@ services:
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"
     assert payload["connectivity_checked"] is False
     assert any(check["name"] == "security.api_token" and check["blocking"] is False for check in payload["checks"])
+
+
+def test_deployment_check_blocks_public_api_without_token(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("PTCLI_API_TOKEN", raising=False)
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (tmp_path / ".env.ptcli.example").write_text(Path(".env.ptcli.example").read_text(encoding="utf-8"), encoding="utf-8")
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
+    volumes:
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+
+    payload = ptcli_service.deployment_check_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir)})
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert "ptcli-api is exposed beyond localhost without PTCLI_API_TOKEN; set a token or bind ports to 127.0.0.1." in payload["blockers"]
+    assert "Set PTCLI_API_TOKEN or change the ptcli-api Docker Compose port mapping back to 127.0.0.1:8080:8080." in payload["next_actions"]
+    assert payload["docker_compose"]["ptcli_api_localhost_port"] is False
+    assert payload["docker_compose"]["ptcli_api_public_port"] is True
+    assert payload["agent_summary"]["api_publicly_exposed"] is True
+    assert payload["agent_summary"]["api_auth_ready"] is False
+    assert payload["agent_summary"]["api_exposure_blocked"] is True
+    assert "security.api_exposure" in payload["agent_summary"]["blocking_checks"]
+    assert payload["deployment_handoff"]["api"]["publicly_exposed"] is True
+    assert payload["deployment_handoff"]["api"]["auth_ready"] is False
+    assert payload["deployment_handoff"]["api"]["exposure_blocked"] is True
+    final_report = payload["deployment_final_report"]
+    assert final_report["ready"] is False
+    assert final_report["api"]["publicly_exposed"] is True
+    assert final_report["api"]["auth_ready"] is False
+    assert final_report["api"]["exposure_blocked"] is True
+    assert final_report["safety"]["api_exposure_gate"] == "blocked"
+    assert final_report["recommended_call"]["tool"] == "deployment_check"
+    assert final_report["recommended_call"]["safe_to_call_now"] is True
 
 
 def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:

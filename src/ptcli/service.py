@@ -24260,6 +24260,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
 
     daily_candidate_plan = _deployment_daily_candidate_plan(request)
     docker_compose = _deployment_docker_compose_summary(compose_path)
+    checks.append(_deployment_api_exposure_check(docker_compose))
     checks.append(
         {
             "name": "automation.daily_candidates",
@@ -24424,6 +24425,28 @@ def _deployment_api_token_check() -> dict[str, Any]:
         "blocking": False,
         "configured": configured,
         "message": "PTCLI_API_TOKEN is configured." if configured else "PTCLI_API_TOKEN is not configured; keep the API bound to localhost or set a token before exposing it.",
+    }
+
+
+def _deployment_api_exposure_check(docker_compose: dict[str, Any]) -> dict[str, Any]:
+    token_configured = bool(os.environ.get("PTCLI_API_TOKEN"))
+    publicly_exposed = bool(docker_compose.get("ptcli_api_public_port"))
+    local_only = bool(docker_compose.get("ptcli_api_localhost_port"))
+    ready = not publicly_exposed or token_configured
+    if ready and publicly_exposed:
+        message = "ptcli-api is exposed beyond localhost and PTCLI_API_TOKEN is configured."
+    elif ready:
+        message = "ptcli-api is bound to localhost or has no public port mapping."
+    else:
+        message = "ptcli-api is exposed beyond localhost without PTCLI_API_TOKEN; set a token or bind ports to 127.0.0.1."
+    return {
+        "name": "security.api_exposure",
+        "ok": ready,
+        "blocking": True,
+        "local_only": local_only,
+        "publicly_exposed": publicly_exposed,
+        "token_configured": token_configured,
+        "message": message,
     }
 
 
@@ -24599,6 +24622,8 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
     schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     host_path_envs = all(key in text for key in ("PTCLI_DOWNLOADS_HOST_PATH", "PTCLI_CONFIG_HOST_PATH", "PTCLI_COOKIES_HOST_PATH", "PTCLI_TMP_HOST_PATH"))
     daily_output_env = "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}" in text
+    ptcli_api_localhost_port = '"127.0.0.1:8080:8080"' in text or "'127.0.0.1:8080:8080'" in text
+    ptcli_api_public_port = any(pattern in text for pattern in ('"8080:8080"', "'8080:8080'", '"0.0.0.0:8080:8080"', "'0.0.0.0:8080:8080'"))
     return {
         "present": exists,
         "readable": exists,
@@ -24606,7 +24631,8 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
         "ptcli_api_service": "ptcli-api:" in text,
         "ptcli_api_command": 'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in text,
         "ptcli_api_healthcheck": "healthcheck:" in text and "http://127.0.0.1:8080/health" in text,
-        "ptcli_api_localhost_port": '"127.0.0.1:8080:8080"' in text or "'127.0.0.1:8080:8080'" in text,
+        "ptcli_api_localhost_port": ptcli_api_localhost_port,
+        "ptcli_api_public_port": ptcli_api_public_port,
         "ptcli_api_token_env": "PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}" in text,
         "ptcli_public_base_url_env": "PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-" in text,
         "ptcli_job_dir_env": "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in text,
@@ -24629,7 +24655,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in text,
                 "healthcheck:" in text,
                 "http://127.0.0.1:8080/health" in text,
-                ("\"127.0.0.1:8080:8080\"" in text or "'127.0.0.1:8080:8080'" in text),
+                ptcli_api_localhost_port,
                 "PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}" in text,
                 "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in text,
                 "host.docker.internal:host-gateway" in text,
@@ -24752,6 +24778,7 @@ def _deployment_agent_summary(
 ) -> dict[str, Any]:
     check_by_name = {str(check.get("name")): check for check in checks}
     api_token_check = check_by_name.get("security.api_token", {})
+    api_exposure_check = check_by_name.get("security.api_exposure", {})
     blocking_failures = [str(check.get("name")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
     warning_failures = [str(check.get("name")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
     return {
@@ -24764,6 +24791,9 @@ def _deployment_agent_summary(
         "api_local_only": bool(docker_compose.get("ptcli_api_localhost_port")),
         "api_auth_recommended": not bool(api_token_check.get("configured")),
         "api_token_configured": bool(api_token_check.get("configured")),
+        "api_publicly_exposed": bool(api_exposure_check.get("publicly_exposed")),
+        "api_auth_ready": bool(api_exposure_check.get("ok")),
+        "api_exposure_blocked": bool(api_exposure_check.get("publicly_exposed")) and not bool(api_exposure_check.get("token_configured")),
         "qbit_configured": bool(qbit.get("configured")),
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
         "docker_compose_api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
@@ -24805,9 +24835,12 @@ def _deployment_runtime_handoff(
             "tools": f"{api_base_url.rstrip('/')}/v1/tools",
             "agent_manifest": f"{api_base_url.rstrip('/')}/.well-known/ptcli-agent.json",
             "localhost_bound": bool(docker_compose.get("ptcli_api_localhost_port")),
+            "publicly_exposed": bool(agent_summary.get("api_publicly_exposed")),
             "token_configured": bool(agent_summary.get("api_token_configured")),
             "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
             "auth_recommended": bool(agent_summary.get("api_auth_recommended")),
+            "auth_ready": bool(agent_summary.get("api_auth_ready")),
+            "exposure_blocked": bool(agent_summary.get("api_exposure_blocked")),
         },
         "env": {
             "template_ready": bool(env_template.get("ready")),
@@ -25196,8 +25229,12 @@ def _deployment_final_report(
             "openapi": api.get("openapi"),
             "tools": api.get("tools"),
             "agent_manifest": api.get("agent_manifest"),
+            "localhost_bound": bool(api.get("localhost_bound")),
+            "publicly_exposed": bool(api.get("publicly_exposed")),
             "token_configured": bool(api.get("token_configured")),
             "auth_recommended": bool(api.get("auth_recommended")),
+            "auth_ready": bool(api.get("auth_ready")),
+            "exposure_blocked": bool(api.get("exposure_blocked")),
             "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
         },
         "mounts": {
@@ -25235,6 +25272,8 @@ def _deployment_final_report(
             "contacts_qbittorrent": False,
             "live_upload_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site policy ready"],
             "do_not_expose_without_token": not bool(api.get("token_configured")),
+            "api_exposure_gate": "blocked" if api.get("exposure_blocked") else "ready",
+            "api_exposure_rule": "Public or 0.0.0.0 ptcli-api port mappings require PTCLI_API_TOKEN; localhost-only bindings may run without a token for local AI access.",
         },
         "recommended_call": recommended_call,
         "read_order": ["deployment_final_report", "deployment_handoff", "seedbox_bootstrap_handoff", "deployment_runbook", "agent_summary", "docker_compose", "mounts", "qbit"],
@@ -25345,6 +25384,9 @@ def _deployment_seedbox_live_trial_handoff(
             "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
             "token_configured": bool(api.get("token_configured")),
             "auth_recommended": bool(api.get("auth_recommended")),
+            "auth_ready": bool(api.get("auth_ready")),
+            "publicly_exposed": bool(api.get("publicly_exposed")),
+            "exposure_blocked": bool(api.get("exposure_blocked")),
         },
         "readiness": {
             "tool": "readiness_bundle",
@@ -25778,6 +25820,8 @@ def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
             actions.append("Install ffmpeg and mediainfo, or rebuild the focused ptcli Docker image.")
         elif name == "security.api_token":
             actions.append("Set PTCLI_API_TOKEN before exposing ptcli-api outside localhost.")
+        elif name == "security.api_exposure":
+            actions.append("Set PTCLI_API_TOKEN or change the ptcli-api Docker Compose port mapping back to 127.0.0.1:8080:8080.")
         elif name == "automation.daily_candidates":
             actions.extend(_string_list((check.get("details") or {}).get("next_actions")))
         elif name == "docker.compose_daily_schedule":
@@ -27679,7 +27723,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "api_token_configured", "api_publicly_exposed", "api_auth_ready", "api_exposure_blocked", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "env", "qbit", "safety", "blockers", "warnings"],
@@ -27690,7 +27734,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
-                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
+                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_public_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
