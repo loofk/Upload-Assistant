@@ -16802,11 +16802,21 @@
           "recommended_method",
           "recommended_request",
           "recommended_call",
+          "followup",
           "read_before_call",
           "continue_when",
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "daily_candidate_refill_followup_fields": [
+          "ready",
+          "batch_status_call",
+          "expected_new_job",
+          "read_after_create",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ],
         "daily_candidate_refill_request_contract_fields": [
           "ready",
@@ -26582,11 +26592,21 @@
           "recommended_method",
           "recommended_request",
           "recommended_call",
+          "followup",
           "read_before_call",
           "continue_when",
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "daily_candidate_refill_followup_fields": [
+          "ready",
+          "batch_status_call",
+          "expected_new_job",
+          "read_after_create",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ],
         "daily_candidate_refill_request_contract_fields": [
           "ready",
