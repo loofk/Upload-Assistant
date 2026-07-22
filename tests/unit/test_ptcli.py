@@ -15847,6 +15847,20 @@ def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp
     assert preview["resume_audit"]["applied_override_keys"] == ["confirm_upload", "uploaded_save_path"]
     assert preview["resume_audit"]["next_command_argv"] == preview["command_argv"]
     assert preview["agent_decision"]["decision"] == "resume_preview"
+    assert preview["agent_decision"]["next_call"] == preview["next_call"]
+    assert preview["next_call"]["kind"] == "ptcli.resume_preview_next_call"
+    assert preview["next_call"]["action"] == "execute_resume"
+    assert preview["next_call"]["tool"] == "resume_job"
+    assert preview["next_call"]["endpoint"] == f"/v1/jobs/{parent['job_id']}/resume"
+    assert preview["next_call"]["request"] == {"job_id": parent["job_id"], "confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
+    assert preview["next_call"]["safe_to_call_now"] is False
+    assert preview["next_call"]["requires_user_review"] is True
+    assert preview["next_call"]["mutates_state"] is True
+    assert preview["next_call"]["uploads"] is True
+    assert preview["next_call"]["contacts_trackers"] is True
+    assert preview["next_call"]["contacts_qbittorrent"] is True
+    assert preview["next_call"]["approval"]["requires_confirm_upload"] is True
+    assert preview["next_call"]["safety"]["preview_is_read_only"] is True
     assert calls == []
 
     status, payload = _service_json_request(
@@ -21358,6 +21372,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "dry_run_request" in tool_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
     assert "execute_request" in tool_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
     assert "resume_preview_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "next_call" in tool_by_name["resume_job"]["response_contract"]["resume_preview_fields"]
+    assert "resume_preview_next_call_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
+    assert "requires_user_review" in tool_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
     assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -23659,6 +23677,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "dry_run_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
         assert "resume_preview_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "next_call" in tools_by_name["resume_job"]["response_contract"]["resume_preview_fields"]
+        assert "resume_preview_next_call_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
+        assert "requires_user_review" in tools_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
         assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]

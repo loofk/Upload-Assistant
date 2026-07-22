@@ -28135,6 +28135,7 @@ def _job_resume_plan(job: dict[str, Any]) -> dict[str, Any]:
 def _resume_preview(parent: dict[str, Any], request: dict[str, Any], argv: list[str] | None, *, allowed: bool, reason: str | None) -> dict[str, Any]:
     parent_job_id = str(parent.get("job_id") or "")
     blockers = [] if allowed else [reason or "No executable resume command is available."]
+    next_call = _resume_preview_next_call(parent_job_id, request, argv, allowed=allowed, blockers=blockers)
     payload = {
         "kind": "ptcli.resume_preview",
         "status": "ok" if allowed else "blocked",
@@ -28160,6 +28161,7 @@ def _resume_preview(parent: dict[str, Any], request: dict[str, Any], argv: list[
         "resume_requirements": _job_resume_requirements(parent),
         "source_reference": _job_source_reference(parent),
         "workflow_context": _job_workflow_context(parent),
+        "next_call": next_call,
         "blockers": blockers,
         "next_actions": _resume_preview_next_actions(allowed, blockers, parent_job_id),
     }
@@ -28171,10 +28173,67 @@ def _resume_preview(parent: dict[str, Any], request: dict[str, Any], argv: list[
         "resume_allowed": bool(allowed),
         "resume_blocker": reason,
         "command_argv": argv or [],
+        "next_call": next_call,
         "blockers": blockers,
         "next_actions": payload["next_actions"],
     }
     return payload
+
+
+def _resume_preview_next_call(parent_job_id: str, request: dict[str, Any], argv: list[str] | None, *, allowed: bool, blockers: list[str]) -> dict[str, Any]:
+    resume_overrides = request.get("resume_overrides") if isinstance(request.get("resume_overrides"), dict) else {}
+    execute_request = {"job_id": parent_job_id, **{key: value for key, value in resume_overrides.items() if key != "dry_run"}}
+    ready = bool(allowed and parent_job_id and argv)
+    return {
+        "kind": "ptcli.resume_preview_next_call",
+        "ready": ready,
+        "action": "execute_resume" if ready else "resolve_resume_preview_blockers",
+        "tool": "resume_job" if ready else None,
+        "endpoint": f"/v1/jobs/{parent_job_id}/resume" if parent_job_id else None,
+        "method": "POST",
+        "request": execute_request if ready else None,
+        "safe_to_call_now": False,
+        "requires_user_review": True,
+        "mutates_state": bool(ready),
+        "uploads": bool(ready and "--confirm-upload" in (argv or [])),
+        "contacts_trackers": bool(ready),
+        "contacts_qbittorrent": bool(ready),
+        "reason": "resume_preview_ok_execute_after_user_review" if ready else "resume_preview_blocked",
+        "read_before_call": ["resume_preview", "command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_audit", "next_call"],
+        "after_call": {
+            "read": ["job_id", "status_endpoint", "summary_endpoint", "next_call", "resume_followup_handoff"],
+            "continue_when": "resume_job returns a child job_id; poll child job next_call until terminal",
+            "stop_when": ["resume_preview.blockers is non-empty", "ignored_overrides require user approval"],
+        },
+        "progress": {
+            "parent_job_id": parent_job_id or None,
+            "resume_allowed": bool(allowed),
+            "command_argv_ready": bool(argv),
+            "blocker_count": len(blockers),
+        },
+        "approval": {
+            "required": True,
+            "dry_run_reviewed": False,
+            "review_fields": ["command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_audit"],
+            "requires_confirm_upload": "--confirm-upload" in (argv or []),
+        },
+        "safety": {
+            "preview_is_read_only": True,
+            "next_call_creates_child_job": bool(ready),
+            "next_call_may_contact_trackers_or_qbit": bool(ready),
+            "safe_to_call_now": False,
+        },
+        "blockers": blockers,
+        "next_actions": _resume_preview_next_call_next_actions(ready, blockers),
+    }
+
+
+def _resume_preview_next_call_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["After user review of resume_preview, call next_call.request through resume_job, then poll the returned child job next_call."]
+    if blockers:
+        return ["Resolve resume_preview.next_call.blockers before executing resume."]
+    return ["Inspect resume_preview.next_call before continuing."]
 
 
 def _resume_audit_from_request(parent: dict[str, Any], request: dict[str, Any], argv: list[str] | None, *, allowed: bool, reason: str | None) -> dict[str, Any]:
@@ -33673,7 +33732,8 @@ def _job_response_contract() -> dict[str, Any]:
         "job_lifecycle_transition_fields": ["name", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review"],
         "next_call_fields": ["ready", "job_id", "status", "action", "tool", "endpoint", "method", "request", "dry_run_request", "execute_request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "read_before_call", "after_call", "progress", "approval", "safety", "source", "blockers", "next_actions"],
         "job_summary_final_report_fields": ["ready", "report_allowed", "verdict", "action", "status", "job_id", "job_kind", "terminal", "should_poll", "should_resume", "resume_preview_required", "summary_file", "status_endpoint", "summary_endpoint", "resume_endpoint", "primary_report_field", "control_field", "lifecycle", "completion_gate", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-        "resume_preview_fields": ["dry_run", "mutates_state", "live_upload", "command_argv", "original_next_command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_context", "resume_lineage", "resume_plan", "resume_requirements", "agent_decision"],
+        "resume_preview_fields": ["dry_run", "mutates_state", "live_upload", "command_argv", "original_next_command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_context", "resume_lineage", "resume_plan", "resume_requirements", "next_call", "agent_decision"],
+        "resume_preview_next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "progress", "approval", "safety", "blockers", "next_actions"],
         "resume_audit_fields": ["is_resume_job", "parent_job_id", "parent_status", "parent_kind", "child_status", "resume_available", "resume_allowed", "resume_recommended", "next_subcommand", "next_command_argv", "applied_override_keys", "ignored_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "next_actions"],
         "job_lineage_fields": ["job_id", "parent_job_id", "root_job_id", "depth", "is_resume_job", "chain", "child_count", "children", "latest_child", "has_active_child", "terminal_child_count", "next_actions"],
         "resume_summary_fields": ["available", "allowed", "recommended", "status", "subcommand", "missing_confirmations", "recommended_input_keys", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "recommended_tool", "blockers", "next_actions"],
