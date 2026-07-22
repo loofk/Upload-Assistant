@@ -19332,6 +19332,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
     assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "live_validation_preflight" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+    assert "site_policy_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "rule_review_request" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+    assert "config_update_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "completion_evidence" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "submission_ready" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -20104,6 +20107,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "rule_review_request" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "live_validation_preflight" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "live_validation_preflight_fields" in goal_progress_tool["response_contract"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
@@ -20149,6 +20154,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_submission_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "rule_review_request" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "config_update_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
@@ -21311,11 +21318,22 @@ services:
     assert payload["source_context"]["target"] == "MTEAM"
     assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
+    assert payload["evidence"]["site_policies"]["policy_repair_action"] == "review_rules"
+    assert payload["evidence"]["site_policies"]["rule_review_request"]["source_tracker"] == "U2"
+    assert payload["evidence"]["site_policies"]["rule_review_request"]["target"] == "MTEAM"
+    assert payload["evidence"]["site_policies"]["config_update_plan"]["structured_patch"]["U2"]["qbit_limits"]["download_limit"]
+    assert payload["evidence"]["site_policies"]["config_update_plan"]["structured_patch"]["MTEAM"]["qbit_limits"]["upload_limit"]
+    assert payload["evidence"]["site_policies"]["config_update_plan"]["flat_patch"]["U2"]["download_rate_limit"]
+    assert payload["evidence"]["site_policies"]["config_update_plan"]["flat_patch"]["MTEAM"]["upload_rate_limit"]
+    assert payload["evidence"]["site_policies"]["next_step"]["tool"] == "site_policy_rule_review"
     assert payload["evidence"]["live_validation"]["status"] == "missing"
     assert payload["evidence"]["live_validation"]["ready"] is False
     assert payload["evidence"]["live_validation_preflight"]["kind"] == "ptcli.goal_live_validation_preflight"
     assert payload["evidence"]["live_validation_preflight"]["ready"] is False
-    assert payload["next_step"]["tool"] in {"site_policies", "readiness_bundle"}
+    assert payload["next_step"]["tool"] == "site_policy_rule_review"
+    assert payload["next_step"]["endpoint"] == "/v1/site-policies/rule-review"
+    assert payload["next_step"]["request"] == payload["evidence"]["site_policies"]["rule_review_request"]
+    assert any("evidence.site_policies.policy_repair_gate.next_step" in action for action in payload["next_actions"])
     assert payload["read_order"][0] == "completion_estimate"
     assert "evidence.live_validation" in payload["read_order"]
     assert "evidence.live_validation_preflight" in payload["read_order"]
@@ -21476,7 +21494,9 @@ services:
     assert payload["source_context"]["target"] == "MTEAM"
     assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
     assert payload["evidence"]["live_validation"]["status"] == "missing"
-    assert payload["next_step"]["tool"] in {"site_policies", "readiness_bundle"}
+    assert payload["evidence"]["site_policies"]["policy_repair_action"] == "review_rules"
+    assert payload["evidence"]["site_policies"]["rule_review_request"]["source_tracker"] == "U2"
+    assert payload["next_step"]["tool"] == "site_policy_rule_review"
 
 
 def test_goal_progress_payload_uses_completed_live_job_evidence(tmp_path, monkeypatch) -> None:

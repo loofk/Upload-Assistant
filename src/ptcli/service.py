@@ -21444,7 +21444,10 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     progress_items = _goal_progress_items(deployment, site_policies, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
-    next_step = _goal_progress_next_step(progress_items, blockers, live_validation_evidence, live_validation_preflight)
+    next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight)
+    policy_repair_gate = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
+    policy_config_handoff = site_policies.get("policy_config_handoff") if isinstance(site_policies.get("policy_config_handoff"), dict) else {}
+    config_update_plan = site_policies.get("config_update_plan") if isinstance(site_policies.get("config_update_plan"), dict) else {}
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
@@ -21476,8 +21479,22 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             },
             "site_policies": {
                 "ready": site_policies.get("ready"),
-                "policy_repair_action": (site_policies.get("policy_repair_gate") or {}).get("action") if isinstance(site_policies.get("policy_repair_gate"), dict) else None,
-                "policy_repair_ready": (site_policies.get("policy_repair_gate") or {}).get("ready") if isinstance(site_policies.get("policy_repair_gate"), dict) else None,
+                "policy_repair_action": policy_repair_gate.get("action"),
+                "policy_repair_ready": policy_repair_gate.get("ready"),
+                "policy_repair_gate": policy_repair_gate or None,
+                "rule_review_request": policy_repair_gate.get("rule_review_request") if isinstance(policy_repair_gate.get("rule_review_request"), dict) else None,
+                "config_update_plan": {
+                    "ready": config_update_plan.get("ready"),
+                    "preferred_shape": config_update_plan.get("preferred_shape"),
+                    "structured_patch": config_update_plan.get("structured_patch") if isinstance(config_update_plan.get("structured_patch"), dict) else None,
+                    "flat_patch": config_update_plan.get("flat_patch") if isinstance(config_update_plan.get("flat_patch"), dict) else None,
+                    "apply_order": config_update_plan.get("apply_order") if isinstance(config_update_plan.get("apply_order"), list) else [],
+                    "blockers": _string_list(config_update_plan.get("blockers")),
+                }
+                if config_update_plan
+                else None,
+                "policy_config_handoff": policy_config_handoff or None,
+                "next_step": policy_repair_gate.get("next_step") if isinstance(policy_repair_gate.get("next_step"), dict) else policy_config_handoff.get("next_step") if isinstance(policy_config_handoff.get("next_step"), dict) else None,
                 "blockers": _string_list(site_policies.get("blockers")),
             },
             "live_validation": live_validation_evidence,
@@ -21485,7 +21502,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             "tool_count": len(tools),
         },
         "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence.live_validation_preflight", "evidence", "next_step", "blockers"],
-        "next_actions": _goal_progress_next_actions(progress_items, blockers, live_validation_evidence, live_validation_preflight),
+        "next_actions": _goal_progress_next_actions(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight),
     }
 
 
@@ -22032,9 +22049,18 @@ def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, A
     return list(dict.fromkeys(blocker for blocker in blockers if blocker))
 
 
-def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None, live_validation_preflight: dict[str, Any] | None = None) -> dict[str, Any]:
+def _goal_progress_next_step(
+    items: list[dict[str, Any]],
+    blockers: list[str],
+    site_policies: dict[str, Any] | None = None,
+    live_validation_evidence: dict[str, Any] | None = None,
+    live_validation_preflight: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     by_id = {str(item.get("id")): item for item in items}
     if by_id.get("site_policy_config", {}).get("status") != "complete":
+        policy_step = _goal_progress_site_policy_next_step(site_policies)
+        if policy_step:
+            return policy_step
         return {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "reason": "repair_site_policy_gate"}
     if by_id.get("qbittorrent_execution", {}).get("status") == "missing":
         return {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "reason": "configure_qbittorrent"}
@@ -22055,9 +22081,17 @@ def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], l
     return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "reason": "exercise_daily_candidate_workflow"}
 
 
-def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None, live_validation_preflight: dict[str, Any] | None = None) -> list[str]:
-    next_step = _goal_progress_next_step(items, blockers, live_validation_evidence, live_validation_preflight)
+def _goal_progress_next_actions(
+    items: list[dict[str, Any]],
+    blockers: list[str],
+    site_policies: dict[str, Any] | None = None,
+    live_validation_evidence: dict[str, Any] | None = None,
+    live_validation_preflight: dict[str, Any] | None = None,
+) -> list[str]:
+    next_step = _goal_progress_next_step(items, blockers, site_policies, live_validation_evidence, live_validation_preflight)
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
+    if any(item.get("id") == "site_policy_config" and item.get("status") != "complete" for item in items):
+        actions.append("Use evidence.site_policies.policy_repair_gate.next_step and rule_review_request before live retorrent automation.")
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
         actions.append("Submit evidence.live_validation.live_submission_final_report.submission.request, then poll the returned job until live_user_report.report_allowed=true.")
     elif any(item.get("id") == "seedbox_live_validation" and item.get("status") == "submitted_needs_resume" for item in items):
@@ -22069,6 +22103,24 @@ def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]
     if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
         actions.append("Configure a daily candidate schedule and validate a 10-item candidate digest before enabling push delivery.")
     return actions
+
+
+def _goal_progress_site_policy_next_step(site_policies: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(site_policies, dict):
+        return None
+    for container_name in ("policy_repair_gate", "policy_execution_handoff", "policy_config_handoff", "policy_handoff"):
+        container = site_policies.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        step = container.get("next_step")
+        if isinstance(step, dict) and step.get("tool"):
+            return {**step, "reason": step.get("reason") or f"{container_name}.next_step"}
+    tool = site_policies.get("recommended_tool")
+    endpoint = site_policies.get("recommended_endpoint")
+    request = site_policies.get("recommended_request")
+    if tool:
+        return {"tool": tool, "endpoint": endpoint, "method": "POST" if endpoint else None, "request": request, "reason": "site_policies.recommended"}
+    return None
 
 
 def tools_payload() -> dict[str, Any]:
@@ -22779,6 +22831,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
+                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "next_step", "blockers"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],

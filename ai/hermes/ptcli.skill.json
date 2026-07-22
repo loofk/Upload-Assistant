@@ -29130,6 +29130,17 @@
           "live_validation_preflight",
           "tool_count"
         ],
+        "site_policy_evidence_fields": [
+          "ready",
+          "policy_repair_action",
+          "policy_repair_ready",
+          "policy_repair_gate",
+          "rule_review_request",
+          "config_update_plan",
+          "policy_config_handoff",
+          "next_step",
+          "blockers"
+        ],
         "live_validation_evidence_fields": [
           "ready",
           "status",
