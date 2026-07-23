@@ -18816,7 +18816,7 @@ def _daily_candidate_jobs_batch_summary(
         "running_count": status_counts.get("running", 0) + status_counts.get("queued", 0),
         "blocked_count": status_counts.get("blocked", 0) + status_counts.get("failed", 0) + status_counts.get("cancelled", 0),
         "items": items,
-        "read_order": ["daily_candidate_batch_summary", "daily_candidate_batch_summary.items[].submitted_jobs[].job_final_report", "jobs[].candidate_batch_handoff", "jobs[].manual_retorrent_final_report", "jobs[].candidate_submit_sequence", "jobs[].candidate_submit_followup", "jobs[].job_control_summary"],
+        "read_order": ["daily_candidate_batch_summary", "daily_candidate_batch_summary.items[].submitted_jobs[].remaining_next_call", "daily_candidate_batch_summary.items[].submitted_jobs[].job_final_report", "jobs[].candidate_batch_handoff", "jobs[].manual_retorrent_final_report", "jobs[].manual_retorrent_remaining_sequence.next_call", "jobs[].candidate_submit_sequence", "jobs[].candidate_submit_followup", "jobs[].job_control_summary"],
         "continue_when": "unsubmitted_safe_count=0 and every submitted candidate job reaches complete or an explicit stop action",
         "stop_when": ["daily_candidate_batch_summary.blockers is not empty", "retorrent_action_counts.stop_duplicate>0", "retorrent_action_counts.configure_policy>0"],
         "blockers": blockers,
@@ -18873,7 +18873,7 @@ def _daily_candidate_batch_gate(summary: dict[str, Any]) -> dict[str, Any]:
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_request": next_step.get("request"),
-        "read_order": ["daily_candidate_batch_gate", "daily_candidate_batch_summary", "daily_candidate_batch_summary.items[].submitted_jobs[].job_final_report", "jobs[].manual_retorrent_final_report", "jobs[].candidate_submit_sequence", "jobs[].candidate_submit_followup", "jobs[].job_control_summary"],
+        "read_order": ["daily_candidate_batch_gate", "daily_candidate_batch_summary", "daily_candidate_batch_summary.items[].submitted_jobs[].remaining_next_call", "daily_candidate_batch_summary.items[].submitted_jobs[].job_final_report", "jobs[].manual_retorrent_remaining_sequence.next_call", "jobs[].manual_retorrent_final_report", "jobs[].candidate_submit_sequence", "jobs[].candidate_submit_followup", "jobs[].job_control_summary"],
         "continue_when": "daily_candidate_batch_gate.action=complete or all safe candidates have submitted jobs and submitted jobs are terminal",
         "stop_when": "daily_candidate_batch_gate.action=resolve_blockers or any submitted job stops on duplicate/policy/confirmation blockers",
         "first_blocker": blockers[0] if blockers else None,
@@ -18900,7 +18900,27 @@ def _daily_candidate_batch_gate_first_submitted(items: list[dict[str, Any]]) -> 
     return None
 
 
+def _daily_candidate_submitted_next_call(submitted: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(submitted, dict):
+        return {}
+    next_call = submitted.get("remaining_next_call")
+    return next_call if isinstance(next_call, dict) else {}
+
+
 def _daily_candidate_batch_gate_blocker_step(first_submitted: dict[str, Any] | None, blockers: list[str]) -> dict[str, Any]:
+    remaining_next_call = _daily_candidate_submitted_next_call(first_submitted)
+    if remaining_next_call.get("tool"):
+        return {
+            "tool": remaining_next_call.get("tool"),
+            "endpoint": remaining_next_call.get("endpoint"),
+            "method": remaining_next_call.get("method") or "POST",
+            "request": remaining_next_call.get("request"),
+            "safe_to_call_now": bool(remaining_next_call.get("safe_to_call_now")),
+            "requires_user_review": bool(remaining_next_call.get("requires_user_review")),
+            "reason": "submitted_candidate_remaining_next_call",
+            "source": "submitted_job.remaining_next_call",
+            "blockers": blockers,
+        }
     remaining_next = first_submitted.get("remaining_next_step") if isinstance(first_submitted, dict) and isinstance(first_submitted.get("remaining_next_step"), dict) else {}
     if remaining_next.get("tool"):
         return {
@@ -19181,14 +19201,18 @@ def _daily_candidate_batch_execution_summary(summary: dict[str, Any], gate: dict
         next_step = {"tool": "get_job_status", "endpoint": first_running.get("status_endpoint"), "method": "GET", "request": None, "reason": "submitted_candidate_jobs_running"}
     elif blocked_jobs:
         first_blocked = blocked_jobs[0]
+        remaining_next_call = _daily_candidate_submitted_next_call(first_blocked)
         remaining_next = first_blocked.get("remaining_next_step") if isinstance(first_blocked.get("remaining_next_step"), dict) else {}
         action = "resolve_submitted_blockers"
         next_step = {
-            "tool": remaining_next.get("tool") or first_blocked.get("recommended_tool") or gate.get("recommended_tool") or "get_job_summary",
-            "endpoint": remaining_next.get("endpoint") or first_blocked.get("recommended_endpoint") or first_blocked.get("summary_endpoint") or first_blocked.get("status_endpoint"),
-            "method": remaining_next.get("method") or first_blocked.get("recommended_method") or ("POST" if first_blocked.get("recommended_tool") in {"resume_job", "site_policies"} else "GET"),
-            "request": remaining_next.get("request") if remaining_next.get("request") is not None else first_blocked.get("recommended_request"),
-            "reason": "submitted_candidate_remaining_step" if remaining_next else "submitted_candidate_job_blocked",
+            "tool": remaining_next_call.get("tool") or remaining_next.get("tool") or first_blocked.get("recommended_tool") or gate.get("recommended_tool") or "get_job_summary",
+            "endpoint": remaining_next_call.get("endpoint") or remaining_next.get("endpoint") or first_blocked.get("recommended_endpoint") or first_blocked.get("summary_endpoint") or first_blocked.get("status_endpoint"),
+            "method": remaining_next_call.get("method") or remaining_next.get("method") or first_blocked.get("recommended_method") or ("POST" if first_blocked.get("recommended_tool") in {"resume_job", "site_policies"} else "GET"),
+            "request": remaining_next_call.get("request") if remaining_next_call.get("request") is not None else remaining_next.get("request") if remaining_next.get("request") is not None else first_blocked.get("recommended_request"),
+            "safe_to_call_now": bool(remaining_next_call.get("safe_to_call_now")) if remaining_next_call else None,
+            "requires_user_review": bool(remaining_next_call.get("requires_user_review")) if remaining_next_call else None,
+            "reason": "submitted_candidate_remaining_next_call" if remaining_next_call else "submitted_candidate_remaining_step" if remaining_next else "submitted_candidate_job_blocked",
+            "source": "submitted_job.remaining_next_call" if remaining_next_call else "submitted_job.remaining_next_step" if remaining_next else "submitted_job.recommended",
         }
     elif shortfall_recovery.get("recommended_request") and int(shortfall_recovery.get("ready_shortfall_count") or 0):
         action = "rerun_for_shortfall"
@@ -19239,7 +19263,7 @@ def _daily_candidate_batch_execution_summary(summary: dict[str, Any], gate: dict
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_method": next_step.get("method"),
         "recommended_request": next_step.get("request"),
-        "read_order": ["daily_candidate_execution_summary", "daily_candidate_submission_plan", "daily_candidate_batch_gate", "daily_candidate_batch_summary.items[].submitted_jobs[].job_final_report", "jobs[].manual_retorrent_final_report", "jobs[].candidate_submit_sequence", "jobs[].candidate_submit_followup"],
+        "read_order": ["daily_candidate_execution_summary", "daily_candidate_submission_plan", "daily_candidate_batch_gate", "daily_candidate_batch_summary.items[].submitted_jobs[].remaining_next_call", "daily_candidate_batch_summary.items[].submitted_jobs[].job_final_report", "jobs[].manual_retorrent_remaining_sequence.next_call", "jobs[].manual_retorrent_final_report", "jobs[].candidate_submit_sequence", "jobs[].candidate_submit_followup"],
         "continue_when": "daily_candidate_execution_summary.action=complete or every safe candidate has a terminal submitted job and shortfall_recovery is exhausted",
         "stop_when": [
             "daily_candidate_execution_summary.blocked_count>0",
@@ -19762,7 +19786,7 @@ def _daily_candidate_batch_sequence_steps(
     if action == "poll_submitted_jobs":
         next_step = execution_summary.get("next_step") if isinstance(execution_summary.get("next_step"), dict) else {}
         return [
-            _daily_candidate_batch_sequence_step(1, "poll_submitted_jobs", next_step.get("tool") or "get_job_status", next_step.get("endpoint"), next_step.get("method") or "GET", next_step.get("request"), ["status", "manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "candidate_submit_sequence", "live_action_sequence", "candidate_submit_followup"], "all submitted jobs are terminal", "any submitted job fails or is cancelled", "poll", repeat_when="submitted jobs are queued/running"),
+            _daily_candidate_batch_sequence_step(1, "poll_submitted_jobs", next_step.get("tool") or "get_job_status", next_step.get("endpoint"), next_step.get("method") or "GET", next_step.get("request"), ["status", "manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "manual_retorrent_remaining_sequence.next_call", "candidate_submit_sequence", "live_action_sequence", "candidate_submit_followup"], "all submitted jobs are terminal", "any submitted job fails or is cancelled", "poll", repeat_when="submitted jobs are queued/running"),
         ]
     if action == "rerun_for_shortfall":
         return [
@@ -19780,7 +19804,7 @@ def _daily_candidate_batch_sequence_steps(
     if action == "resolve_blockers":
         next_step = execution_summary.get("next_step") if isinstance(execution_summary.get("next_step"), dict) else gate.get("next_step") if isinstance(gate.get("next_step"), dict) else {}
         return [
-            _daily_candidate_batch_sequence_step(1, "inspect_blockers", next_step.get("tool") or "daily_candidate_batch_status", next_step.get("endpoint") or "/v1/jobs/candidates/daily/batch", next_step.get("method") or "GET", next_step.get("request"), ["manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "daily_candidate_batch_sequence.blockers", "daily_candidate_execution_summary", "daily_candidate_submission_plan"], "blockers are resolved and batch sequence is regenerated", "blockers remain", "read"),
+            _daily_candidate_batch_sequence_step(1, "inspect_blockers", next_step.get("tool") or "daily_candidate_batch_status", next_step.get("endpoint") or "/v1/jobs/candidates/daily/batch", next_step.get("method") or "GET", next_step.get("request"), ["manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "manual_retorrent_remaining_sequence.next_call", "daily_candidate_batch_summary.items[].submitted_jobs[].remaining_next_call", "daily_candidate_batch_sequence.blockers", "daily_candidate_execution_summary", "daily_candidate_submission_plan"], "blockers are resolved and batch sequence is regenerated", "blockers remain", "read"),
         ]
     next_step = gate.get("next_step") if isinstance(gate.get("next_step"), dict) else {}
     return [
@@ -21421,6 +21445,7 @@ def _daily_candidate_submitted_item(job: dict[str, Any]) -> dict[str, Any]:
     manual_final_report = followup.get("manual_retorrent_final_report") if isinstance(followup.get("manual_retorrent_final_report"), dict) else _job_cached_manual_retorrent_final_report(job)
     manual_remaining_sequence = _job_manual_retorrent_remaining_sequence(job)
     remaining_next_step = manual_remaining_sequence.get("next_step") if isinstance(manual_remaining_sequence, dict) and isinstance(manual_remaining_sequence.get("next_step"), dict) else {}
+    remaining_next_call = manual_remaining_sequence.get("next_call") if isinstance(manual_remaining_sequence, dict) and isinstance(manual_remaining_sequence.get("next_call"), dict) else {}
     job_final_report = _job_final_report(job)
     summary = followup.get("candidate_submission_summary") if isinstance(followup.get("candidate_submission_summary"), dict) else {}
     execution = summary.get("execution_handoff") if isinstance(summary.get("execution_handoff"), dict) else {}
@@ -21439,13 +21464,14 @@ def _daily_candidate_submitted_item(job: dict[str, Any]) -> dict[str, Any]:
         "status_endpoint": followup.get("status_endpoint"),
         "summary_endpoint": followup.get("summary_endpoint"),
         "resume_endpoint": followup.get("resume_endpoint"),
-        "recommended_tool": remaining_next_step.get("tool") or followup.get("recommended_tool"),
-        "recommended_endpoint": remaining_next_step.get("endpoint") or followup.get("recommended_endpoint"),
-        "recommended_method": remaining_next_step.get("method") or followup.get("recommended_method"),
-        "recommended_request": remaining_next_step.get("request") if remaining_next_step.get("request") is not None else followup.get("recommended_request"),
+        "recommended_tool": remaining_next_call.get("tool") or remaining_next_step.get("tool") or followup.get("recommended_tool"),
+        "recommended_endpoint": remaining_next_call.get("endpoint") or remaining_next_step.get("endpoint") or followup.get("recommended_endpoint"),
+        "recommended_method": remaining_next_call.get("method") or remaining_next_step.get("method") or followup.get("recommended_method"),
+        "recommended_request": remaining_next_call.get("request") if remaining_next_call.get("request") is not None else remaining_next_step.get("request") if remaining_next_step.get("request") is not None else followup.get("recommended_request"),
         "manual_retorrent_remaining_sequence": manual_remaining_sequence,
         "remaining_action": manual_remaining_sequence.get("action") if isinstance(manual_remaining_sequence, dict) else None,
         "remaining_next_step": remaining_next_step or None,
+        "remaining_next_call": remaining_next_call or None,
         "job_final_verdict": job_final_report.get("verdict"),
         "job_report_allowed": job_final_report.get("report_allowed"),
         "job_final_report": job_final_report,
@@ -34792,7 +34818,7 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_batch_execution_context_fields": ["ready", "action", "candidate_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_submitted_job", "running_jobs", "blocked_jobs", "complete_jobs", "completed_source_ids", "running_source_ids", "blocked_source_ids", "approval_items", "shortfall_recovery", "refill_job_handoff", "next_step", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
         "daily_candidate_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "notification", "approval", "submission", "completion_report", "shortfall_recovery", "audit", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_completion_report_fields": ["ready", "report_allowed", "complete_count", "running_count", "blocked_count", "completed_source_ids", "completed_jobs", "summary_endpoints", "evidence_refs", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_completed_job_fields": ["retorrent_job_id", "source_id", "title", "status", "action", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "job_final_report", "manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "remaining_action", "remaining_next_step", "read_order"],
+        "daily_candidate_completed_job_fields": ["retorrent_job_id", "source_id", "title", "status", "action", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "job_final_report", "manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "remaining_action", "remaining_next_step", "remaining_next_call", "read_order"],
         "daily_candidate_tracking_report_fields": ["ready", "status", "action", "verdict", "target_count", "candidate_job_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "ready_target_met", "can_submit_now", "should_poll", "should_refill", "should_report", "approval_required", "completed_source_ids", "running_source_ids", "blocked_source_ids", "covered_source_ids", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "refill_request_contract", "refill_job_handoff", "loop_control", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_completion_gate_fields": ["ready", "complete", "report_allowed", "action", "target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "progress", "next_step", "refill_handoff", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_completion_refill_handoff_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "excluded_source_ids", "submitted_source_ids", "scan_limit", "next_scan_limit", "max_scan_limit", "scan_exhausted", "pagination_supported", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "followup", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
@@ -34815,7 +34841,7 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_executability_matrix", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
         "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "action_handoff", "submit_call", "tracking_call", "after_submit_calls", "source_url_retorrent_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "after_submit"],
         "daily_candidate_submit_action_handoff_fields": ["ready", "candidate_job_id", "rank", "source_id", "submit_call", "tracking_call", "summary_call", "resume_call", "after_submit_calls", "read_after_submit", "complete_when", "stop_when", "safety"],
-        "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "manual_retorrent_remaining_sequence", "remaining_action", "remaining_next_step", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "execution_state", "blockers", "next_actions"],
+        "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "manual_retorrent_remaining_sequence", "remaining_action", "remaining_next_step", "remaining_next_call", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }

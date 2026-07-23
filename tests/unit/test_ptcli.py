@@ -16903,8 +16903,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_remaining_sequence"] == retorrent_job["manual_retorrent_remaining_sequence"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["remaining_action"] == retorrent_job["manual_retorrent_remaining_sequence"]["action"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["remaining_next_step"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]
-    assert daily_batch["items"][0]["submitted_jobs"][0]["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
-    assert daily_batch["items"][0]["submitted_jobs"][0]["recommended_request"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["request"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["remaining_next_call"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["recommended_request"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["request"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["policy_application_ready"] == retorrent_job["policy_application_handoff"]["ready"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["policy_application_handoff"] == retorrent_job["policy_application_handoff"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["qbit_enforcement_ready"] == retorrent_job["qbit_enforcement_summary"]["ready"]
@@ -16924,9 +16925,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_gate["retorrent_action_counts"]["configure_policy"] == 1
     assert daily_gate["first_submitted_job"]["retorrent_job_id"] == retorrent_job["job_id"]
     assert daily_gate["first_blocker"].startswith("submitted_job.")
-    assert daily_gate["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
+    assert daily_gate["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
     assert daily_gate["next_step"]["method"] == "POST"
-    assert daily_gate["next_step"]["reason"] == "submitted_candidate_remaining_step"
+    assert daily_gate["next_step"]["reason"] == "submitted_candidate_remaining_next_call"
+    assert daily_gate["next_step"]["source"] == "submitted_job.remaining_next_call"
     assert "jobs[].manual_retorrent_final_report" in daily_gate["read_order"]
     blocked_submission_plan = list_payload["daily_candidate_submission_plan"]
     assert blocked_submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
@@ -16943,9 +16945,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_execution_summary["blocked_count"] == 1
     assert blocked_execution_summary["blocked_source_ids"] == ["60635"]
     assert blocked_execution_summary["blocked_jobs"][0]["retorrent_job_id"] == retorrent_job["job_id"]
-    assert blocked_execution_summary["blocked_jobs"][0]["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
-    assert blocked_execution_summary["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
-    assert blocked_execution_summary["next_step"]["reason"] == "submitted_candidate_remaining_step"
+    assert blocked_execution_summary["blocked_jobs"][0]["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
+    assert blocked_execution_summary["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
+    assert blocked_execution_summary["next_step"]["reason"] == "submitted_candidate_remaining_next_call"
+    assert blocked_execution_summary["next_step"]["source"] == "submitted_job.remaining_next_call"
     assert "jobs[].manual_retorrent_final_report" in blocked_execution_summary["read_order"]
     blocked_refill_plan = list_payload["daily_candidate_refill_plan"]
     assert blocked_refill_plan["kind"] == "ptcli.daily_candidate_refill_plan"
@@ -16959,9 +16962,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_sequence["kind"] == "ptcli.daily_candidate_batch_sequence"
     assert blocked_sequence["action"] == "resolve_blockers"
     assert blocked_sequence["steps"][0]["name"] == "inspect_blockers"
-    assert blocked_sequence["steps"][0]["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
+    assert blocked_sequence["steps"][0]["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
     assert "manual_retorrent_final_report" in blocked_sequence["steps"][0]["read"]
     assert "manual_retorrent_remaining_sequence" in blocked_sequence["steps"][0]["read"]
+    assert "manual_retorrent_remaining_sequence.next_call" in blocked_sequence["steps"][0]["read"]
     assert blocked_sequence["blockers"][0].startswith("submitted_job.")
     assert blocked_sequence["loop_control"]["action"] == "resolve_blockers"
     assert blocked_sequence["loop_control"]["blockers"][0].startswith("submitted_job.")
@@ -16971,7 +16975,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_approval_sequence["action"] == "resolve_blockers"
     assert blocked_approval_sequence["approval_count"] == 0
     assert blocked_approval_sequence["steps"][0]["name"] == "inspect_approval_blockers"
-    assert blocked_approval_sequence["steps"][0]["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
+    assert blocked_approval_sequence["steps"][0]["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
     assert "manual_retorrent_remaining_sequence" in blocked_approval_sequence["steps"][0]["read"]
     assert blocked_approval_sequence["blockers"][0].startswith("submitted_job.")
     blocked_batch_context = list_payload["daily_candidate_batch_execution_context"]
@@ -16982,7 +16986,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_batch_context["blocked_count"] == 1
     assert blocked_batch_context["blocked_source_ids"] == ["60635"]
     assert blocked_batch_context["first_submitted_job"]["retorrent_job_id"] == retorrent_job["job_id"]
-    assert blocked_batch_context["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
+    assert blocked_batch_context["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
     assert blocked_batch_context["blockers"][0].startswith("submitted_job.")
     blocked_tracking = list_payload["daily_candidate_tracking_report"]
     assert blocked_tracking["kind"] == "ptcli.daily_candidate_tracking_report"
@@ -16991,7 +16995,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_tracking["blocked_count"] == 1
     assert blocked_tracking["blocked_source_ids"] == ["60635"]
     assert blocked_tracking["can_submit_now"] is False
-    assert blocked_tracking["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
+    assert blocked_tracking["recommended_tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
     assert blocked_tracking["recommended_call"]["safe_to_call_now"] is False
     assert blocked_tracking["refill_request_contract"] == blocked_refill_plan["refill_request_contract"]
     assert blocked_tracking["loop_control"] == blocked_sequence["loop_control"]
@@ -17004,8 +17008,8 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_next_call["kind"] == "ptcli.daily_candidate_batch_next_call"
     assert list_payload["next_call"] == blocked_next_call
     assert blocked_next_call["action"] == "resolve_blockers"
-    assert blocked_next_call["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
-    assert blocked_next_call["request"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["request"]
+    assert blocked_next_call["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["tool"]
+    assert blocked_next_call["request"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_call"]["request"]
     assert blocked_next_call["requires_user_review"] is False
     assert blocked_next_call["uploads"] is False
     assert blocked_next_call["candidate_next_calls"] == []
@@ -21072,6 +21076,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "uploaded_seeding_evidence" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completed_job_fields"]
     assert "manual_retorrent_remaining_sequence" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completed_job_fields"]
     assert "remaining_next_step" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completed_job_fields"]
+    assert "remaining_next_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completed_job_fields"]
     assert "daily_candidate_tracking_report_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "can_submit_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
     assert "recommended_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
@@ -21550,6 +21555,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_remaining_sequence" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "remaining_action" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "remaining_next_step" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
+    assert "remaining_next_call" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "job_final_verdict" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "policy_application_handoff" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
@@ -21683,6 +21689,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_completed_job_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "manual_retorrent_remaining_sequence" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completed_job_fields"]
     assert "remaining_next_step" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completed_job_fields"]
+    assert "remaining_next_call" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completed_job_fields"]
     assert "daily_candidate_tracking_report" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_tracking_report_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "should_refill" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_tracking_report_fields"]
