@@ -13596,6 +13596,17 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert payload["job_list_next_call"]["requires_user_review"] is False
     assert payload["job_list_next_call"]["uploads"] is False
     assert payload["job_list_next_call"]["safety"]["uses_job_level_next_call"] is True
+    assert payload["job_list_final_decision"]["kind"] == "ptcli.job_list_final_decision"
+    assert payload["job_list_final_decision"]["ready"] is True
+    assert payload["job_list_final_decision"]["status"] == "ready"
+    assert payload["job_list_final_decision"]["action"] == "poll_active_job"
+    assert payload["job_list_final_decision"]["verdict"] == "poll_selected_job"
+    assert payload["job_list_final_decision"]["job_id"] == job_id
+    assert payload["job_list_final_decision"]["recommended_call"]["tool"] == "get_job_status"
+    assert payload["job_list_final_decision"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
+    assert payload["job_list_final_decision"]["safe_to_call_now"] is True
+    assert payload["job_list_final_decision"]["requires_user_review"] is False
+    assert payload["job_list_final_decision"]["safety"]["does_not_batch_execute"] is True
     assert payload["jobs"][0]["job_resume_handoff"]["action"] == "poll"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
@@ -14684,6 +14695,16 @@ def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     assert payload["job_list_next_call"]["requires_user_review"] is True
     assert payload["job_list_next_call"]["mutates_state"] is False
     assert payload["job_list_next_call"]["safety"]["dry_run_resume_preview_only"] is True
+    assert payload["job_list_final_decision"]["ready"] is True
+    assert payload["job_list_final_decision"]["action"] == "preview_resume_blocked_job"
+    assert payload["job_list_final_decision"]["verdict"] == "preview_resume_before_execute"
+    assert payload["job_list_final_decision"]["job_id"] == blocked["job_id"]
+    assert payload["job_list_final_decision"]["recommended_call"]["tool"] == "resume_job"
+    assert payload["job_list_final_decision"]["recommended_call"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["job_list_final_decision"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["job_list_final_decision"]["safe_to_call_now"] is True
+    assert payload["job_list_final_decision"]["requires_user_review"] is True
+    assert payload["job_list_final_decision"]["safety"]["resume_preview_is_dry_run"] is True
     assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
 
     limited = store.list({"limit": "1"})
@@ -16218,6 +16239,12 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert job_list["jobs"][0]["status_endpoint"] == f"/v1/jobs/{payload['job_id']}"
     assert job_list["jobs"][0]["summary_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
     assert job_list["jobs"][0]["resume_endpoint"] == f"/v1/jobs/{payload['job_id']}/resume"
+    assert job_list["job_list_final_decision"]["kind"] == "ptcli.job_list_final_decision"
+    assert job_list["job_list_final_decision"]["job_id"] == payload["job_id"]
+    assert job_list["job_list_final_decision"]["recommended_tool"] == "get_job_summary"
+    assert job_list["job_list_final_decision"]["recommended_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
+    assert job_list["job_list_final_decision"]["dry_run_request"]["job_id"] == payload["job_id"]
+    assert job_list["job_list_final_decision"]["dry_run_request"]["dry_run"] is True
 
 
 def test_http_cancel_job_endpoint_requires_auth_and_only_cancels_queued(tmp_path) -> None:
@@ -22533,6 +22560,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_completion_gate_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "complete" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
     assert "refill_handoff" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
+    assert "job_list_final_decision" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "job_list_final_decision_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "recommended_call" in tool_by_name["list_jobs"]["response_contract"]["job_list_final_decision_fields"]
+    assert "safe_to_call_now" in tool_by_name["list_jobs"]["response_contract"]["job_list_final_decision_fields"]
+    assert "requires_user_review" in tool_by_name["list_jobs"]["response_contract"]["job_list_final_decision_fields"]
     assert "daily_candidate_completion_final_decision" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_completion_final_decision_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "safe_to_call_now" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_final_decision_fields"]
@@ -24010,6 +24042,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_approval_final_report" in job_list_schema["properties"]
     assert "daily_candidate_batch_final_decision" in job_list_schema["properties"]
     assert "daily_candidate_completion_final_decision" in job_list_schema["properties"]
+    assert "job_list_final_decision" in job_list_schema["properties"]
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "job_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_submission" in job_list_schema["properties"]["jobs"]["items"]["properties"]
@@ -25525,11 +25558,16 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "queue" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "job_queue_control" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "job_list_next_call" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "job_list_final_decision" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "job_queue_control_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "first_job_next_call" in tools_by_name["list_jobs"]["response_contract"]["job_queue_control_fields"]
         assert "job_list_next_call_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "dry_run_request" in tools_by_name["list_jobs"]["response_contract"]["job_list_next_call_fields"]
         assert "requires_user_review" in tools_by_name["list_jobs"]["response_contract"]["job_list_next_call_fields"]
+        assert "job_list_final_decision_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "recommended_call" in tools_by_name["list_jobs"]["response_contract"]["job_list_final_decision_fields"]
+        assert "safe_to_call_now" in tools_by_name["list_jobs"]["response_contract"]["job_list_final_decision_fields"]
+        assert "requires_user_review" in tools_by_name["list_jobs"]["response_contract"]["job_list_final_decision_fields"]
         assert "daily_candidate_batch_gate" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "daily_candidate_batch_gate_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "action" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_gate_fields"]

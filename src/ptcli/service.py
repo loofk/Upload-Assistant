@@ -401,6 +401,7 @@ class JobStore:
         )
         queue_control = _job_list_queue_control(jobs, total, limit, status_counts, status_filter=status_filter or None, kind_filter=kind_filter or None)
         job_list_next_call = _job_list_next_call(queue_control)
+        job_list_final_decision = _job_list_final_decision(queue_control, job_list_next_call, daily_candidate_completion_final_decision)
         return {
             "status": "ok",
             "ok": True,
@@ -412,6 +413,7 @@ class JobStore:
             "queue": _job_queue_summary(status_counts, self.max_concurrent_jobs),
             "job_queue_control": queue_control,
             "job_list_next_call": job_list_next_call,
+            "job_list_final_decision": job_list_final_decision,
             "daily_candidate_batch_summary": daily_batch_summary,
             "daily_candidate_batch_gate": daily_batch_gate,
             "daily_candidate_submission_plan": daily_submission_plan,
@@ -21805,6 +21807,123 @@ def _job_list_next_call_next_actions(ready: bool, action: str, selected: dict[st
     return ["Call job_list_next_call.endpoint, then follow the returned next_call."]
 
 
+def _job_list_final_decision(queue_control: dict[str, Any], job_list_next_call: dict[str, Any], daily_candidate_completion_final_decision: dict[str, Any]) -> dict[str, Any]:
+    action = str(queue_control.get("action") or "inspect")
+    ready = bool(job_list_next_call.get("ready"))
+    blockers = _string_list(queue_control.get("blockers")) + _string_list(job_list_next_call.get("blockers"))
+    recommended_call = _job_list_final_decision_call(action, ready, job_list_next_call, queue_control)
+    return {
+        "kind": "ptcli.job_list_final_decision",
+        "ready": ready and not blockers,
+        "status": "ready" if ready and not blockers else "blocked",
+        "action": action,
+        "verdict": _job_list_final_decision_verdict(action, ready, blockers),
+        "job_id": job_list_next_call.get("job_id"),
+        "job_status": job_list_next_call.get("job_status"),
+        "job_kind": job_list_next_call.get("job_kind"),
+        "queue": {
+            "visible_count": queue_control.get("visible_count"),
+            "total": queue_control.get("total"),
+            "truncated": queue_control.get("truncated"),
+            "active_count": queue_control.get("active_count"),
+            "resumable_count": queue_control.get("resumable_count"),
+            "complete_count": queue_control.get("complete_count"),
+            "failed_or_cancelled_count": queue_control.get("failed_or_cancelled_count"),
+        },
+        "daily_candidate_completion": {
+            "ready": daily_candidate_completion_final_decision.get("ready"),
+            "action": daily_candidate_completion_final_decision.get("action"),
+            "status": daily_candidate_completion_final_decision.get("status"),
+            "recommended_tool": daily_candidate_completion_final_decision.get("recommended_tool"),
+            "recommended_endpoint": daily_candidate_completion_final_decision.get("recommended_endpoint"),
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "dry_run_request": job_list_next_call.get("dry_run_request"),
+        "execute_request": job_list_next_call.get("execute_request"),
+        "safe_to_call_now": bool(recommended_call.get("safe_to_call_now")),
+        "requires_user_review": bool(job_list_next_call.get("requires_user_review")),
+        "read_order": ["job_list_final_decision", "job_queue_control", "job_list_next_call", "jobs[].job_operation_final_decision", "jobs[].job_control_summary"],
+        "complete_when": ["job_list_final_decision.action=read_complete_summary and get_job_summary has been read", "job_list_final_decision.action=inspect and blockers are resolved"],
+        "stop_when": ["job_list_final_decision.blockers is non-empty", "job_list_final_decision.requires_user_review=true and user approval is missing", "job_list_final_decision.recommended_call.uploads=true"],
+        "safety": {
+            "selects_single_job": True,
+            "does_not_batch_execute": True,
+            "does_not_upload": not bool(job_list_next_call.get("uploads")),
+            "live_upload_requires_confirm_upload": True,
+            "resume_preview_is_dry_run": action == "preview_resume_blocked_job",
+        },
+        "blockers": list(dict.fromkeys(blockers)),
+        "next_actions": _job_list_final_decision_next_actions(action, ready, blockers),
+    }
+
+
+def _job_list_final_decision_call(action: str, ready: bool, job_list_next_call: dict[str, Any], queue_control: dict[str, Any]) -> dict[str, Any]:
+    if ready:
+        return {
+            "ready": True,
+            "tool": job_list_next_call.get("tool"),
+            "endpoint": job_list_next_call.get("endpoint"),
+            "method": job_list_next_call.get("method"),
+            "request": job_list_next_call.get("request"),
+            "dry_run_request": job_list_next_call.get("dry_run_request"),
+            "execute_request": job_list_next_call.get("execute_request"),
+            "safe_to_call_now": bool(job_list_next_call.get("safe_to_call_now")),
+            "requires_user_review": bool(job_list_next_call.get("requires_user_review")),
+            "mutates_state": bool(job_list_next_call.get("mutates_state")),
+            "uploads": bool(job_list_next_call.get("uploads")),
+            "contacts_trackers": bool(job_list_next_call.get("contacts_trackers")),
+            "contacts_qbittorrent": bool(job_list_next_call.get("contacts_qbittorrent")),
+            "reason": f"job_list_final_decision_{action}",
+        }
+    filters = queue_control.get("filters") if isinstance(queue_control.get("filters"), dict) else {}
+    return {
+        "ready": True,
+        "tool": "list_jobs",
+        "endpoint": "/v1/jobs",
+        "method": "GET",
+        "request": {key: value for key, value in filters.items() if value is not None},
+        "safe_to_call_now": True,
+        "requires_user_review": False,
+        "mutates_state": False,
+        "uploads": False,
+        "contacts_trackers": False,
+        "contacts_qbittorrent": False,
+        "reason": "inspect_or_adjust_job_filters",
+    }
+
+
+def _job_list_final_decision_verdict(action: str, ready: bool, blockers: list[str]) -> str:
+    if blockers:
+        return "blocked"
+    if not ready:
+        return "inspect_jobs"
+    if action == "poll_active_job":
+        return "poll_selected_job"
+    if action == "preview_resume_blocked_job":
+        return "preview_resume_before_execute"
+    if action == "read_complete_summary":
+        return "read_selected_summary"
+    return action
+
+
+def _job_list_final_decision_next_actions(action: str, ready: bool, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve job_list_final_decision.blockers, then rerun list_jobs."]
+    if not ready:
+        return ["Rerun list_jobs with broader filters or inspect jobs[].blockers."]
+    if action == "poll_active_job":
+        return ["Call job_list_final_decision.recommended_call, then rerun list_jobs until terminal."]
+    if action == "preview_resume_blocked_job":
+        return ["Call job_list_final_decision.recommended_call with dry_run_request; execute resume only after review."]
+    if action == "read_complete_summary":
+        return ["Call job_list_final_decision.recommended_call and report only summary-approved fields."]
+    return ["Follow job_list_final_decision.recommended_call, then inspect the returned job next_call."]
+
+
 def _daily_candidate_jobs_batch_summary(
     all_jobs: list[dict[str, Any]],
     *,
@@ -41863,7 +41982,7 @@ def _daily_candidate_delivery_response_contract() -> dict[str, Any]:
 
 def _job_list_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "job_queue_control", "job_list_next_call", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "daily_candidate_batch_sequence", "daily_candidate_approval_sequence", "daily_candidate_batch_execution_context", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_target_report", "daily_candidate_batch_fulfillment_report", "daily_candidate_batch_publish_payload", "daily_candidate_submitted_jobs_report", "daily_candidate_batch_next_call", "daily_candidate_submission_gate", "daily_candidate_approval_final_report", "daily_candidate_batch_final_decision", "daily_candidate_completion_final_decision", "next_call", "jobs", "next_actions"],
+        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "job_queue_control", "job_list_next_call", "job_list_final_decision", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "daily_candidate_batch_sequence", "daily_candidate_approval_sequence", "daily_candidate_batch_execution_context", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_target_report", "daily_candidate_batch_fulfillment_report", "daily_candidate_batch_publish_payload", "daily_candidate_submitted_jobs_report", "daily_candidate_batch_next_call", "daily_candidate_submission_gate", "daily_candidate_approval_final_report", "daily_candidate_batch_final_decision", "daily_candidate_completion_final_decision", "next_call", "jobs", "next_actions"],
         "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "live_validation_submission", "live_validation_followup", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "candidate_submit_final_decision", "source_reference", "duplicate_check", "submit_if_clear_handoff", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "qbit_final_report", "qbit_policy_final_decision", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "material_chain_handoff", "material_preparation_final_decision", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_materials_final_report", "target_upload_service_gate", "target_upload_handoff", "target_upload_final_decision", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_recovery_final_report", "live_action_sequence", "live_evidence_collection_handoff", "manual_retorrent_handoff", "manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "agent_decision", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "resume_gate", "job_lifecycle_final_report", "job_lifecycle_control", "job_summary_final_report", "reporting_gate", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "next_call", "job_operation_final_decision", "resume_lineage", "job_lineage", "resume_summary", "resume_followup_handoff", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "job_lifecycle_control_fields": _job_response_contract()["job_lifecycle_control_fields"],
         "job_lifecycle_transition_fields": _job_response_contract()["job_lifecycle_transition_fields"],
@@ -41871,6 +41990,7 @@ def _job_list_response_contract() -> dict[str, Any]:
         "target_upload_final_decision_fields": _job_response_contract()["target_upload_final_decision_fields"],
         "job_queue_control_fields": ["ready", "action", "filters", "visible_count", "total", "limit", "truncated", "status_counts", "active_count", "resumable_count", "complete_count", "failed_or_cancelled_count", "first_job_id", "first_job_status", "first_job_kind", "first_job_next_call", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "job_list_next_call_fields": ["ready", "action", "source", "job_id", "job_status", "job_kind", "tool", "endpoint", "method", "request", "dry_run_request", "execute_request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "queue", "approval", "safety", "blockers", "next_actions"],
+        "job_list_final_decision_fields": ["ready", "status", "action", "verdict", "job_id", "job_status", "job_kind", "queue", "daily_candidate_completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "safe_to_call_now", "requires_user_review", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "available_submit_request_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "target_groups", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
@@ -42859,6 +42979,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "queue": {"type": "object"},
             "job_queue_control": {"type": "object"},
             "job_list_next_call": {"type": "object"},
+            "job_list_final_decision": {"type": "object"},
             "daily_candidate_batch_summary": {"type": "object"},
             "daily_candidate_batch_gate": {"type": "object"},
             "daily_candidate_submission_plan": {"type": "object"},
