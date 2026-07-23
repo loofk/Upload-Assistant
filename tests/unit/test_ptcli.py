@@ -21402,10 +21402,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_manifest_readiness_report_fields" in tool_by_name["agent_smoke"]["response_contract"]
     assert "agent_smoke_command_report" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "agent_smoke_command_report_fields" in tool_by_name["agent_smoke"]["response_contract"]
+    assert "agent_smoke_live_validation_handoff" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "agent_smoke_live_validation_handoff_fields" in tool_by_name["agent_smoke"]["response_contract"]
     assert "openclaw_skill_url" in tool_by_name["agent_smoke"]["response_contract"]["agent_manifest_readiness_report_fields"]
     assert "hermes_skill_url" in tool_by_name["agent_smoke"]["response_contract"]["agent_manifest_readiness_report_fields"]
     assert "commands" in tool_by_name["agent_smoke"]["response_contract"]["agent_smoke_command_report_fields"]
     assert "api_checks" in tool_by_name["agent_smoke"]["response_contract"]["agent_smoke_command_report_fields"]
+    assert "must_not_submit_until" in tool_by_name["agent_smoke"]["response_contract"]["agent_smoke_live_validation_handoff_fields"]
+    assert "must_not_report_complete_until" in tool_by_name["agent_smoke"]["response_contract"]["agent_smoke_live_validation_handoff_fields"]
     assert "deployment" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "readiness" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert tool_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
@@ -23689,6 +23693,21 @@ def test_agent_smoke_exposes_post_deploy_handoff(tmp_path) -> None:
     assert command_report["safety"]["does_not_contact_qbittorrent"] is True
     assert command_report["safety"]["does_not_upload"] is True
     assert "commands.agent_smoke" in command_report["read_order"]
+    live_handoff = payload["agent_smoke_live_validation_handoff"]
+    assert live_handoff["kind"] == "ptcli.agent_smoke_live_validation_handoff"
+    assert live_handoff["ready"] is False
+    assert live_handoff["status"] == "blocked"
+    assert live_handoff["action"] == "repair_readiness"
+    assert live_handoff["recommended_tool"] == "deployment_check"
+    assert live_handoff["recommended_endpoint"] == "/v1/deployment/check"
+    assert live_handoff["start_report"]["start_allowed"] is False
+    assert live_handoff["safety"]["does_not_contact_trackers"] is True
+    assert live_handoff["safety"]["does_not_contact_qbittorrent"] is True
+    assert live_handoff["safety"]["does_not_upload"] is True
+    assert live_handoff["safety"]["submit_call_may_create_live_job_after_doctor_and_user_review"] is True
+    assert "accept_rules=true" in live_handoff["must_not_submit_until"]
+    assert "live_validation_completion_audit.report_allowed=true" in live_handoff["must_not_report_complete_until"]
+    assert "readiness.seedbox_live_validation_start_report" in live_handoff["read_order"]
     assert [step["step"] for step in payload["run_order"]] == ["health", "tools", "manifest", "deployment", "readiness", "goal_progress"]
     assert payload["recommended_call"]["tool"] == "deployment_check"
     assert payload["recommended_endpoint"] == "/v1/deployment/check"
@@ -23698,6 +23717,7 @@ def test_agent_smoke_exposes_post_deploy_handoff(tmp_path) -> None:
     assert any(check["name"] == "manifest.discovery" and check["details"]["kind"] == "ptcli.agent_manifest_readiness_report" for check in payload["checks"])
     assert "agent_manifest_readiness_report" in payload["read_order"]
     assert "agent_smoke_command_report" in payload["read_order"]
+    assert "agent_smoke_live_validation_handoff" in payload["read_order"]
     assert "deployment.deployment_final_report" in payload["read_order"]
 
 

@@ -1112,6 +1112,7 @@
           "manifest",
           "agent_manifest_readiness_report",
           "agent_smoke_command_report",
+          "agent_smoke_live_validation_handoff",
           "deployment",
           "readiness",
           "goal_progress",
@@ -1189,6 +1190,27 @@
           "blockers",
           "next_actions"
         ],
+        "agent_smoke_live_validation_handoff_fields": [
+          "kind",
+          "ready",
+          "status",
+          "action",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "start_report",
+          "post_submit_report",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "must_not_submit_until",
+          "must_not_report_complete_until",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
         "deployment_fields": [
           "ready",
           "status",
@@ -1200,7 +1222,10 @@
           "ready",
           "status",
           "next_call",
+          "first_live_validation_handoff",
           "seedbox_live_runbook_final_report",
+          "seedbox_live_validation_start_report",
+          "seedbox_live_post_submit_report",
           "live_execution_package"
         ],
         "goal_progress_fields": [

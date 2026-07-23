@@ -32632,6 +32632,7 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
     manifest_summary = _agent_smoke_manifest_summary(base_url)
     agent_manifest_readiness_report = _agent_smoke_manifest_readiness_report(manifest_summary)
     agent_smoke_command_report = _agent_smoke_command_report(base_url, request, manifest_summary)
+    agent_smoke_live_validation_handoff = _agent_smoke_live_validation_handoff(readiness)
     checks = _agent_smoke_checks(health, missing_tools, agent_manifest_readiness_report, deployment, readiness, goal_progress)
     blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
     warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
@@ -32657,6 +32658,7 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
         "manifest": manifest_summary,
         "agent_manifest_readiness_report": agent_manifest_readiness_report,
         "agent_smoke_command_report": agent_smoke_command_report,
+        "agent_smoke_live_validation_handoff": agent_smoke_live_validation_handoff,
         "deployment": {
             "ready": deployment.get("ready") is True,
             "status": deployment.get("status"),
@@ -32668,7 +32670,10 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
             "ready": readiness.get("ready") is True,
             "status": readiness.get("status"),
             "next_call": readiness.get("next_call"),
+            "first_live_validation_handoff": readiness.get("first_live_validation_handoff"),
             "seedbox_live_runbook_final_report": readiness.get("seedbox_live_runbook_final_report"),
+            "seedbox_live_validation_start_report": readiness.get("seedbox_live_validation_start_report"),
+            "seedbox_live_post_submit_report": readiness.get("seedbox_live_post_submit_report"),
             "live_execution_package": readiness.get("live_execution_package"),
         },
         "goal_progress": {
@@ -32683,9 +32688,9 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_method": recommended_call.get("method"),
         "recommended_request": recommended_call.get("request"),
-        "read_order": ["agent_smoke", "agent_manifest_readiness_report", "agent_smoke_command_report", "deployment.deployment_final_report", "readiness.seedbox_live_runbook_final_report", "goal_progress.goal_distance_report"],
-        "complete_when": ["agent_smoke.ready=true", "agent_manifest_readiness_report.ready=true", "agent_smoke_command_report.ready=true", "deployment.deployment_final_report.ready=true", "readiness.seedbox_live_runbook_final_report.ready=true for live validation input"],
-        "stop_when": ["agent_smoke.blockers is non-empty", "agent_manifest_readiness_report.blockers is non-empty", "agent_smoke_command_report.blockers is non-empty", "deployment.deployment_final_report.blockers is non-empty", "readiness.seedbox_live_runbook_final_report.blockers is non-empty before live tracker action"],
+        "read_order": ["agent_smoke", "agent_manifest_readiness_report", "agent_smoke_command_report", "agent_smoke_live_validation_handoff", "deployment.deployment_final_report", "readiness.seedbox_live_runbook_final_report", "goal_progress.goal_distance_report"],
+        "complete_when": ["agent_smoke.ready=true", "agent_manifest_readiness_report.ready=true", "agent_smoke_command_report.ready=true", "agent_smoke_live_validation_handoff.status is understood", "deployment.deployment_final_report.ready=true", "readiness.seedbox_live_runbook_final_report.ready=true for live validation input"],
+        "stop_when": ["agent_smoke.blockers is non-empty", "agent_manifest_readiness_report.blockers is non-empty", "agent_smoke_command_report.blockers is non-empty", "agent_smoke_live_validation_handoff.stop_when triggers", "deployment.deployment_final_report.blockers is non-empty", "readiness.seedbox_live_runbook_final_report.blockers is non-empty before live tracker action"],
         "safety": {
             "does_not_contact_trackers": True,
             "does_not_contact_qbittorrent": True,
@@ -32763,6 +32768,98 @@ def _agent_smoke_command_query(request: dict[str, Any]) -> str:
     if not items:
         return ""
     return "?" + urlencode(items, doseq=True)
+
+
+def _agent_smoke_live_validation_handoff(readiness: dict[str, Any]) -> dict[str, Any]:
+    first = readiness.get("first_live_validation_handoff") if isinstance(readiness.get("first_live_validation_handoff"), dict) else {}
+    runbook = readiness.get("seedbox_live_runbook_final_report") if isinstance(readiness.get("seedbox_live_runbook_final_report"), dict) else {}
+    start = readiness.get("seedbox_live_validation_start_report") if isinstance(readiness.get("seedbox_live_validation_start_report"), dict) else {}
+    post_submit = readiness.get("seedbox_live_post_submit_report") if isinstance(readiness.get("seedbox_live_post_submit_report"), dict) else {}
+    next_call = readiness.get("next_call") if isinstance(readiness.get("next_call"), dict) else {}
+    ready_to_start = bool(start.get("start_allowed") or first.get("ready") or runbook.get("ready"))
+    blockers = _string_list(start.get("blockers")) or _string_list(runbook.get("blockers")) or _string_list(first.get("blockers")) or _string_list(readiness.get("blockers"))
+    if ready_to_start:
+        action = "run_doctor"
+        recommended_call = start.get("doctor_call") if isinstance(start.get("doctor_call"), dict) else runbook.get("recommended_call") if isinstance(runbook.get("recommended_call"), dict) else next_call
+    elif next_call.get("tool"):
+        action = "repair_readiness"
+        recommended_call = next_call
+    else:
+        action = "provide_live_request"
+        recommended_call = {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request": None,
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "reason": "rerun_with_source_url_target_accept_rules_confirm_upload_and_seedbox_paths",
+        }
+    return {
+        "kind": "ptcli.agent_smoke_live_validation_handoff",
+        "ready": ready_to_start,
+        "status": "ready_for_doctor" if ready_to_start else "blocked",
+        "action": action,
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "start_report": {
+            "ready": start.get("ready"),
+            "start_allowed": start.get("start_allowed"),
+            "verdict": start.get("verdict"),
+            "doctor_call": start.get("doctor_call"),
+            "summary_check_call": start.get("summary_check_call"),
+            "submit_call_template": start.get("submit_call_template"),
+        },
+        "post_submit_report": {
+            "ready": post_submit.get("ready"),
+            "action": post_submit.get("action"),
+            "recommended_call": post_submit.get("recommended_call"),
+            "poll": post_submit.get("poll"),
+            "resume": post_submit.get("resume"),
+            "finish": post_submit.get("finish"),
+        },
+        "read_order": [
+            "agent_smoke_live_validation_handoff",
+            "readiness.seedbox_live_validation_start_report",
+            "readiness.seedbox_live_runbook_final_report",
+            "readiness.first_live_validation_handoff",
+            "readiness.seedbox_live_post_submit_report",
+        ],
+        "complete_when": _string_list(runbook.get("complete_when")) or LIVE_VALIDATION_COMPLETE_WHEN,
+        "stop_when": _string_list(start.get("stop_when")) or _string_list(runbook.get("stop_when")) or ["agent_smoke_live_validation_handoff.blockers is non-empty before doctor or live job submit"],
+        "must_not_submit_until": _string_list(start.get("must_not_submit_until"))
+        or [
+            "summary_check.live_validation_result.can_submit_check_and_submit=true",
+            "accept_rules=true",
+            "confirm_upload=true",
+            "duplicate_check.exists is not true",
+        ],
+        "must_not_report_complete_until": _string_list(runbook.get("must_not_report_complete_until")) or LIVE_VALIDATION_COMPLETE_WHEN,
+        "safety": {
+            "read_only": True,
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "does_not_upload": True,
+            "doctor_call_may_contact_trackers_and_qbittorrent": True,
+            "submit_call_may_create_live_job_after_doctor_and_user_review": True,
+            "live_upload_requires_accept_rules_and_confirm_upload": True,
+        },
+        "blockers": blockers,
+        "next_actions": _agent_smoke_live_validation_next_actions(ready_to_start, recommended_call, blockers),
+    }
+
+
+def _agent_smoke_live_validation_next_actions(ready: bool, recommended_call: dict[str, Any], blockers: list[str]) -> list[str]:
+    if ready:
+        return ["After explicit user approval, follow agent_smoke_live_validation_handoff.recommended_call, then summary_check, check-and-submit, poll/resume, and final summary audit."]
+    if recommended_call.get("tool"):
+        return ["Follow agent_smoke_live_validation_handoff.recommended_call to repair readiness, then rerun agent_smoke before doctor or live job submit."]
+    if blockers:
+        return ["Resolve agent_smoke_live_validation_handoff.blockers before doctor, tracker, upload, or qBittorrent live actions."]
+    return ["Rerun agent_smoke with source_url, target, save_path, accept_rules=true, confirm_upload=true, and seedbox paths."]
 
 
 def _agent_smoke_manifest_summary(base_url: str) -> dict[str, Any]:
@@ -38510,13 +38607,14 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
 
 def _agent_smoke_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "base_url", "request", "health", "tools", "manifest", "agent_manifest_readiness_report", "agent_smoke_command_report", "deployment", "readiness", "goal_progress", "run_order", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "checks", "blockers", "warnings", "next_actions"],
+        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "base_url", "request", "health", "tools", "manifest", "agent_manifest_readiness_report", "agent_smoke_command_report", "agent_smoke_live_validation_handoff", "deployment", "readiness", "goal_progress", "run_order", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "checks", "blockers", "warnings", "next_actions"],
         "tool_fields": ["count", "required", "missing", "key_endpoints"],
         "manifest_fields": ["ready", "schema_version", "base_url", "paths", "tool_count", "workflow_count", "required_first_read"],
         "agent_manifest_readiness_report_fields": ["ready", "report_allowed", "status", "manifest_ready", "schema_version", "base_url", "required_paths", "paths", "missing_paths", "tool_count", "workflow_count", "openclaw_skill_url", "hermes_skill_url", "well_known_url", "openapi_url", "tools_url", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "agent_smoke_command_report_fields": ["kind", "ready", "status", "base_url", "auth", "commands", "api_checks", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+        "agent_smoke_live_validation_handoff_fields": ["kind", "ready", "status", "action", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "start_report", "post_submit_report", "read_order", "complete_when", "stop_when", "must_not_submit_until", "must_not_report_complete_until", "safety", "blockers", "next_actions"],
         "deployment_fields": ["ready", "status", "deployment_final_report", "agent_handoff", "seedbox_bootstrap_handoff"],
-        "readiness_fields": ["ready", "status", "next_call", "seedbox_live_runbook_final_report", "live_execution_package"],
+        "readiness_fields": ["ready", "status", "next_call", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "seedbox_live_validation_start_report", "seedbox_live_post_submit_report", "live_execution_package"],
         "goal_progress_fields": ["status", "completion_estimate", "goal_distance_report", "next_step"],
         "run_order_fields": ["step", "tool", "method", "url", "endpoint", "request", "continue_when", "mutates_state"],
         "check_fields": ["name", "ok", "blocking", "message", "details"],
@@ -40608,6 +40706,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "manifest": {"type": "object"},
             "agent_manifest_readiness_report": {"type": "object"},
             "agent_smoke_command_report": {"type": "object"},
+            "agent_smoke_live_validation_handoff": {"type": "object"},
             "deployment": {"type": "object"},
             "readiness": {"type": "object"},
             "goal_progress": {"type": "object"},
