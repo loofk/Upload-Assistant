@@ -14708,6 +14708,8 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_application_handoff"]["request_patch"] == job["policy_execution_plan"]["request_defaults"]
     assert job["policy_application_handoff"]["qbit_runtime_handoff"] == job["policy_execution_plan"]["qbit_runtime_handoff"]
     assert job["policy_application_handoff"]["qbit_defaults_application_report"] == defaults_application
+    assert job["policy_application_handoff"]["qbit_defaults_ready"] is True
+    assert job["policy_application_handoff"]["qbit_defaults_blockers"] == []
     assert job["policy_application_handoff"]["applied_request_fields"] == job["policy_execution_plan"]["request_defaults"]
     assert job["policy_application_handoff"]["missing_request_fields"] == []
     assert job["policy_application_handoff"]["missing_confirmations"] == []
@@ -14814,6 +14816,59 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert "--confirm-upload" in job["command_argv"]
     assert "--qbit-download-limit" in job["command_argv"]
     assert "--uploaded-qbit-upload-limit" in job["command_argv"]
+
+
+def test_manual_retorrent_job_blocks_looser_qbit_policy_override_at_application_gate(monkeypatch, tmp_path) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+
+    async def fake_retorrent(request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target duplicate check or live upload gate blocked execution."],
+            "next_actions": ["Review blockers and resume with explicit confirmations when safe."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+            "request": request,
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "uploaded_qbit_upload_limit": "5MiB/s",
+        },
+    )
+
+    defaults_application = job["policy_qbit_defaults"]["application_report"]
+    assert defaults_application["ready"] is False
+    assert defaults_application["looser_override_fields"][0]["field"] == "uploaded_qbit_upload_limit"
+    assert job["policy_application_handoff"]["ready"] is False
+    assert job["policy_application_handoff"]["qbit_defaults_ready"] is False
+    assert job["policy_application_handoff"]["qbit_defaults_blockers"] == [
+        "policy_qbit_defaults.application_report: uploaded_qbit_upload_limit: override 5242880 is looser than policy 2097152 from site_policy:MTEAM"
+    ]
+    assert job["policy_application_handoff"]["blockers"][0] == job["policy_application_handoff"]["qbit_defaults_blockers"][0]
+    assert job["policy_application_handoff"]["next_actions"][0].startswith("Resolve policy_qbit_defaults.application_report blockers")
+    assert job["policy_application_report"]["ready_for_live_audit"] is False
+    assert job["policy_application_report"]["verdict"] == "request_patch_missing"
+    assert job["policy_application_report"]["blockers"][0] == job["policy_application_handoff"]["qbit_defaults_blockers"][0]
+    assert "uploaded_qbit_upload_limit" in job["policy_application_report"]["missing_protected_fields"]
 
 
 def test_retorrent_execute_blocks_before_live_payload_when_policy_enforcement_not_ready(monkeypatch) -> None:
@@ -21310,6 +21365,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "qbit_defaults_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "qbit_defaults_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "qbit_defaults_blockers" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "qbit_runtime_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "qbit_runtime_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "applied_request_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
@@ -23822,6 +23879,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "looser_override_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
         assert "invalid_override_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
         assert "qbit_defaults_application_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+        assert "qbit_defaults_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+        assert "qbit_defaults_blockers" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
         assert "policy_execution_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
