@@ -21400,8 +21400,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manifest" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "agent_manifest_readiness_report" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "agent_manifest_readiness_report_fields" in tool_by_name["agent_smoke"]["response_contract"]
+    assert "agent_smoke_command_report" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "agent_smoke_command_report_fields" in tool_by_name["agent_smoke"]["response_contract"]
     assert "openclaw_skill_url" in tool_by_name["agent_smoke"]["response_contract"]["agent_manifest_readiness_report_fields"]
     assert "hermes_skill_url" in tool_by_name["agent_smoke"]["response_contract"]["agent_manifest_readiness_report_fields"]
+    assert "commands" in tool_by_name["agent_smoke"]["response_contract"]["agent_smoke_command_report_fields"]
+    assert "api_checks" in tool_by_name["agent_smoke"]["response_contract"]["agent_smoke_command_report_fields"]
     assert "deployment" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "readiness" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert tool_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
@@ -23671,6 +23675,20 @@ def test_agent_smoke_exposes_post_deploy_handoff(tmp_path) -> None:
     assert manifest_report["openclaw_skill_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest_report["hermes_skill_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
     assert manifest_report["recommended_call"]["endpoint"] == "/.well-known/ptcli-agent.json"
+    command_report = payload["agent_smoke_command_report"]
+    assert command_report["kind"] == "ptcli.agent_smoke_command_report"
+    assert command_report["ready"] is True
+    assert command_report["commands"]["health"] == "curl -fsS http://ptcli.local:8080/health"
+    assert command_report["commands"]["openapi"] == "curl -fsS http://ptcli.local:8080/openapi.json"
+    assert command_report["commands"]["openclaw_skill"] == "curl -fsS http://ptcli.local:8080/v1/openclaw/skill.json"
+    assert command_report["commands"]["hermes_skill"] == "curl -fsS http://ptcli.local:8080/v1/hermes/skill.json"
+    assert "source_url=https%3A%2F%2Fu2.dmhy.org%2Fdetails.php%3Fid%3D60635" in command_report["commands"]["agent_smoke"]
+    assert "base_dir=" in command_report["commands"]["deployment_check"]
+    assert command_report["auth"]["env"] == "PTCLI_API_TOKEN"
+    assert command_report["safety"]["does_not_contact_trackers"] is True
+    assert command_report["safety"]["does_not_contact_qbittorrent"] is True
+    assert command_report["safety"]["does_not_upload"] is True
+    assert "commands.agent_smoke" in command_report["read_order"]
     assert [step["step"] for step in payload["run_order"]] == ["health", "tools", "manifest", "deployment", "readiness", "goal_progress"]
     assert payload["recommended_call"]["tool"] == "deployment_check"
     assert payload["recommended_endpoint"] == "/v1/deployment/check"
@@ -23679,6 +23697,7 @@ def test_agent_smoke_exposes_post_deploy_handoff(tmp_path) -> None:
     assert any(check["name"] == "deployment.final_report" for check in payload["checks"])
     assert any(check["name"] == "manifest.discovery" and check["details"]["kind"] == "ptcli.agent_manifest_readiness_report" for check in payload["checks"])
     assert "agent_manifest_readiness_report" in payload["read_order"]
+    assert "agent_smoke_command_report" in payload["read_order"]
     assert "deployment.deployment_final_report" in payload["read_order"]
 
 
