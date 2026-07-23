@@ -15701,6 +15701,18 @@ def test_manual_remaining_sequence_uses_target_materials_report_for_upload_reque
     assert sequence["next_step"]["tool"] == "target_upload_job"
     assert sequence["next_step"]["request"] == target_request
     assert sequence["next_step"]["safe_to_call_now"] is True
+    assert sequence["next_call"]["kind"] == "ptcli.manual_retorrent_remaining_next_call"
+    assert sequence["next_call"]["tool"] == "target_upload_job"
+    assert sequence["next_call"]["endpoint"] == "/v1/jobs/target/upload"
+    assert sequence["next_call"]["request"] == target_request
+    assert sequence["next_call"]["safe_to_call_now"] is True
+    assert sequence["next_call"]["requires_user_review"] is True
+    assert sequence["next_call"]["mutates_state"] is True
+    assert sequence["next_call"]["uploads"] is True
+    assert sequence["next_call"]["contacts_trackers"] is True
+    assert sequence["next_call"]["contacts_qbittorrent"] is True
+    assert sequence["next_call"]["approval"]["requires_confirm_upload"] is True
+    assert sequence["next_call"]["safety"]["do_not_upload_without_rule_gate"] is True
     assert sequence["target_materials"]["ready_for_target_upload_preflight"] is True
     assert sequence["target_materials"]["target_upload_request"] == target_request
     assert "target_materials_final_report.ready_for_target_upload_preflight" in sequence["steps"][3]["read"]
@@ -21243,6 +21255,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_remaining_sequence_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "manual_retorrent_remaining_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "remaining_sequence" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
+    assert "next_call" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_remaining_sequence_fields"]
+    assert "manual_retorrent_remaining_next_call_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_remaining_next_call_fields"]
+    assert "uploads" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_remaining_next_call_fields"]
     assert "steps" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_remaining_sequence_fields"]
     assert "steps" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]
     assert "direct_calls" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]

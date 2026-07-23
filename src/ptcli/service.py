@@ -28149,6 +28149,7 @@ def _manual_retorrent_remaining_sequence_from_reports(
         fallback_next_step,
     )
     action = str(next_step.get("action") or next_step.get("name") or "inspect")
+    next_call = _manual_remaining_next_call(job_id, action, next_step)
     steps = [
         _manual_remaining_step("poll_status", "get_job_status", f"/v1/jobs/{job_id}" if job_id else None, "GET", {"job_id": job_id} if job_id else None, ["status", "runtime", "job_handoff", "manual_retorrent_remaining_sequence", "material_chain_handoff"], "status not in queued,running", "status=failed or status=cancelled", repeat_when="status in queued,running"),
         _manual_remaining_step("policy_gate", "site_policies", "/v1/site-policies", "POST", None, ["policy_execution_final_report", "policy_application_handoff", "policy_config_apply_handoff"], "policy_execution_final_report.ready_for_live=true", "policy_execution_final_report.ready_for_live=false"),
@@ -28179,6 +28180,7 @@ def _manual_retorrent_remaining_sequence_from_reports(
             "blockers": _string_list(target_materials_report.get("blockers")) if isinstance(target_materials_report, dict) else [],
         },
         "next_step": next_step,
+        "next_call": next_call,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_method": next_step.get("method"),
@@ -28209,6 +28211,72 @@ def _manual_remaining_target_package_call(material_chain: dict[str, Any] | None,
             "requires_user_review": False,
         }
     return {}
+
+
+def _manual_remaining_next_call(job_id: str, action: str, next_step: dict[str, Any]) -> dict[str, Any]:
+    tool = next_step.get("tool")
+    endpoint = next_step.get("endpoint")
+    method = str(next_step.get("method") or ("GET" if tool == "get_job_status" else "POST")).upper()
+    request = next_step.get("request") if "request" in next_step else None
+    mutates_state = method != "GET" and tool not in {None, "get_job_status", "get_job_summary"}
+    uploads = tool in {"target_upload_job", "target_upload"} or action == "target_upload_closure"
+    contacts_qbit = uploads or tool in {"qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete"}
+    contacts_trackers = uploads or tool in {"source_info", "source_download", "target_upload_preflight", "target_upload", "target_upload_job"}
+    safe_to_call_now = bool(next_step.get("safe_to_call_now"))
+    requires_user_review = next_step.get("requires_user_review") is not False
+    if tool in {None, "get_job_status", "get_job_summary"}:
+        requires_user_review = False if tool else requires_user_review
+    return {
+        "kind": "ptcli.manual_retorrent_remaining_next_call",
+        "ready": bool(tool and endpoint),
+        "job_id": job_id or None,
+        "action": action,
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method,
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "mutates_state": mutates_state,
+        "uploads": uploads,
+        "contacts_trackers": contacts_trackers,
+        "contacts_qbittorrent": contacts_qbit,
+        "reason": next_step.get("reason") or action,
+        "read_before_call": ["manual_retorrent_remaining_sequence", "target_materials_final_report", "target_package_handoff", "target_upload_handoff", "blockers"],
+        "after_call": _manual_remaining_next_call_after_call(job_id, action, tool),
+        "approval": {
+            "required": requires_user_review,
+            "requires_confirm_upload": uploads,
+            "requires_accept_rules": uploads,
+            "review_request_before_call": mutates_state or uploads,
+        },
+        "safety": {
+            "do_not_upload_when_duplicate_exists": True,
+            "do_not_upload_without_confirm_upload": uploads,
+            "do_not_upload_without_rule_gate": uploads,
+            "read_only": not mutates_state,
+        },
+        "blockers": _string_list(next_step.get("blockers")),
+        "next_actions": _manual_remaining_next_call_actions(action, tool, safe_to_call_now, requires_user_review),
+    }
+
+
+def _manual_remaining_next_call_after_call(job_id: str, action: str, tool: Any) -> dict[str, Any]:
+    if tool == "get_job_status":
+        return {"tool": "get_job_status", "endpoint": f"/v1/jobs/{job_id}" if job_id else None, "method": "GET", "request": {"job_id": job_id} if job_id else None}
+    if action == "final_summary" or tool == "get_job_summary":
+        return {"tool": "get_job_summary", "endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None, "method": "GET", "request": {"job_id": job_id} if job_id else None}
+    return {"tool": "get_job_status", "endpoint": "/v1/jobs/{returned_job_id}", "method": "GET", "request": {"job_id": "{returned_job_id}"}}
+
+
+def _manual_remaining_next_call_actions(action: str, tool: Any, safe_to_call_now: bool, requires_user_review: bool) -> list[str]:
+    if not tool:
+        return ["Resolve manual_retorrent_remaining_sequence.blockers before calling another tool."]
+    if requires_user_review and not safe_to_call_now:
+        return ["Review manual_retorrent_remaining_sequence.next_call.approval and blockers before executing the next call."]
+    if action == "target_upload_closure":
+        return ["Review target_materials_final_report.target_upload.target_upload_request, then call target_upload_job only with accept_rules and confirm_upload already satisfied."]
+    return ["Call manual_retorrent_remaining_sequence.next_call, then poll or read the returned job according to after_call."]
 
 
 def _manual_remaining_target_upload_call(target_materials_report: dict[str, Any] | None, target_package: dict[str, Any] | None, target_upload: dict[str, Any] | None) -> dict[str, Any]:
@@ -34620,7 +34688,8 @@ def _job_response_contract() -> dict[str, Any]:
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "policy_runtime_ready", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "manual_retorrent_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "policy", "materials", "target_upload", "closure", "live", "control", "remaining_sequence", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-        "manual_retorrent_remaining_sequence_fields": ["ready", "action", "job_id", "status", "material_chain", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "steps", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "manual_retorrent_remaining_sequence_fields": ["ready", "action", "job_id", "status", "material_chain", "target_materials", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "steps", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "manual_retorrent_remaining_next_call_fields": ["ready", "job_id", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
         "manual_retorrent_remaining_step_fields": ["name", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
