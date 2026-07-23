@@ -4858,6 +4858,21 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     site_policy_execution_profiles = {str(item.get("tracker")): item.get("execution_profile") for item in matrix if item.get("tracker")}
     blockers = _string_list(report.get("blockers")) + _string_list(policy_setup_summary.get("blockers"))
     next_call = _site_policy_next_call(overall_ready, context, policy_handoff, policy_repair_gate, policy_config_apply_handoff, config_update_plan, blockers)
+    site_policy_final_report = _site_policy_final_report(
+        overall_ready=overall_ready,
+        context=context,
+        policy_execution_summary=policy_execution_summary,
+        policy_setup_summary=policy_setup_summary,
+        policy_readiness_summary=policy_readiness_summary,
+        policy_repair_gate=policy_repair_gate,
+        policy_execution_handoff=policy_execution_handoff,
+        policy_execution_targets=policy_execution_targets,
+        policy_runtime_contract=policy_runtime_contract,
+        policy_execution_contract=policy_execution_contract,
+        policy_application_handoff=policy_application_handoff,
+        next_call=next_call,
+        blockers=blockers,
+    )
     return {
         "kind": "ptcli.site_policies",
         "status": "ok" if overall_ready else "blocked",
@@ -4887,6 +4902,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_runtime_contract": policy_runtime_contract,
         "policy_execution_contract": policy_execution_contract,
         "policy_application_handoff": policy_application_handoff,
+        "site_policy_final_report": site_policy_final_report,
         "policy_config_handoff": policy_config_handoff,
         "policy_config_repair_handoff": policy_config_repair_handoff,
         "policy_config_apply_handoff": policy_config_apply_handoff,
@@ -4901,6 +4917,130 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "agent_summary": _site_policy_agent_summary(matrix, report, policy_gap_summary, execution_readiness, policy_execution_summary),
         "report": report,
     }
+
+
+def _site_policy_final_report(
+    *,
+    overall_ready: bool,
+    context: dict[str, Any],
+    policy_execution_summary: dict[str, Any],
+    policy_setup_summary: dict[str, Any],
+    policy_readiness_summary: dict[str, Any],
+    policy_repair_gate: dict[str, Any],
+    policy_execution_handoff: dict[str, Any],
+    policy_execution_targets: dict[str, Any],
+    policy_runtime_contract: dict[str, Any],
+    policy_execution_contract: dict[str, Any],
+    policy_application_handoff: dict[str, Any],
+    next_call: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    ready_for_live = bool(
+        overall_ready
+        and policy_execution_summary.get("ready") is True
+        and policy_setup_summary.get("ready") is True
+        and policy_repair_gate.get("ready") is True
+        and policy_execution_handoff.get("ready") is True
+        and policy_execution_targets.get("ready") is True
+        and policy_runtime_contract.get("ready") is True
+        and policy_execution_contract.get("ready") is True
+        and policy_application_handoff.get("ready") is True
+        and not blockers
+    )
+    verdict = "ready_for_live_preflight" if ready_for_live else str(policy_repair_gate.get("action") or policy_readiness_summary.get("phase") or "blocked")
+    rate_limits = policy_execution_handoff.get("qbit") if isinstance(policy_execution_handoff.get("qbit"), dict) else {}
+    seeding = policy_execution_handoff.get("seeding") if isinstance(policy_execution_handoff.get("seeding"), dict) else {}
+    rules = policy_execution_targets.get("rules") if isinstance(policy_execution_targets.get("rules"), dict) else {}
+    recommended_call = {
+        "tool": next_call.get("tool"),
+        "endpoint": next_call.get("endpoint"),
+        "method": next_call.get("method"),
+        "request": next_call.get("request"),
+        "safe_to_call_now": next_call.get("safe_to_call_now") is True,
+        "requires_user_review": next_call.get("requires_user_review") is True,
+    }
+    return {
+        "kind": "ptcli.site_policy_final_report",
+        "ready": ready_for_live,
+        "ready_for_live": ready_for_live,
+        "report_allowed": ready_for_live,
+        "verdict": verdict,
+        "status": "ready" if ready_for_live else "blocked",
+        "accepted_rules": context.get("accept_rules") is True,
+        "source_tracker": context.get("source_tracker"),
+        "target_trackers": _string_list(context.get("target")),
+        "site_policy": {
+            "setup_ready": policy_setup_summary.get("ready") is True,
+            "execution_ready": policy_execution_summary.get("ready") is True,
+            "repair_gate_ready": policy_repair_gate.get("ready") is True,
+            "application_ready": policy_application_handoff.get("ready") is True,
+        },
+        "rate_limits": {
+            "ready": rate_limits.get("ready") is True,
+            "source": rate_limits.get("source") if isinstance(rate_limits.get("source"), dict) else {},
+            "target": rate_limits.get("target") if isinstance(rate_limits.get("target"), dict) else {},
+            "missing": rate_limits.get("missing") if isinstance(rate_limits.get("missing"), list) else [],
+            "request_defaults": policy_runtime_contract.get("request_defaults") if isinstance(policy_runtime_contract.get("request_defaults"), dict) else {},
+            "protected_fields": policy_runtime_contract.get("protected_fields") if isinstance(policy_runtime_contract.get("protected_fields"), list) else [],
+        },
+        "seeding": {
+            "ready": seeding.get("ready") is True,
+            "by_tracker": seeding.get("by_tracker") if isinstance(seeding.get("by_tracker"), dict) else {},
+            "missing": seeding.get("missing") if isinstance(seeding.get("missing"), list) else [],
+        },
+        "rules": {
+            "ready": rules.get("ready") is True,
+            "accepted_rules": rules.get("accepted_rules") is True,
+            "obligations": rules.get("by_tracker") if isinstance(rules.get("by_tracker"), dict) else {},
+        },
+        "runtime_contract": {
+            "ready": policy_runtime_contract.get("ready") is True,
+            "required_request_fields": _string_list(policy_runtime_contract.get("required_request_fields")),
+            "request_defaults": policy_runtime_contract.get("request_defaults") if isinstance(policy_runtime_contract.get("request_defaults"), dict) else {},
+            "completion_contract": policy_runtime_contract.get("completion_contract") if isinstance(policy_runtime_contract.get("completion_contract"), dict) else {},
+        },
+        "live_request_template": policy_execution_contract.get("live_request_template") if isinstance(policy_execution_contract.get("live_request_template"), dict) else {},
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": ["site_policy_final_report", "policy_application_handoff", "policy_execution_contract", "policy_runtime_contract", "policy_execution_targets", "policy_repair_gate", "next_call"],
+        "complete_when": [
+            "site_policy_final_report.ready_for_live=true",
+            "policy_application_handoff.ready=true",
+            "policy_runtime_contract.ready=true",
+            "policy_execution_contract.ready=true",
+            "policy_execution_targets.ready=true",
+        ],
+        "stop_when": [
+            "site_policy_final_report.blockers is non-empty",
+            "site_policy_final_report.rate_limits.ready=false",
+            "site_policy_final_report.seeding.ready=false",
+            "site_policy_final_report.rules.ready=false",
+            "site_policy_final_report.runtime_contract.ready=false",
+        ],
+        "blockers": blockers,
+        "next_actions": _site_policy_final_report_next_actions(ready_for_live, blockers, recommended_call),
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "live_upload": False,
+            "requires_accept_rules_for_live": True,
+            "requires_confirm_upload_for_live": True,
+            "does_not_override_site_rules": True,
+        },
+    }
+
+
+def _site_policy_final_report_next_actions(ready: bool, blockers: list[str], recommended_call: dict[str, Any]) -> list[str]:
+    if ready:
+        return ["Read site_policy_final_report.live_request_template, then continue with the recommended read-only preflight before creating live jobs."]
+    if recommended_call.get("tool"):
+        return ["Follow site_policy_final_report.recommended_call after resolving blockers; do not create live jobs until report_allowed=true."]
+    if blockers:
+        return ["Resolve site_policy_final_report.blockers by updating PTCLI.SITE_POLICIES and completing manual rule review."]
+    return ["Inspect site_policy_final_report.read_order before continuing site policy setup."]
 
 
 def _site_policy_next_call(
@@ -36308,7 +36448,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "site_policy_final_report", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -36357,6 +36497,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_application_handoff_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_patch", "request_patch_sources", "live_request_template", "submit_overrides_template", "protected_fields", "qbit", "qbit_runtime_handoff", "seeding", "rules", "completion", "workflow", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
                 "policy_runtime_protected_field_fields": ["field", "value", "source", "protection", "override_requires"],
                 "policy_runtime_completion_contract_fields": ["summary_fields", "required_evidence", "complete_when"],
+                "site_policy_final_report_fields": ["ready", "ready_for_live", "report_allowed", "verdict", "status", "accepted_rules", "source_tracker", "target_trackers", "site_policy", "rate_limits", "seeding", "rules", "runtime_contract", "live_request_template", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions", "safety"],
                 "policy_enforcement_qbit_fields": ["ready", "role_count", "roles", "missing", "request_fields", "client_fields", "evidence_required"],
                 "policy_enforcement_seeding_fields": ["ready", "role_count", "by_role", "missing", "evidence_required"],
                 "policy_config_handoff_fields": ["ready", "action", "accepted_rules", "tracker_count", "blocked_trackers", "config_path", "preferred_shape", "preferred_patch", "structured_patch", "flat_patch", "apply_order", "manual_review_required", "cannot_auto_generate_rule_review", "rule_review_request", "merge_strategy", "tracker_items", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "after_edit"],
@@ -39056,6 +39197,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_runtime_contract": {"type": "object"},
             "policy_execution_contract": {"type": "object"},
             "policy_application_handoff": {"type": "object"},
+            "site_policy_final_report": {"type": "object"},
             "policy_config_handoff": {"type": "object"},
             "policy_config_repair_handoff": {"type": "object"},
             "policy_config_apply_handoff": {"type": "object"},

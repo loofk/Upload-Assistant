@@ -19805,6 +19805,19 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert application_handoff["workflow"][1]["name"] == "merge_request_patch"
     assert application_handoff["recommended_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert application_handoff["safety"]["does_not_override_site_rules"] is True
+    site_policy_final_report = payload["site_policy_final_report"]
+    assert site_policy_final_report["kind"] == "ptcli.site_policy_final_report"
+    assert site_policy_final_report["ready_for_live"] is True
+    assert site_policy_final_report["report_allowed"] is True
+    assert site_policy_final_report["verdict"] == "ready_for_live_preflight"
+    assert site_policy_final_report["rate_limits"]["request_defaults"] == execution_plan["request_defaults"]
+    assert site_policy_final_report["rate_limits"]["protected_fields"] == runtime_contract["protected_fields"]
+    assert site_policy_final_report["seeding"]["by_tracker"]["U2"]["min_seed_time_hours"] == 72
+    assert site_policy_final_report["rules"]["ready"] is True
+    assert site_policy_final_report["runtime_contract"]["required_request_fields"] == runtime_contract["required_request_fields"]
+    assert site_policy_final_report["live_request_template"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert site_policy_final_report["recommended_call"]["tool"] == "readiness_bundle"
+    assert site_policy_final_report["safety"]["requires_confirm_upload_for_live"] is True
     config_repair_handoff = payload["policy_config_repair_handoff"]
     assert config_repair_handoff["kind"] == "ptcli.site_policy_config_repair_handoff"
     assert config_repair_handoff["ready"] is True
@@ -22291,6 +22304,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_runtime_contract" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_contract" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_application_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "site_policy_final_report" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "site_policy_final_report_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "ready_for_live" in tool_by_name["site_policies"]["response_contract"]["site_policy_final_report_fields"]
+    assert "rate_limits" in tool_by_name["site_policies"]["response_contract"]["site_policy_final_report_fields"]
+    assert "live_request_template" in tool_by_name["site_policies"]["response_contract"]["site_policy_final_report_fields"]
     assert "policy_config_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_repair_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
