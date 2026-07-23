@@ -3230,6 +3230,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -3242,6 +3243,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -3261,8 +3265,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -5732,6 +5749,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -5744,6 +5762,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -5763,8 +5784,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -8101,6 +8135,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -8113,6 +8148,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -8132,8 +8170,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -10470,6 +10521,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -10482,6 +10534,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -10501,8 +10556,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -12843,6 +12911,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -12855,6 +12924,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -12874,8 +12946,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -16200,6 +16285,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -16212,6 +16298,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -16231,8 +16320,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -19379,6 +19481,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -19391,6 +19494,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -19410,8 +19516,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -26132,6 +26251,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -26144,6 +26264,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -26163,8 +26286,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -28463,6 +28599,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -28475,6 +28612,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -28494,8 +28634,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -30803,6 +30956,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -30815,6 +30969,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -30834,8 +30991,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -33112,6 +33282,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -33124,6 +33295,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -33143,8 +33317,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -36604,6 +36791,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -36616,6 +36804,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -36635,8 +36826,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -39535,6 +39739,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -39547,6 +39752,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -39566,8 +39774,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",
@@ -41741,6 +41962,7 @@
         "policy_qbit_defaults_fields": [
           "applied",
           "sources",
+          "policy_values",
           "request_overrides",
           "application_report",
           "errors"
@@ -41753,6 +41975,9 @@
           "target_scope",
           "request_patch",
           "request_overrides",
+          "override_audit",
+          "looser_override_fields",
+          "invalid_override_fields",
           "applied_fields",
           "override_fields",
           "missing_policy_fields",
@@ -41772,8 +41997,21 @@
           "request_values",
           "applied_fields",
           "override_fields",
+          "policy_fields",
           "sources",
           "missing_policy_fields"
+        ],
+        "policy_qbit_override_audit_fields": [
+          "field",
+          "source",
+          "policy_limit",
+          "override_limit",
+          "policy_limit_raw",
+          "override_limit_raw",
+          "status",
+          "stricter_or_equal",
+          "blocker",
+          "parse_error"
         ],
         "policy_application_handoff_fields": [
           "ready",

@@ -13113,22 +13113,62 @@ def test_service_execute_applies_policy_qbit_defaults(monkeypatch) -> None:
     assert normalized["qbit_download_limit"] == 20 * 1024 * 1024
     assert normalized["uploaded_qbit_upload_limit"] == "1MiB/s"
     assert normalized["policy_qbit_defaults"]["applied"] == {"qbit_download_limit": 20 * 1024 * 1024}
-    assert normalized["policy_qbit_defaults"]["sources"] == {"qbit_download_limit": "site_policy:U2"}
+    assert normalized["policy_qbit_defaults"]["sources"] == {"qbit_download_limit": "site_policy:U2", "uploaded_qbit_upload_limit": "site_policy:MTEAM"}
+    assert normalized["policy_qbit_defaults"]["policy_values"] == {"qbit_download_limit": 20 * 1024 * 1024, "uploaded_qbit_upload_limit": 2 * 1024 * 1024}
     assert normalized["policy_qbit_defaults"]["request_overrides"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
     application_report = normalized["policy_qbit_defaults"]["application_report"]
     assert application_report["kind"] == "ptcli.policy_qbit_defaults_application_report"
     assert application_report["ready"] is True
     assert application_report["request_patch"] == {"qbit_download_limit": 20 * 1024 * 1024}
     assert application_report["request_overrides"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
+    assert application_report["override_audit"][0]["field"] == "uploaded_qbit_upload_limit"
+    assert application_report["override_audit"][0]["status"] == "stricter_or_equal"
+    assert application_report["override_audit"][0]["policy_limit"] == 2 * 1024 * 1024
+    assert application_report["override_audit"][0]["override_limit"] == 1 * 1024 * 1024
+    assert application_report["looser_override_fields"] == []
     assert application_report["role_reports"][0]["role"] == "source"
     assert application_report["role_reports"][0]["required_request_fields"] == ["qbit_download_limit"]
     assert application_report["role_reports"][0]["applied_fields"] == {"qbit_download_limit": 20 * 1024 * 1024}
     assert application_report["role_reports"][1]["role"] == "uploaded"
     assert application_report["role_reports"][1]["override_fields"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
+    assert application_report["role_reports"][1]["policy_fields"] == {"uploaded_qbit_upload_limit": 2 * 1024 * 1024}
     assert application_report["missing_policy_fields"] == []
     assert application_report["protected_fields"][0]["field"] == "qbit_download_limit"
     assert "--qbit-download-limit" in argv
     assert "--uploaded-qbit-upload-limit" in argv
+
+
+def test_service_execute_blocks_looser_policy_qbit_override(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    _args, normalized, _argv = ptcli_service._retorrent_execute_args(
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "execute": True,
+            "accept_rules": True,
+            "confirm_upload": True,
+            "uploaded_qbit_upload_limit": "5MiB/s",
+        }
+    )
+
+    application_report = normalized["policy_qbit_defaults"]["application_report"]
+    assert application_report["ready"] is False
+    assert application_report["status"] == "blocked"
+    assert application_report["looser_override_fields"][0]["field"] == "uploaded_qbit_upload_limit"
+    assert application_report["looser_override_fields"][0]["status"] == "looser_than_policy"
+    assert application_report["looser_override_fields"][0]["policy_limit"] == 2 * 1024 * 1024
+    assert application_report["looser_override_fields"][0]["override_limit"] == 5 * 1024 * 1024
+    assert "uploaded_qbit_upload_limit: override 5242880 is looser than policy 2097152 from site_policy:MTEAM" in application_report["blockers"]
+    assert application_report["next_actions"][0].startswith("Lower or remove looser qBittorrent override fields")
 
 
 def test_service_duplicate_check_summary_marks_existing_target_seed() -> None:
@@ -21196,10 +21236,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "policy_values" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_fields"]
     assert "application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_fields"]
     assert "policy_qbit_defaults_application_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "override_audit" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
+    assert "looser_override_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
+    assert "invalid_override_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
     assert "role_reports" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
     assert "policy_qbit_defaults_role_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "policy_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_role_report_fields"]
+    assert "policy_qbit_override_audit_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "policy_execution_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -23770,7 +23816,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "policy_qbit_defaults" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "policy_values" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_fields"]
         assert "application_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_fields"]
+        assert "override_audit" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
+        assert "looser_override_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
+        assert "invalid_override_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
         assert "qbit_defaults_application_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
         assert "policy_execution_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
