@@ -13508,6 +13508,20 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert payload["jobs"][0]["job_lifecycle_control"]["allowed_transitions"][0]["tool"] == "get_job_status"
     assert payload["jobs"][0]["next_call"]["action"] == "poll"
     assert payload["jobs"][0]["next_call"]["safe_to_call_now"] is True
+    assert payload["job_queue_control"]["kind"] == "ptcli.job_queue_control"
+    assert payload["job_queue_control"]["action"] == "poll_active_job"
+    assert payload["job_queue_control"]["active_count"] == 1
+    assert payload["job_queue_control"]["first_job_id"] == job_id
+    assert payload["job_queue_control"]["first_job_next_call"] == payload["jobs"][0]["next_call"]
+    assert payload["job_list_next_call"]["kind"] == "ptcli.job_list_next_call"
+    assert payload["job_list_next_call"]["action"] == "poll_active_job"
+    assert payload["job_list_next_call"]["job_id"] == job_id
+    assert payload["job_list_next_call"]["tool"] == "get_job_status"
+    assert payload["job_list_next_call"]["endpoint"] == f"/v1/jobs/{job_id}"
+    assert payload["job_list_next_call"]["safe_to_call_now"] is True
+    assert payload["job_list_next_call"]["requires_user_review"] is False
+    assert payload["job_list_next_call"]["uploads"] is False
+    assert payload["job_list_next_call"]["safety"]["uses_job_level_next_call"] is True
     assert payload["jobs"][0]["job_resume_handoff"]["action"] == "poll"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
@@ -14502,6 +14516,20 @@ def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     assert payload["jobs"][0]["job_control_summary"]["action"] == "resume_preview"
     assert payload["jobs"][0]["job_control_summary"]["recommended_tool"] == "resume_job"
     assert payload["jobs"][0]["job_control_summary"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["job_queue_control"]["action"] == "preview_resume_blocked_job"
+    assert payload["job_queue_control"]["resumable_count"] == 1
+    assert payload["job_queue_control"]["first_job_id"] == blocked["job_id"]
+    assert payload["job_queue_control"]["first_job_next_call"] == payload["jobs"][0]["next_call"]
+    assert payload["job_list_next_call"]["action"] == "preview_resume_blocked_job"
+    assert payload["job_list_next_call"]["job_id"] == blocked["job_id"]
+    assert payload["job_list_next_call"]["tool"] == "resume_job"
+    assert payload["job_list_next_call"]["endpoint"] == f"/v1/jobs/{blocked['job_id']}/resume"
+    assert payload["job_list_next_call"]["request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["job_list_next_call"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["job_list_next_call"]["safe_to_call_now"] is True
+    assert payload["job_list_next_call"]["requires_user_review"] is True
+    assert payload["job_list_next_call"]["mutates_state"] is False
+    assert payload["job_list_next_call"]["safety"]["dry_run_resume_preview_only"] is True
     assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
 
     limited = store.list({"limit": "1"})
@@ -24081,6 +24109,13 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["list_jobs"]["path"] == "/v1/jobs"
         assert "jobs" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "queue" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "job_queue_control" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "job_list_next_call" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "job_queue_control_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "first_job_next_call" in tools_by_name["list_jobs"]["response_contract"]["job_queue_control_fields"]
+        assert "job_list_next_call_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "dry_run_request" in tools_by_name["list_jobs"]["response_contract"]["job_list_next_call_fields"]
+        assert "requires_user_review" in tools_by_name["list_jobs"]["response_contract"]["job_list_next_call_fields"]
         assert "daily_candidate_batch_gate" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "daily_candidate_batch_gate_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "action" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_gate_fields"]
