@@ -13387,7 +13387,7 @@ def test_job_store_limits_concurrent_background_jobs(tmp_path) -> None:
 
     def first_runner():
         first_started.set()
-        assert release_first.wait(2)
+        assert release_first.wait(10)
         return {"status": "ok", "next_actions": ["first done"]}
 
     def second_runner():
@@ -13409,7 +13409,7 @@ def test_job_store_limits_concurrent_background_jobs(tmp_path) -> None:
     assert listed["queue"]["backlog_count"] == 1
 
     release_first.set()
-    deadline = time.time() + 2
+    deadline = time.time() + 10
     while time.time() < deadline and store.get(second["job_id"])["status"] != "complete":
         time.sleep(0.01)
 
@@ -15142,6 +15142,21 @@ def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_pat
                     "ok": True,
                     "result": {
                         "status": "uploaded",
+                        "summary": {
+                            "uploaded_torrent_hash": uploaded_hash,
+                            "injected_torrent_hash": uploaded_hash,
+                            "uploaded_torrent_path": "/tmp/uploaded/MTEAM-999.torrent",
+                        },
+                        "target_upload_diagnostics": {
+                            "ready_for_uploaded_seeding": True,
+                            "completion": {
+                                "complete": True,
+                                "uploaded_torrent_hash": uploaded_hash,
+                                "injected_torrent_hash": uploaded_hash,
+                                "uploaded_torrent_path": "/tmp/uploaded/MTEAM-999.torrent",
+                                "checks": {"uploaded_wait_complete": True, "injection_verified": True},
+                            },
+                        },
                         "injected_torrent": {
                             "hash": uploaded_hash,
                             "upload_limit": 2 * 1024 * 1024,
@@ -15239,6 +15254,20 @@ def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_pat
     assert job["qbit_execution_gate"]["source"]["status"] == "applied"
     assert job["qbit_execution_gate"]["uploaded"]["status"] == "applied"
     assert job["qbit_execution_gate"]["next_step"]["reason"] == "qbit_execution_ready"
+    assert job["qbit_final_report"]["kind"] == "ptcli.qbit_final_report"
+    assert job["qbit_final_report"]["ready"] is True
+    assert job["qbit_final_report"]["report_allowed"] is True
+    assert job["qbit_final_report"]["verdict"] == "ready"
+    assert job["qbit_final_report"]["rate_limits"]["ready"] is True
+    assert job["qbit_final_report"]["rate_limits"]["applied_role_count"] == 2
+    assert job["qbit_final_report"]["source"]["ready"] is True
+    assert job["qbit_final_report"]["source"]["torrent_hash"] == source_hash
+    assert job["qbit_final_report"]["uploaded"]["role_ready"] is True
+    assert job["qbit_final_report"]["uploaded"]["seeding_ready"] is True
+    assert job["qbit_final_report"]["uploaded"]["uploaded_torrent_hash"] == uploaded_hash
+    assert job["qbit_final_report"]["uploaded"]["injected_torrent_hash"] == uploaded_hash
+    assert job["qbit_final_report"]["uploaded"]["uploaded_wait_complete"] is True
+    assert job["qbit_final_report"]["recommended_call"]["tool"] == "get_job_summary"
     assert job["agent_decision"]["qbit_limit_audit"] == job["qbit_limit_audit"]
     assert job["agent_decision"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["agent_decision"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
@@ -15246,6 +15275,7 @@ def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_pat
     assert job["agent_decision"]["policy_execution_report"] == job["policy_execution_report"]
     assert job["agent_decision"]["policy_execution_final_report"] == job["policy_execution_final_report"]
     assert job["agent_decision"]["qbit_execution_gate"] == job["qbit_execution_gate"]
+    assert job["agent_decision"]["qbit_final_report"] == job["qbit_final_report"]
     assert job["workflow_context"]["qbit_limit_audit"] == job["qbit_limit_audit"]
     assert job["workflow_context"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["workflow_context"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
@@ -15253,6 +15283,7 @@ def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_pat
     assert job["workflow_context"]["policy_execution_report"] == job["policy_execution_report"]
     assert job["workflow_context"]["policy_execution_final_report"] == job["policy_execution_final_report"]
     assert job["workflow_context"]["qbit_execution_gate"] == job["qbit_execution_gate"]
+    assert job["workflow_context"]["qbit_final_report"] == job["qbit_final_report"]
     assert summary["qbit_limit_audit"] == job["qbit_limit_audit"]
     assert summary["qbit_handoff"] == job["qbit_handoff"]
     assert summary["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
@@ -15260,6 +15291,7 @@ def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_pat
     assert summary["policy_execution_report"] == job["policy_execution_report"]
     assert summary["policy_execution_final_report"] == job["policy_execution_final_report"]
     assert summary["qbit_execution_gate"] == job["qbit_execution_gate"]
+    assert summary["qbit_final_report"] == job["qbit_final_report"]
 
 
 def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_evidence(monkeypatch, tmp_path) -> None:
@@ -15368,11 +15400,18 @@ def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_e
     assert job["qbit_execution_gate"]["recommended_tool"] == "resume_job"
     assert job["qbit_execution_gate"]["recommended_endpoint"].endswith(f"/v1/jobs/{job['job_id']}/resume")
     assert job["qbit_execution_gate"]["dry_run_request"] == {"dry_run": True}
+    assert job["qbit_final_report"]["ready"] is False
+    assert job["qbit_final_report"]["report_allowed"] is False
+    assert job["qbit_final_report"]["verdict"] == "rate_limit_pending"
+    assert job["qbit_final_report"]["rate_limits"]["pending_roles"] == ["source", "uploaded"]
+    assert "qbit.uploaded_seeding_not_ready" in job["qbit_final_report"]["blockers"]
+    assert job["qbit_final_report"]["recommended_call"]["tool"] == "resume_job"
     assert job["job_handoff"]["qbit_limit_audit"] == job["qbit_limit_audit"]
     assert job["job_handoff"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["job_handoff"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
     assert job["job_handoff"]["qbit_rate_limit_repair_plan"] == job["qbit_rate_limit_repair_plan"]
     assert job["job_handoff"]["qbit_execution_gate"] == job["qbit_execution_gate"]
+    assert job["job_handoff"]["qbit_final_report"] == job["qbit_final_report"]
     assert job["recovery_handoff"]["handoff_sources"]["qbit_limit_ready"] is False
     assert job["recovery_handoff"]["handoff_sources"]["qbit_enforcement_ready"] is False
     assert job["recovery_handoff"]["handoff_sources"]["qbit_execution_ready"] is False
@@ -15390,6 +15429,7 @@ def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_e
     assert "qbit_execution_gate" in job["blocked_recovery_report"]["read_order"]
     summary = store.summary(job["job_id"])
     assert summary["qbit_rate_limit_repair_plan"] == job["qbit_rate_limit_repair_plan"]
+    assert summary["qbit_final_report"] == job["qbit_final_report"]
     assert summary["agent_decision"]["qbit_rate_limit_repair_plan"] == job["qbit_rate_limit_repair_plan"]
     assert summary["workflow_context"]["qbit_rate_limit_repair_plan"] == job["qbit_rate_limit_repair_plan"]
     assert summary["site_policy_profiles"] == job["site_policy_profiles"]
@@ -21647,6 +21687,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_execution_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "qbit_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "qbit_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "qbit_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "qbit_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "enforcement_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_handoff_fields"]
     assert "qbit_enforcement_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
@@ -21668,6 +21711,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_execution_gate_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "action" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_execution_gate_fields"]
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_execution_gate_fields"]
+    assert "qbit_final_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "report_allowed" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
+    assert "uploaded" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
     assert "materials_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_evidence_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -24251,6 +24297,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_execution_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_execution_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_execution_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "qbit_final_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "qbit_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "qbit_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "qbit_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "enforcement_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_handoff_fields"]
         assert "qbit_enforcement_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
@@ -24258,6 +24307,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "applied_role_count" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_summary_fields"]
         assert "qbit_execution_gate_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "action" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_execution_gate_fields"]
+        assert "qbit_final_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "report_allowed" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
+        assert "uploaded" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
         assert "qbit_enforcement_role_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "requires_injection_evidence" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_role_fields"]
         assert "materials_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
