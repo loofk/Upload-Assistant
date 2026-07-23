@@ -35831,6 +35831,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     client = str(request.get("client") or "default")
     compose_path = _deployment_path(request.get("compose_file") or os.environ.get("PTCLI_COMPOSE_FILE") or "docker-compose.yml", base_dir)
     env_template = _deployment_env_template_summary(_deployment_path(request.get("env_template") or ".env.ptcli.example", base_dir), _deployment_path(request.get("env_file") or ".env", base_dir))
+    agent_skill_templates = _deployment_agent_skill_templates_summary(base_dir, _deployment_path(request.get("dockerfile") or "Dockerfile.ptcli", base_dir))
 
     runtime_check = build_runtime_dependency_check()
     runtime_tools = _deployment_runtime_tools()
@@ -35912,6 +35913,15 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
             "details": docker_compose,
         }
     )
+    checks.append(
+        {
+            "name": "ai.skill_templates",
+            "ok": bool(agent_skill_templates.get("ready")),
+            "blocking": False,
+            "message": agent_skill_templates.get("message"),
+            "details": agent_skill_templates,
+        }
+    )
 
     blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
     warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
@@ -35929,10 +35939,10 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "env_file": str(env_template.get("env_path")),
     }
     mounts = _deployment_mount_summary(checks)
-    agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose, env_template)
+    agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose, env_template, agent_skill_templates)
     seedbox_qbit_handoff = _deployment_seedbox_qbit_handoff(agent_summary, paths, qbit, docker_compose, blockers, warnings)
-    deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
-    deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
+    deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, agent_skill_templates, blockers, warnings)
+    deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, agent_skill_templates, blockers, warnings)
     daily_candidate_trigger_handoff = _deployment_daily_candidate_trigger_handoff(agent_summary, paths, daily_candidate_plan, docker_compose, blockers, warnings)
     daily_candidate_delivery_handoff = _deployment_daily_candidate_delivery_handoff(daily_candidate_plan, docker_compose, daily_candidate_trigger_handoff, blockers, warnings)
     daily_candidate_config_final_report = _deployment_daily_candidate_config_final_report(paths, daily_candidate_plan, docker_compose, env_template, daily_candidate_trigger_handoff, warnings)
@@ -35947,6 +35957,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         daily_candidate_plan=daily_candidate_plan,
         docker_compose=docker_compose,
         env_template=env_template,
+        agent_skill_templates=agent_skill_templates,
         deployment_handoff=deployment_handoff,
         seedbox_bootstrap_handoff=seedbox_bootstrap_handoff,
         agent_summary=agent_summary,
@@ -36005,6 +36016,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
         "deployment_env": env_template,
+        "agent_skill_templates": agent_skill_templates,
         "docker_compose": docker_compose,
         "deployment_runbook": deployment_runbook,
         "deployment_handoff": deployment_handoff,
@@ -36111,6 +36123,90 @@ def _deployment_runtime_tools() -> dict[str, Any]:
 def _runtime_binary_status(name: str) -> dict[str, Any]:
     path = shutil.which(name)
     return {"name": name, "available": bool(path), "path": path}
+
+
+def _deployment_agent_skill_templates_summary(base_dir: Path, dockerfile_path: Path) -> dict[str, Any]:
+    template_paths = {
+        "openclaw": base_dir / "ai" / "openclaw" / "ptcli.skill.json",
+        "hermes": base_dir / "ai" / "hermes" / "ptcli.skill.json",
+    }
+    templates = {name: _deployment_agent_skill_template_status(name, path) for name, path in template_paths.items()}
+    dockerfile = _deployment_dockerfile_ai_template_status(dockerfile_path)
+    missing = [name for name, item in templates.items() if not item.get("present")]
+    invalid = [name for name, item in templates.items() if item.get("present") and not item.get("valid_json")]
+    schema_mismatch = [name for name, item in templates.items() if item.get("valid_json") and item.get("schema_version") != "ptcli.agent_manifest.v1"]
+    ready = not missing and not invalid and not schema_mismatch and bool(dockerfile.get("copies_ai_templates"))
+    return {
+        "kind": "ptcli.deployment_agent_skill_templates",
+        "ready": ready,
+        "status": "ready" if ready else "warning",
+        "delivery_mode": "api_manifest_primary_static_templates_packaged",
+        "api_manifest_endpoints": {
+            "well_known": "/.well-known/ptcli-agent.json",
+            "openclaw": "/v1/openclaw/skill.json",
+            "hermes": "/v1/hermes/skill.json",
+        },
+        "templates": templates,
+        "image_paths": {
+            "openclaw": "/Upload-Assistant/ai/openclaw/ptcli.skill.json",
+            "hermes": "/Upload-Assistant/ai/hermes/ptcli.skill.json",
+        },
+        "dockerfile": dockerfile,
+        "missing": missing,
+        "invalid": invalid,
+        "schema_mismatch": schema_mismatch,
+        "message": "OpenClaw/Hermes static skill templates are present and copied into the ptcli Docker image." if ready else "Static OpenClaw/Hermes skill templates or Docker image copy evidence need attention; API manifest endpoints remain the primary skill path.",
+        "safety": {
+            "read_only": True,
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "does_not_upload": True,
+            "not_required_for_api_manifest_endpoints": True,
+        },
+        "next_actions": ["Use /.well-known/ptcli-agent.json or /v1/openclaw/skill.json from the running service; static templates are also available inside the image."] if ready else ["Run scripts/sync_agent_skill_templates.py --write, ensure Dockerfile.ptcli copies ai/, then rerun deployment_check."],
+    }
+
+
+def _deployment_agent_skill_template_status(name: str, path: Path) -> dict[str, Any]:
+    present = path.is_file()
+    payload: dict[str, Any] = {}
+    error: str | None = None
+    if present:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            error = str(exc)
+    valid_json = present and not error and isinstance(payload, dict)
+    return {
+        "name": name,
+        "path": str(path),
+        "present": present,
+        "valid_json": valid_json,
+        "schema_version": payload.get("schema_version") if valid_json else None,
+        "tool_count": len(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
+        "workflow_count": len(payload.get("default_workflows") if isinstance(payload.get("default_workflows"), list) else []),
+        "error": error,
+    }
+
+
+def _deployment_dockerfile_ai_template_status(path: Path) -> dict[str, Any]:
+    present = path.is_file()
+    text = ""
+    error: str | None = None
+    if present:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            error = str(exc)
+    copies_ai = bool(re.search(r"(?m)^COPY\s+ai/\s+ai/?\s*$", text))
+    return {
+        "path": str(path),
+        "present": present,
+        "readable": present and error is None,
+        "copies_ai_templates": copies_ai,
+        "copy_instruction": "COPY ai/ ai/",
+        "error": error,
+    }
 
 
 def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dict[str, Any]:
@@ -36510,6 +36606,7 @@ def _deployment_agent_summary(
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
     env_template: dict[str, Any],
+    agent_skill_templates: dict[str, Any],
 ) -> dict[str, Any]:
     check_by_name = {str(check.get("name")): check for check in checks}
     api_token_check = check_by_name.get("security.api_token", {})
@@ -36536,6 +36633,9 @@ def _deployment_agent_summary(
         "docker_compose_host_path_envs": bool(docker_compose.get("host_path_envs")),
         "env_template_ready": bool(env_template.get("ready")),
         "env_template_present": bool(env_template.get("template_present")),
+        "agent_skill_templates_ready": bool(agent_skill_templates.get("ready")),
+        "static_ai_templates_present": not bool(agent_skill_templates.get("missing")),
+        "docker_image_includes_ai_templates": bool((agent_skill_templates.get("dockerfile") or {}).get("copies_ai_templates")) if isinstance(agent_skill_templates.get("dockerfile"), dict) else False,
         "missing_mounts": mounts.get("missing", []),
         "blocking_checks": blocking_failures,
         "warning_checks": warning_failures,
@@ -36552,6 +36652,7 @@ def _deployment_runtime_handoff(
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
     env_template: dict[str, Any],
+    agent_skill_templates: dict[str, Any],
     blockers: list[str],
     warnings: list[str],
 ) -> dict[str, Any]:
@@ -36576,6 +36677,14 @@ def _deployment_runtime_handoff(
             "auth_recommended": bool(agent_summary.get("api_auth_recommended")),
             "auth_ready": bool(agent_summary.get("api_auth_ready")),
             "exposure_blocked": bool(agent_summary.get("api_exposure_blocked")),
+        },
+        "agent_skill_templates": {
+            "ready": bool(agent_skill_templates.get("ready")),
+            "delivery_mode": agent_skill_templates.get("delivery_mode"),
+            "api_manifest_endpoints": agent_skill_templates.get("api_manifest_endpoints"),
+            "image_paths": agent_skill_templates.get("image_paths"),
+            "dockerfile_copies_ai_templates": bool((agent_skill_templates.get("dockerfile") or {}).get("copies_ai_templates")) if isinstance(agent_skill_templates.get("dockerfile"), dict) else False,
+            "missing": agent_skill_templates.get("missing") if isinstance(agent_skill_templates.get("missing"), list) else [],
         },
         "env": {
             "template_ready": bool(env_template.get("ready")),
@@ -36613,7 +36722,7 @@ def _deployment_runtime_handoff(
             "connectivity_checked": bool(qbit.get("connectivity_checked")),
         },
         "next_step": _deployment_runtime_next_step(manual_ready, daily_ready, compose_ready, blockers, warnings),
-        "deployment_runbook": _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings),
+        "deployment_runbook": _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, agent_skill_templates, blockers, warnings),
         "warnings": warnings,
     }
 
@@ -37046,6 +37155,7 @@ def _deployment_final_report(
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
     env_template: dict[str, Any],
+    agent_skill_templates: dict[str, Any],
     deployment_handoff: dict[str, Any],
     seedbox_bootstrap_handoff: dict[str, Any],
     agent_summary: dict[str, Any],
@@ -37094,6 +37204,14 @@ def _deployment_final_report(
             "exposure_blocked": bool(api.get("exposure_blocked")),
             "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
         },
+        "agent_skill_templates": {
+            "ready": bool(agent_skill_templates.get("ready")),
+            "delivery_mode": agent_skill_templates.get("delivery_mode"),
+            "api_manifest_endpoints": agent_skill_templates.get("api_manifest_endpoints"),
+            "image_paths": agent_skill_templates.get("image_paths"),
+            "dockerfile_copies_ai_templates": bool((agent_skill_templates.get("dockerfile") or {}).get("copies_ai_templates")) if isinstance(agent_skill_templates.get("dockerfile"), dict) else False,
+            "missing": agent_skill_templates.get("missing") if isinstance(agent_skill_templates.get("missing"), list) else [],
+        },
         "mounts": {
             "ready": bool(mounts.get("ready")),
             "missing_count": len(mounts.get("missing") or []),
@@ -37133,7 +37251,7 @@ def _deployment_final_report(
             "api_exposure_rule": "Public or 0.0.0.0 ptcli-api port mappings require PTCLI_API_TOKEN; localhost-only bindings may run without a token for local AI access.",
         },
         "recommended_call": recommended_call,
-        "read_order": ["deployment_final_report", "deployment_handoff", "seedbox_bootstrap_handoff", "deployment_runbook", "agent_summary", "docker_compose", "mounts", "qbit"],
+        "read_order": ["deployment_final_report", "deployment_handoff", "seedbox_bootstrap_handoff", "deployment_runbook", "agent_summary", "agent_skill_templates", "docker_compose", "mounts", "qbit"],
         "complete_when": ["deployment_final_report.ready=true", "docker.ptcli_api_service_ready=true", "mounts.ready=true", "qbit.configured=true", "api.health returns status=ok"],
         "stop_when": ["blockers is non-empty", "docker.ptcli_api_service_ready=false", "config/cookies/downloads/tmp/job paths are missing", "qBittorrent config is missing"],
         "blockers": blockers if blockers else ([] if compose_ready else ["Docker Compose ptcli-api service is incomplete."]),
@@ -37593,6 +37711,7 @@ def _deployment_runbook(
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
     env_template: dict[str, Any],
+    agent_skill_templates: dict[str, Any],
     blockers: list[str],
     warnings: list[str],
 ) -> dict[str, Any]:
@@ -37692,6 +37811,7 @@ def _deployment_runbook(
             "copy_command": env_template.get("copy_command"),
             "missing_keys": env_template.get("missing_keys") if isinstance(env_template.get("missing_keys"), list) else [],
         },
+        "agent_skill_templates": agent_skill_templates,
         "qbit": {
             "configured": bool(qbit.get("configured")),
             "host_hint": "Use http://host.docker.internal for host qBittorrent, or a Docker service name when qBittorrent shares the compose network.",
@@ -40841,9 +40961,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "seedbox_deployment_final_decision", "deployment_final_report", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "agent_skill_templates", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "seedbox_deployment_final_decision", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "api_token_configured", "api_publicly_exposed", "api_auth_ready", "api_exposure_blocked", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "api_token_configured", "api_publicly_exposed", "api_auth_ready", "api_exposure_blocked", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present", "agent_skill_templates_ready", "static_ai_templates_present", "docker_image_includes_ai_templates"],
+                "agent_skill_templates_fields": ["ready", "status", "delivery_mode", "api_manifest_endpoints", "templates", "image_paths", "dockerfile", "missing", "invalid", "schema_mismatch", "message", "safety", "next_actions"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "env", "qbit", "safety", "blockers", "warnings"],
@@ -40855,7 +40976,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "seedbox_qbit_handoff_fields": ["ready", "status", "read_only", "configured", "client", "torrent_client", "url", "port", "connectivity_checked", "host_gateway_required", "compose", "config_contract", "probe", "policy_limits", "manual_retorrent_preflight", "next_step", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "seedbox_deployment_final_decision_fields": ["ready", "status", "action", "verdict", "deployment_ready", "bootstrap_ready", "qbit_ready", "live_trial_ready", "api", "docker", "mounts", "qbit", "live_trial", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_order", "complete_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
-                "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "seedbox_qbit_handoff", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
+                "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "agent_skill_templates", "mounts", "env", "runtime", "qbit", "seedbox_qbit_handoff", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_public_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
@@ -43927,6 +44048,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "qbit": {"type": "object"},
             "daily_candidates": {"type": "object"},
             "deployment_env": {"type": "object"},
+            "agent_skill_templates": {"type": "object"},
             "docker_compose": {"type": "object"},
             "deployment_runbook": {"type": "object"},
             "deployment_handoff": {"type": "object"},

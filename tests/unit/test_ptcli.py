@@ -23215,6 +23215,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "queue" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_env" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "agent_skill_templates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "seedbox_bootstrap_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -23231,6 +23232,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "api_publicly_exposed" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "api_exposure_blocked" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "env_template_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "agent_skill_templates_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "docker_image_includes_ai_templates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "agent_skill_templates_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "dockerfile" in tool_by_name["deployment_check"]["response_contract"]["agent_skill_templates_fields"]
     assert "docker_compose_host_path_envs" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "deployment_env_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "copy_command" in tool_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
@@ -23238,6 +23243,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "next_step" in tool_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
     assert "deployment_final_report_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "recommended_call" in tool_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
+    assert "agent_skill_templates" in tool_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
     assert "seedbox_bootstrap_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "mkdir_commands" in tool_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
     assert "verification_requests" in tool_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
@@ -23638,6 +23644,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/goal/progress" in openapi["paths"]
     assert "/v1/retorrent/source-url/preflight" in openapi["paths"]
     assert "/v1/deployment/check" in openapi["paths"]
+    deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "agent_skill_templates" in deployment_schema["properties"]
     assert "/v1/readiness/bundle" in openapi["paths"]
     assert "/v1/sites" in openapi["paths"]
     assert "/v1/qbit/inspect" in openapi["paths"]
@@ -24579,6 +24587,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_config_final_report" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidate_config_final_report_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "smoke_checks" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
+        assert "agent_skill_templates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "agent_skill_templates_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "dockerfile" in tools_by_name["deployment_check"]["response_contract"]["agent_skill_templates_fields"]
+        assert "agent_skill_templates_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "agent_skill_templates" in tools_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
         assert "seedbox_live_post_submit_report" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "seedbox_live_post_submit_report_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "recommended_call" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_post_submit_report_fields"]
@@ -25888,6 +25901,7 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "ptcli-api:" in compose
     assert "ffmpeg" in dockerfile
     assert "mediainfo" in dockerfile
+    assert "COPY ai/ ai/" in dockerfile
     assert "ptcli-daily-schedule:" in compose
     assert 'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in compose
     assert "healthcheck:" in compose
@@ -25932,6 +25946,12 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
     for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
         directory.mkdir(parents=True)
     (tmp_path / ".env.ptcli.example").write_text(Path(".env.ptcli.example").read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "Dockerfile.ptcli").write_text(Path("Dockerfile.ptcli").read_text(encoding="utf-8"), encoding="utf-8")
+    static_manifest = json.dumps(ptcli_service.agent_manifest_payload(base_url="http://127.0.0.1:8080"), ensure_ascii=False, indent=2) + "\n"
+    for relative_path in ("ai/openclaw/ptcli.skill.json", "ai/hermes/ptcli.skill.json"):
+        skill_path = tmp_path / relative_path
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text(static_manifest, encoding="utf-8")
     (data_dir / "config.py").write_text(
         "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
         encoding="utf-8",
@@ -25993,6 +26013,13 @@ services:
     assert payload["deployment_env"]["env_present"] is False
     assert payload["deployment_env"]["copy_command"] == "cp .env.ptcli.example .env"
     assert payload["deployment_env"]["missing_keys"] == []
+    assert payload["agent_skill_templates"]["ready"] is True
+    assert payload["agent_skill_templates"]["delivery_mode"] == "api_manifest_primary_static_templates_packaged"
+    assert payload["agent_skill_templates"]["templates"]["openclaw"]["schema_version"] == "ptcli.agent_manifest.v1"
+    assert payload["agent_skill_templates"]["templates"]["hermes"]["schema_version"] == "ptcli.agent_manifest.v1"
+    assert payload["agent_skill_templates"]["dockerfile"]["copies_ai_templates"] is True
+    assert payload["agent_skill_templates"]["image_paths"]["openclaw"] == "/Upload-Assistant/ai/openclaw/ptcli.skill.json"
+    assert payload["agent_skill_templates"]["missing"] == []
     assert "PTCLI_API_TOKEN" in payload["deployment_env"]["required_keys"]
     assert "PTCLI_DOWNLOADS_HOST_PATH" in payload["deployment_env"]["required_keys"]
     assert "PTCLI_CONFIG_HOST_PATH" in payload["deployment_env"]["required_keys"]
@@ -26023,6 +26050,9 @@ services:
     assert payload["agent_summary"]["docker_compose_host_path_envs"] is True
     assert payload["agent_summary"]["env_template_ready"] is True
     assert payload["agent_summary"]["env_template_present"] is True
+    assert payload["agent_summary"]["agent_skill_templates_ready"] is True
+    assert payload["agent_summary"]["static_ai_templates_present"] is True
+    assert payload["agent_summary"]["docker_image_includes_ai_templates"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
     assert payload["deployment_handoff"]["kind"] == "ptcli.deployment_runtime_handoff"
     assert payload["deployment_handoff"]["ready"] is True
@@ -26034,6 +26064,8 @@ services:
     assert payload["deployment_handoff"]["api"]["auth_recommended"] is True
     assert payload["deployment_handoff"]["api"]["auth_ready"] is True
     assert payload["deployment_handoff"]["api"]["exposure_blocked"] is False
+    assert payload["deployment_handoff"]["agent_skill_templates"]["ready"] is True
+    assert payload["deployment_handoff"]["agent_skill_templates"]["dockerfile_copies_ai_templates"] is True
     assert payload["deployment_handoff"]["env"]["template_ready"] is True
     assert payload["deployment_handoff"]["env"]["copy_command"] == "cp .env.ptcli.example .env"
     assert payload["deployment_handoff"]["manual_retorrent"]["ready"] is True
@@ -26142,6 +26174,8 @@ services:
     assert final_report["api"]["auth_ready"] is True
     assert final_report["api"]["publicly_exposed"] is False
     assert final_report["api"]["exposure_blocked"] is False
+    assert final_report["agent_skill_templates"]["ready"] is True
+    assert final_report["agent_skill_templates"]["dockerfile_copies_ai_templates"] is True
     assert final_report["mounts"]["ready"] is True
     assert final_report["mounts"]["missing_count"] == 0
     assert final_report["runtime"]["material_tools_ready"] is True
@@ -26163,6 +26197,7 @@ services:
     assert payload["deployment_runbook"]["daily_candidate_trigger_handoff"] == trigger
     assert payload["deployment_runbook"]["daily_candidate_delivery_handoff"] == delivery
     assert payload["deployment_runbook"]["env"]["template_ready"] is True
+    assert payload["deployment_runbook"]["agent_skill_templates"]["ready"] is True
     runbook_steps = {step["name"]: step for step in payload["deployment_runbook"]["steps"]}
     assert runbook_steps["prepare_env"]["env_template"]["ready"] is True
     assert runbook_steps["build_and_start_api"]["command"].endswith("up -d --build ptcli-api")

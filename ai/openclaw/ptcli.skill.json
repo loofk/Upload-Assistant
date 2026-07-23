@@ -50675,6 +50675,7 @@
           "qbit",
           "daily_candidates",
           "deployment_env",
+          "agent_skill_templates",
           "docker_compose",
           "deployment_runbook",
           "deployment_handoff",
@@ -50713,7 +50714,25 @@
           "docker_compose_daily_ready",
           "docker_compose_host_path_envs",
           "env_template_ready",
-          "env_template_present"
+          "env_template_present",
+          "agent_skill_templates_ready",
+          "static_ai_templates_present",
+          "docker_image_includes_ai_templates"
+        ],
+        "agent_skill_templates_fields": [
+          "ready",
+          "status",
+          "delivery_mode",
+          "api_manifest_endpoints",
+          "templates",
+          "image_paths",
+          "dockerfile",
+          "missing",
+          "invalid",
+          "schema_mismatch",
+          "message",
+          "safety",
+          "next_actions"
         ],
         "runtime_tools_fields": [
           "ready",
@@ -50939,6 +50958,7 @@
           "deployment_status",
           "docker",
           "api",
+          "agent_skill_templates",
           "mounts",
           "env",
           "runtime",
