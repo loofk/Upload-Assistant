@@ -15463,25 +15463,53 @@ def test_manual_retorrent_job_exposes_qbit_rate_limit_mismatch_repair_handoff(mo
         "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
     }
     assert repair_plan["roles"][0]["repair_reason"] == "qbit_rate_limit_mismatch"
+    assert repair_plan["roles"][0]["hash"] == source_hash
     assert repair_plan["roles"][0]["observed_limits"]["download_limit"] == 10 * 1024 * 1024
+    assert repair_plan["roles"][0]["qbit_apply_limits_dry_run_request"] == {
+        "hash": source_hash,
+        "client": "default",
+        "role": "source",
+        "dry_run": True,
+        "tracker": "U2",
+        "download_limit": 20 * 1024 * 1024,
+    }
+    assert repair_plan["roles"][0]["qbit_apply_limits_execute_request"]["dry_run"] is False
     assert repair_plan["roles"][0]["recommended_call"]["dry_run_request"] == {
         "dry_run": True,
-        "qbit_download_limit": 20 * 1024 * 1024,
+        "hash": source_hash,
+        "client": "default",
+        "role": "source",
+        "tracker": "U2",
+        "download_limit": 20 * 1024 * 1024,
     }
+    assert repair_plan["roles"][0]["recommended_call"]["tool"] == "qbit_apply_limits"
     assert repair_plan["roles"][1]["recommended_call"]["execute_request"] == {
         "dry_run": False,
-        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+        "hash": uploaded_hash,
+        "client": "default",
+        "role": "uploaded",
+        "tracker": "MTEAM",
+        "upload_limit": 2 * 1024 * 1024,
     }
+    assert repair_plan["qbit_apply_limits_calls"][0]["dry_run_request"] == repair_plan["roles"][0]["qbit_apply_limits_dry_run_request"]
+    assert repair_plan["qbit_apply_limits_calls"][1]["execute_request"] == repair_plan["roles"][1]["qbit_apply_limits_execute_request"]
     assert repair_plan["repair_handoff"]["mismatch_roles"] == ["source", "uploaded"]
+    assert repair_plan["repair_handoff"]["qbit_apply_limits_calls"] == repair_plan["qbit_apply_limits_calls"]
+    assert repair_plan["repair_handoff"]["dry_run_call"]["tool"] == "qbit_apply_limits"
     assert repair_plan["repair_handoff"]["dry_run_call"]["mutates_state"] is False
+    assert repair_plan["repair_handoff"]["execute_call"]["tool"] == "qbit_apply_limits"
     assert repair_plan["repair_handoff"]["execute_call"]["mutates_state"] is True
-    assert repair_plan["repair_sequence"][0]["request"] == repair_plan["dry_run_request"]
-    assert repair_plan["repair_sequence"][1]["request"] == repair_plan["execute_request"]
-    assert repair_plan["repair_sequence"][2]["success_when"] == [
+    assert repair_plan["repair_sequence"][0]["tool"] == "qbit_apply_limits"
+    assert repair_plan["repair_sequence"][0]["request"] == repair_plan["qbit_apply_limits_calls"][0]["dry_run_request"]
+    assert repair_plan["repair_sequence"][1]["request"] == repair_plan["qbit_apply_limits_calls"][0]["execute_request"]
+    assert repair_plan["repair_sequence"][-1]["success_when"] == [
         "qbit_rate_limit_repair_plan.ready=true",
         "qbit_execution_gate.ready=true",
         "qbit_enforcement_summary.ready=true",
     ]
+    assert repair_plan["recommended_tool"] == "qbit_apply_limits"
+    assert repair_plan["recommended_endpoint"] == "/v1/qbit/limits"
+    assert repair_plan["recommended_request"] == repair_plan["qbit_apply_limits_calls"][0]["dry_run_request"]
     assert repair_plan["verification_call"]["endpoint"].endswith(f"/v1/jobs/{job['job_id']}/summary")
     assert store.summary(job["job_id"])["qbit_rate_limit_repair_plan"] == repair_plan
 
@@ -21490,8 +21518,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_rate_limit_repair_plan_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_rate_limit_repair_plan_fields"]
     assert "execute_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_rate_limit_repair_plan_fields"]
+    assert "qbit_apply_limits_calls" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_rate_limit_repair_plan_fields"]
     assert "qbit_rate_limit_repair_role_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "hash" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_rate_limit_repair_role_fields"]
+    assert "qbit_apply_limits_dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_rate_limit_repair_role_fields"]
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_rate_limit_repair_role_fields"]
+    assert "qbit_apply_limits_repair_call_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "policy_execution_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_execution_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_execution_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]

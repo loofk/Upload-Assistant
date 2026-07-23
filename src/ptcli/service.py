@@ -23751,7 +23751,7 @@ def _job_qbit_rate_limit_repair_plan(job: dict[str, Any], summary_payload: dict[
     gate = _job_qbit_execution_gate(job, summary_payload)
     if not isinstance(audit, dict) or not isinstance(gate, dict):
         return None
-    roles = [_qbit_rate_limit_repair_role(role, qbit_plan, audit, gate) for role in ("source", "uploaded")]
+    roles = [_qbit_rate_limit_repair_role(role, job, qbit_plan, audit, gate) for role in ("source", "uploaded")]
     repair_roles = [role for role in roles if role.get("needs_repair")]
     pending_roles = [str(role["role"]) for role in repair_roles if role.get("status") == "pending"]
     mismatch_roles = [str(role["role"]) for role in repair_roles if role.get("status") == "mismatch"]
@@ -23763,6 +23763,8 @@ def _job_qbit_rate_limit_repair_plan(job: dict[str, Any], summary_payload: dict[
     ready = gate.get("ready") is True
     action = _qbit_rate_limit_repair_action(ready, pending_roles, mismatch_roles, _string_list(gate.get("blockers")))
     verification_call = _qbit_rate_limit_repair_verification_call(job_id)
+    qbit_apply_limits_calls = _qbit_rate_limit_apply_calls(repair_roles)
+    preferred_call = _qbit_rate_limit_repair_preferred_call(ready, action, job_id, endpoint, dry_run_request, execute_request, verification_call, qbit_apply_limits_calls)
     repair_sequence = _qbit_rate_limit_repair_sequence(
         action=action,
         endpoint=endpoint,
@@ -23770,6 +23772,7 @@ def _job_qbit_rate_limit_repair_plan(job: dict[str, Any], summary_payload: dict[
         execute_request=execute_request,
         verification_call=verification_call,
         repair_roles=[str(role["role"]) for role in repair_roles],
+        qbit_apply_limits_calls=qbit_apply_limits_calls,
     )
     repair_handoff = _qbit_rate_limit_repair_handoff(
         action=action,
@@ -23781,6 +23784,7 @@ def _job_qbit_rate_limit_repair_plan(job: dict[str, Any], summary_payload: dict[
         pending_roles=pending_roles,
         mismatch_roles=mismatch_roles,
         request_patch=request_patch,
+        qbit_apply_limits_calls=qbit_apply_limits_calls,
     )
     return {
         "kind": "ptcli.qbit_rate_limit_repair_plan",
@@ -23795,20 +23799,22 @@ def _job_qbit_rate_limit_repair_plan(job: dict[str, Any], summary_payload: dict[
         "request_patch": request_patch,
         "dry_run_request": dry_run_request if repair_roles else None,
         "execute_request": execute_request if repair_roles else None,
+        "qbit_apply_limits_calls": qbit_apply_limits_calls,
         "repair_handoff": repair_handoff,
         "repair_sequence": repair_sequence,
         "verification_call": verification_call,
-        "recommended_tool": "get_job_summary" if ready else "resume_job",
-        "recommended_endpoint": f"/v1/jobs/{job_id}/summary" if ready and job_id else endpoint,
-        "recommended_method": "GET" if ready else "POST",
-        "recommended_request": None if ready else dry_run_request,
+        "recommended_tool": preferred_call.get("tool"),
+        "recommended_endpoint": preferred_call.get("endpoint"),
+        "recommended_method": preferred_call.get("method"),
+        "recommended_request": preferred_call.get("request"),
         "recommended_call": {
-            "tool": "get_job_summary" if ready else "resume_job",
-            "endpoint": f"/v1/jobs/{job_id}/summary" if ready and job_id else endpoint,
-            "method": "GET" if ready else "POST",
-            "request": None if ready else dry_run_request,
+            "tool": preferred_call.get("tool"),
+            "endpoint": preferred_call.get("endpoint"),
+            "method": preferred_call.get("method"),
+            "request": preferred_call.get("request"),
             "dry_run_request": dry_run_request if repair_roles else None,
             "execute_request": execute_request if repair_roles else None,
+            "qbit_apply_limits_calls": qbit_apply_limits_calls,
             "verification_call": verification_call,
             "safe_to_call_now": ready or bool(repair_roles),
             "requires_user_review": bool(repair_roles),
@@ -23832,7 +23838,7 @@ def _job_qbit_rate_limit_repair_plan(job: dict[str, Any], summary_payload: dict[
     }
 
 
-def _qbit_rate_limit_repair_role(role: str, plan: dict[str, Any], audit: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
+def _qbit_rate_limit_repair_role(role: str, job: dict[str, Any], plan: dict[str, Any], audit: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
     role_plan = plan.get(role) if isinstance(plan.get(role), dict) else {}
     role_audit = audit.get(role) if isinstance(audit.get(role), dict) else {}
     role_gate = gate.get(role) if isinstance(gate.get(role), dict) else {}
@@ -23842,12 +23848,16 @@ def _qbit_rate_limit_repair_role(role: str, plan: dict[str, Any], audit: dict[st
     dry_run_request = {"dry_run": True, **request_patch} if request_patch else {"dry_run": True}
     execute_request = {"dry_run": False, **request_patch} if request_patch else {"dry_run": False}
     needs_repair = bool(expected) and status in {"pending", "mismatch"}
+    torrent_hash = _qbit_normalize_hash(role_audit.get("hash") or role_gate.get("hash"))
+    qbit_apply_dry_run_request = _qbit_rate_limit_apply_request(job, role, torrent_hash, expected, dry_run=True)
+    qbit_apply_execute_request = _qbit_rate_limit_apply_request(job, role, torrent_hash, expected, dry_run=False)
     return {
         "role": role,
         "ready": role_audit.get("ready") is True,
         "status": status,
         "needs_repair": needs_repair,
         "repair_reason": _qbit_rate_limit_repair_role_reason(status),
+        "hash": torrent_hash,
         "category": role_plan.get("category"),
         "tags": role_plan.get("tags"),
         "expected_limits": expected,
@@ -23855,11 +23865,14 @@ def _qbit_rate_limit_repair_role(role: str, plan: dict[str, Any], audit: dict[st
         "request_patch": request_patch,
         "dry_run_request": dry_run_request if needs_repair else None,
         "execute_request": execute_request if needs_repair else None,
-        "recommended_call": _qbit_rate_limit_repair_role_call(role, status, request_patch) if needs_repair else None,
+        "qbit_apply_limits_dry_run_request": qbit_apply_dry_run_request if status == "mismatch" and needs_repair else None,
+        "qbit_apply_limits_execute_request": qbit_apply_execute_request if status == "mismatch" and needs_repair else None,
+        "recommended_call": _qbit_rate_limit_repair_role_call(role, status, request_patch, qbit_apply_dry_run_request, qbit_apply_execute_request) if needs_repair else None,
         "upload_limit_source": role_plan.get("upload_limit_source"),
         "download_limit_source": role_plan.get("download_limit_source"),
         "requires_injection_evidence": role_gate.get("requires_injection_evidence") is True,
         "requires_rate_limit_repair": role_gate.get("requires_rate_limit_repair") is True,
+        "can_apply_limits_directly": status == "mismatch" and qbit_apply_dry_run_request is not None,
         "blockers": _string_list(role_audit.get("blockers")) or _string_list(role_gate.get("blockers")),
     }
 
@@ -23874,7 +23887,28 @@ def _qbit_rate_limit_repair_role_reason(status: str) -> str:
     return "qbit_rate_limit_not_requested"
 
 
-def _qbit_rate_limit_repair_role_call(role: str, status: str, request_patch: dict[str, Any]) -> dict[str, Any]:
+def _qbit_rate_limit_repair_role_call(
+    role: str,
+    status: str,
+    request_patch: dict[str, Any],
+    qbit_apply_dry_run_request: dict[str, Any] | None = None,
+    qbit_apply_execute_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if status == "mismatch" and qbit_apply_dry_run_request:
+        return {
+            "tool": "qbit_apply_limits",
+            "endpoint": "/v1/qbit/limits",
+            "method": "POST",
+            "role": role,
+            "request": qbit_apply_dry_run_request,
+            "dry_run_request": qbit_apply_dry_run_request,
+            "execute_request": qbit_apply_execute_request,
+            "safe_to_call_now": True,
+            "requires_user_review": True,
+            "mutates_state": False,
+            "execute_mutates_state": True,
+            "reason": _qbit_rate_limit_repair_role_reason(status),
+        }
     dry_run_request = {"dry_run": True, **request_patch} if request_patch else {"dry_run": True}
     execute_request = {"dry_run": False, **request_patch} if request_patch else {"dry_run": False}
     return {
@@ -23891,6 +23925,87 @@ def _qbit_rate_limit_repair_role_call(role: str, status: str, request_patch: dic
         "execute_mutates_state": True,
         "reason": _qbit_rate_limit_repair_role_reason(status),
     }
+
+
+def _qbit_rate_limit_apply_request(job: dict[str, Any], role: str, torrent_hash: str | None, expected: dict[str, Any], *, dry_run: bool) -> dict[str, Any] | None:
+    if not torrent_hash or not expected:
+        return None
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    source_ref = request.get("source_reference") if isinstance(request.get("source_reference"), dict) else job.get("source_reference") if isinstance(job.get("source_reference"), dict) else {}
+    target_trackers = _target_trackers_from_request(request)
+    tracker = source_ref.get("tracker") if role == "source" else target_trackers[0] if target_trackers else None
+    payload: dict[str, Any] = {
+        "hash": torrent_hash,
+        "client": request.get("client") or "default",
+        "role": role,
+        "dry_run": dry_run,
+    }
+    if tracker:
+        payload["tracker"] = str(tracker).upper()
+    if expected.get("upload_limit") is not None:
+        payload["upload_limit"] = expected["upload_limit"]
+    if expected.get("download_limit") is not None:
+        payload["download_limit"] = expected["download_limit"]
+    return payload
+
+
+def _target_trackers_from_request(request: dict[str, Any]) -> list[str]:
+    target_value = request.get("target_trackers") or request.get("target") or request.get("target_tracker")
+    if isinstance(target_value, str):
+        return parse_tracker_list(target_value)
+    if isinstance(target_value, list):
+        trackers: list[str] = []
+        for item in target_value:
+            if isinstance(item, str):
+                trackers.extend(parse_tracker_list(item))
+        return list(dict.fromkeys(trackers))
+    return []
+
+
+def _qbit_rate_limit_apply_calls(repair_roles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for role in repair_roles:
+        if role.get("status") != "mismatch":
+            continue
+        dry_run_request = role.get("qbit_apply_limits_dry_run_request")
+        execute_request = role.get("qbit_apply_limits_execute_request")
+        if not isinstance(dry_run_request, dict):
+            continue
+        calls.append(
+            {
+                "role": role.get("role"),
+                "hash": role.get("hash"),
+                "tool": "qbit_apply_limits",
+                "endpoint": "/v1/qbit/limits",
+                "method": "POST",
+                "dry_run_request": dry_run_request,
+                "execute_request": execute_request if isinstance(execute_request, dict) else None,
+                "safe_to_call_now": True,
+                "requires_user_review": True,
+                "mutates_state": False,
+                "execute_mutates_qbittorrent": True,
+                "reason": "qbit_rate_limit_mismatch",
+            }
+        )
+    return calls
+
+
+def _qbit_rate_limit_repair_preferred_call(
+    ready: bool,
+    action: str,
+    job_id: Any,
+    endpoint: str,
+    dry_run_request: dict[str, Any],
+    execute_request: dict[str, Any],
+    verification_call: dict[str, Any],
+    qbit_apply_limits_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if ready:
+        return {"tool": "get_job_summary", "endpoint": f"/v1/jobs/{job_id}/summary" if job_id else endpoint, "method": "GET", "request": None}
+    if action == "repair_rate_limits" and qbit_apply_limits_calls:
+        first_call = qbit_apply_limits_calls[0]
+        return {"tool": "qbit_apply_limits", "endpoint": "/v1/qbit/limits", "method": "POST", "request": first_call.get("dry_run_request"), "execute_request": first_call.get("execute_request"), "verification_call": verification_call}
+    return {"tool": "resume_job", "endpoint": endpoint, "method": "POST", "request": dry_run_request, "execute_request": execute_request, "verification_call": verification_call}
 
 
 def _qbit_rate_limit_repair_role_patch(role: str, role_plan: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
@@ -23938,11 +24053,47 @@ def _qbit_rate_limit_repair_sequence(
     execute_request: dict[str, Any],
     verification_call: dict[str, Any],
     repair_roles: list[str],
+    qbit_apply_limits_calls: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if action == "read_summary":
         return [{"step": "verify_summary", **verification_call, "safe_to_call_now": True, "requires_user_review": False}]
     if not repair_roles:
         return [{"step": "inspect", **verification_call, "safe_to_call_now": True, "requires_user_review": False}]
+    if action == "repair_rate_limits" and qbit_apply_limits_calls:
+        steps: list[dict[str, Any]] = []
+        for index, call in enumerate(qbit_apply_limits_calls, start=1):
+            steps.append(
+                {
+                    "step": "dry_run_qbit_apply_limits",
+                    "tool": "qbit_apply_limits",
+                    "endpoint": "/v1/qbit/limits",
+                    "method": "POST",
+                    "request": call.get("dry_run_request"),
+                    "role": call.get("role"),
+                    "roles": [call.get("role")],
+                    "safe_to_call_now": True,
+                    "requires_user_review": False,
+                    "mutates_state": False,
+                }
+            )
+            steps.append(
+                {
+                    "step": "execute_qbit_apply_limits",
+                    "tool": "qbit_apply_limits",
+                    "endpoint": "/v1/qbit/limits",
+                    "method": "POST",
+                    "request": call.get("execute_request"),
+                    "role": call.get("role"),
+                    "roles": [call.get("role")],
+                    "safe_to_call_now": False,
+                    "requires_user_review": True,
+                    "mutates_state": True,
+                }
+            )
+            steps[-2]["index"] = index * 2 - 1
+            steps[-1]["index"] = index * 2
+        steps.append({"step": "verify_repair", **verification_call, "safe_to_call_now": True, "requires_user_review": False})
+        return steps
     return [
         {
             "step": "dry_run_resume",
@@ -23981,7 +24132,9 @@ def _qbit_rate_limit_repair_handoff(
     pending_roles: list[str],
     mismatch_roles: list[str],
     request_patch: dict[str, Any],
+    qbit_apply_limits_calls: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    first_qbit_call = qbit_apply_limits_calls[0] if qbit_apply_limits_calls else {}
     return {
         "ready": not repair_roles,
         "action": action,
@@ -23989,11 +24142,34 @@ def _qbit_rate_limit_repair_handoff(
         "pending_roles": pending_roles,
         "mismatch_roles": mismatch_roles,
         "request_patch": request_patch,
-        "dry_run_call": {
-            "tool": "resume_job",
-            "endpoint": endpoint,
+        "qbit_apply_limits_calls": qbit_apply_limits_calls,
+        "qbit_apply_limits_dry_run_call": {
+            "tool": "qbit_apply_limits",
+            "endpoint": "/v1/qbit/limits",
             "method": "POST",
-            "request": dry_run_request,
+            "request": first_qbit_call.get("dry_run_request"),
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "mutates_state": False,
+        }
+        if qbit_apply_limits_calls
+        else None,
+        "qbit_apply_limits_execute_call": {
+            "tool": "qbit_apply_limits",
+            "endpoint": "/v1/qbit/limits",
+            "method": "POST",
+            "request": first_qbit_call.get("execute_request"),
+            "safe_to_call_now": False,
+            "requires_user_review": True,
+            "mutates_state": True,
+        }
+        if qbit_apply_limits_calls
+        else None,
+        "dry_run_call": {
+            "tool": "qbit_apply_limits" if qbit_apply_limits_calls and not pending_roles else "resume_job",
+            "endpoint": "/v1/qbit/limits" if qbit_apply_limits_calls and not pending_roles else endpoint,
+            "method": "POST",
+            "request": first_qbit_call.get("dry_run_request") if qbit_apply_limits_calls and not pending_roles else dry_run_request,
             "safe_to_call_now": bool(repair_roles),
             "requires_user_review": False,
             "mutates_state": False,
@@ -24001,10 +24177,10 @@ def _qbit_rate_limit_repair_handoff(
         if repair_roles
         else None,
         "execute_call": {
-            "tool": "resume_job",
-            "endpoint": endpoint,
+            "tool": "qbit_apply_limits" if qbit_apply_limits_calls and not pending_roles else "resume_job",
+            "endpoint": "/v1/qbit/limits" if qbit_apply_limits_calls and not pending_roles else endpoint,
             "method": "POST",
-            "request": execute_request,
+            "request": first_qbit_call.get("execute_request") if qbit_apply_limits_calls and not pending_roles else execute_request,
             "safe_to_call_now": False,
             "requires_user_review": True,
             "mutates_state": True,
@@ -27580,6 +27756,23 @@ def _qbit_limit_uploaded_result(payloads: list[dict[str, Any]]) -> dict[str, Any
     return None
 
 
+def _qbit_result_hash(result: Any) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    return _qbit_normalize_hash(result.get("hash") or result.get("torrent_hash") or result.get("torrenthash") or result.get("infohash"))
+
+
+def _qbit_normalize_hash(value: Any) -> str | None:
+    if value is None:
+        return None
+    torrent_hash = str(value).strip().lower()
+    if len(torrent_hash) not in {32, 40}:
+        return None
+    if any(char not in "0123456789abcdef" for char in torrent_hash):
+        return None
+    return torrent_hash
+
+
 def _stage_from_payload(payload: dict[str, Any], name: str) -> dict[str, Any] | None:
     stages = payload.get("stages")
     if not isinstance(stages, list):
@@ -27610,6 +27803,7 @@ def _qbit_limit_role_audit(role: str, plan: Any, result: dict[str, Any] | None) 
             "ready": True,
             "expected": {},
             "observed": None,
+            "hash": _qbit_result_hash(result),
             "evidence_present": isinstance(result, dict),
             "blockers": [],
         }
@@ -27621,6 +27815,7 @@ def _qbit_limit_role_audit(role: str, plan: Any, result: dict[str, Any] | None) 
             "ready": False,
             "expected": expected,
             "observed": None,
+            "hash": None,
             "evidence_present": False,
             "blockers": blockers,
         }
@@ -27642,6 +27837,7 @@ def _qbit_limit_role_audit(role: str, plan: Any, result: dict[str, Any] | None) 
         "ready": applied,
         "expected": expected,
         "observed": observed,
+        "hash": _qbit_result_hash(result),
         "evidence_present": True,
         "blockers": blockers,
     }
@@ -35832,8 +36028,9 @@ def _job_response_contract() -> dict[str, Any]:
         "qbit_handoff_fields": ["ready", "source", "uploaded", "enforcement_handoff", "policy_defaults", "blockers", "next_actions"],
         "qbit_enforcement_handoff_fields": ["ready", "status", "roles", "pending_roles", "mismatch_roles", "blockers", "next_step", "continue_when", "stop_when"],
         "qbit_enforcement_summary_fields": ["ready", "status", "client", "expected_role_count", "applied_role_count", "pending_role_count", "mismatch_role_count", "expected_roles", "applied_roles", "pending_roles", "mismatch_roles", "roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-        "qbit_rate_limit_repair_plan_fields": ["ready", "action", "status", "client", "roles", "repair_roles", "pending_roles", "mismatch_roles", "request_patch", "dry_run_request", "execute_request", "repair_handoff", "repair_sequence", "verification_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-        "qbit_rate_limit_repair_role_fields": ["role", "ready", "status", "needs_repair", "repair_reason", "category", "tags", "expected_limits", "observed_limits", "request_patch", "dry_run_request", "execute_request", "recommended_call", "upload_limit_source", "download_limit_source", "requires_injection_evidence", "requires_rate_limit_repair", "blockers"],
+        "qbit_rate_limit_repair_plan_fields": ["ready", "action", "status", "client", "roles", "repair_roles", "pending_roles", "mismatch_roles", "request_patch", "dry_run_request", "execute_request", "qbit_apply_limits_calls", "repair_handoff", "repair_sequence", "verification_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "qbit_rate_limit_repair_role_fields": ["role", "ready", "status", "needs_repair", "repair_reason", "hash", "category", "tags", "expected_limits", "observed_limits", "request_patch", "dry_run_request", "execute_request", "qbit_apply_limits_dry_run_request", "qbit_apply_limits_execute_request", "recommended_call", "upload_limit_source", "download_limit_source", "requires_injection_evidence", "requires_rate_limit_repair", "can_apply_limits_directly", "blockers"],
+        "qbit_apply_limits_repair_call_fields": ["role", "hash", "tool", "endpoint", "method", "dry_run_request", "execute_request", "safe_to_call_now", "requires_user_review", "mutates_state", "execute_mutates_qbittorrent", "reason"],
         "qbit_enforcement_role_fields": ["role", "ready", "status", "category", "tags", "expected_limits", "observed_limits", "upload_limit_source", "download_limit_source", "evidence_present", "requires_injection_evidence", "requires_rate_limit_repair", "blockers", "requested_options"],
         "uploaded_seeding_evidence_fields": ["ready", "status", "uploaded_torrent_id", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_torrent_path", "uploaded_wait_complete", "injection_verified", "qbit", "required", "missing", "read_fields", "complete_when", "stop_when"],
         "policy_qbit_defaults_fields": ["applied", "sources", "policy_values", "request_overrides", "application_report", "errors"],
