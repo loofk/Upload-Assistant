@@ -44310,6 +44310,7 @@
           "policy_config_apply_handoff",
           "policy_handoff",
           "next_step",
+          "next_call",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -44980,6 +44981,27 @@
           "recommended_request",
           "blockers",
           "rule_obligations"
+        ],
+        "next_call_fields": [
+          "ready",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "safe_to_call_now",
+          "requires_user_review",
+          "mutates_state",
+          "uploads",
+          "contacts_trackers",
+          "contacts_qbittorrent",
+          "reason",
+          "read_before_call",
+          "after_call",
+          "approval",
+          "safety",
+          "blockers",
+          "next_actions"
         ]
       },
       "safety": {

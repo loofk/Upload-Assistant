@@ -4586,6 +4586,8 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
     site_policy_profiles = {str(item.get("tracker")): item.get("policy_profile") for item in matrix if item.get("tracker")}
     site_policy_execution_profiles = {str(item.get("tracker")): item.get("execution_profile") for item in matrix if item.get("tracker")}
+    blockers = _string_list(report.get("blockers")) + _string_list(policy_setup_summary.get("blockers"))
+    next_call = _site_policy_next_call(overall_ready, context, policy_handoff, policy_repair_gate, policy_config_apply_handoff, config_update_plan, blockers)
     return {
         "kind": "ptcli.site_policies",
         "status": "ok" if overall_ready else "blocked",
@@ -4620,14 +4622,122 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_config_apply_handoff": policy_config_apply_handoff,
         "policy_handoff": policy_handoff,
         "next_step": policy_handoff.get("next_step"),
+        "next_call": next_call,
         "recommended_tool": policy_handoff.get("recommended_tool"),
         "recommended_endpoint": policy_handoff.get("recommended_endpoint"),
         "recommended_request": policy_handoff.get("recommended_request"),
-        "blockers": _string_list(report.get("blockers")) + _string_list(policy_setup_summary.get("blockers")),
+        "blockers": blockers,
         "next_actions": _string_list(report.get("next_actions")) or _string_list(policy_setup_summary.get("next_actions")),
         "agent_summary": _site_policy_agent_summary(matrix, report, policy_gap_summary, execution_readiness, policy_execution_summary),
         "report": report,
     }
+
+
+def _site_policy_next_call(
+    overall_ready: bool,
+    context: dict[str, Any],
+    policy_handoff: dict[str, Any],
+    policy_repair_gate: dict[str, Any],
+    policy_config_apply_handoff: dict[str, Any],
+    config_update_plan: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    rerun_request = _site_policy_rerun_request(context, {"accept_rules": bool(context.get("accept_rules"))})
+    if overall_ready:
+        request = _site_policy_rerun_request(context, {"accept_rules": bool(context.get("accept_rules"))})
+        action = "verify_readiness"
+        tool: str | None = "readiness_bundle"
+        endpoint: str | None = "/v1/readiness/bundle"
+        method: str | None = "POST"
+        safe_to_call_now = True
+        requires_user_review = False
+        reason = "site_policy_ready_verify_readiness"
+        after_call = {
+            "read": ["readiness_bundle.ready", "readiness_bundle.next_call", "readiness_bundle.live_readiness", "readiness_bundle.blockers"],
+            "continue_when": "readiness_bundle.ready=true and readiness_bundle.next_call is reviewed before any live action",
+            "stop_when": ["readiness_bundle.next_call.requires_user_review=true and user approval is missing", "readiness_bundle.blockers is non-empty"],
+        }
+    else:
+        next_step = policy_repair_gate.get("next_step") if isinstance(policy_repair_gate.get("next_step"), dict) else policy_handoff.get("next_step")
+        next_step = next_step if isinstance(next_step, dict) else {}
+        tool = str(next_step.get("tool") or policy_repair_gate.get("recommended_tool") or policy_config_apply_handoff.get("recommended_tool") or policy_handoff.get("recommended_tool") or "site_policies")
+        endpoint = next_step.get("endpoint") or policy_repair_gate.get("recommended_endpoint") or policy_config_apply_handoff.get("recommended_endpoint") or policy_handoff.get("recommended_endpoint")
+        method = next_step.get("method") or ("POST" if endpoint else None)
+        request = next_step.get("request") or policy_repair_gate.get("recommended_request") or policy_config_apply_handoff.get("recommended_request") or policy_handoff.get("recommended_request")
+        action = "manual_rule_review" if tool == "site_policy_rule_review" else "manual_config_edit" if tool == "edit_config" else "repair_policy"
+        safe_to_call_now = tool in {"site_policies"}
+        requires_user_review = True
+        reason = "site_policy_not_ready_review_rules" if tool == "site_policy_rule_review" else "site_policy_not_ready_edit_config"
+        after_call = {
+            "tool": "site_policies",
+            "endpoint": "/v1/site-policies",
+            "method": "POST",
+            "request": rerun_request,
+            "read": ["site_policies.next_call", "site_policies.policy_repair_gate", "site_policies.policy_config_apply_handoff", "site_policies.blockers"],
+            "continue_when": "site_policies.policy_repair_gate.ready=true and site_policies.next_call.action=verify_readiness",
+            "stop_when": [
+                "rules_reviewed is not true",
+                "rule_review_fingerprint is missing or placeholder",
+                "SITE_POLICIES config has not been manually edited",
+                "site_policies.blockers is non-empty",
+            ],
+        }
+    return {
+        "kind": "ptcli.site_policy_next_call",
+        "ready": bool(tool and (overall_ready or tool in {"site_policy_rule_review", "site_policies", "edit_config"})),
+        "action": action,
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method,
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "mutates_state": tool == "edit_config",
+        "uploads": False,
+        "contacts_trackers": False,
+        "contacts_qbittorrent": False,
+        "reason": reason,
+        "read_before_call": [
+            "next_call",
+            "policy_repair_gate",
+            "policy_config_apply_handoff",
+            "policy_execution_handoff",
+            "config_update_plan",
+            "rule_obligations",
+            "blockers",
+        ],
+        "after_call": after_call,
+        "approval": {
+            "requires_accept_rules": True,
+            "requires_manual_rule_review": not overall_ready,
+            "requires_config_edit": tool == "edit_config",
+            "accept_rules_does_not_replace_manual_rule_review": True,
+            "confirm_upload_not_used_by_site_policies": True,
+        },
+        "safety": {
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "does_not_upload": True,
+            "does_not_auto_edit_config": True,
+            "does_not_generate_rule_review_fingerprint_without_user_evidence": True,
+            "preserve_stricter_configured_limits": True,
+            "config_patch_safe_to_auto_apply": bool(config_update_plan.get("safe_to_auto_apply")),
+        },
+        "blockers": blockers,
+        "next_actions": _site_policy_next_call_actions(overall_ready, tool, blockers),
+    }
+
+
+def _site_policy_next_call_actions(overall_ready: bool, tool: str | None, blockers: list[str]) -> list[str]:
+    if overall_ready:
+        return ["Call next_call.endpoint to run readiness_bundle, then follow readiness_bundle.next_call before any live tracker or qBittorrent action."]
+    if tool == "site_policy_rule_review":
+        return ["Manually read each tracker rules page, submit rule-review evidence through next_call.request, copy the returned patch into config, then rerun site_policies."]
+    if tool == "edit_config":
+        return ["Copy policy_config_apply_handoff.preferred_patch into PTCLI.SITE_POLICIES after manual rule review, then rerun site_policies with next_call.after_call.request."]
+    if blockers:
+        return ["Resolve site policy blockers, then rerun site_policies."]
+    return ["Inspect site_policies.next_call before continuing."]
 
 
 def site_policy_rule_review_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -33681,7 +33791,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -33737,6 +33847,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_config_repair_handoff_fields": ["ready", "status", "action", "accepted_rules", "config_path", "preferred_shape", "preferred_patch", "apply_order", "manual_review", "edit_config", "rerun", "tracker_items", "read_order", "complete_when", "stop_when", "safety", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "policy_config_apply_handoff_fields": ["ready", "status", "action", "config_path", "preferred_shape", "preferred_patch", "structured_patch", "flat_patch", "apply_order", "manual_review", "edit_config", "merge_sources", "patch_paths", "verification", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "config_update_plan", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "rule_obligations"],
+                "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -36325,6 +36436,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_config_apply_handoff": {"type": "object"},
             "policy_handoff": {"type": "object"},
             "next_step": {"type": "object"},
+            "next_call": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
             "recommended_request": {"type": ["object", "null"]},

@@ -19497,6 +19497,21 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_handoff"]["next_step"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_tool"] == "readiness_bundle"
     assert payload["recommended_endpoint"] == "/v1/readiness/bundle"
+    next_call = payload["next_call"]
+    assert next_call["kind"] == "ptcli.site_policy_next_call"
+    assert next_call["ready"] is True
+    assert next_call["action"] == "verify_readiness"
+    assert next_call["tool"] == "readiness_bundle"
+    assert next_call["endpoint"] == "/v1/readiness/bundle"
+    assert next_call["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert next_call["safe_to_call_now"] is True
+    assert next_call["requires_user_review"] is False
+    assert next_call["mutates_state"] is False
+    assert next_call["uploads"] is False
+    assert next_call["contacts_trackers"] is False
+    assert next_call["contacts_qbittorrent"] is False
+    assert next_call["approval"]["accept_rules_does_not_replace_manual_rule_review"] is True
+    assert next_call["safety"]["does_not_auto_edit_config"] is True
 
 
 def test_service_site_policies_config_audit_reports_structured_shape(monkeypatch) -> None:
@@ -20598,6 +20613,22 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_handoff"]["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_tool"] == "edit_config"
     assert payload["recommended_request"] == payload["policy_handoff"]["next_step"]["request"]
+    next_call = payload["next_call"]
+    assert next_call["kind"] == "ptcli.site_policy_next_call"
+    assert next_call["ready"] is True
+    assert next_call["action"] == "manual_rule_review"
+    assert next_call["tool"] == "site_policy_rule_review"
+    assert next_call["endpoint"] == "/v1/site-policies/rule-review"
+    assert next_call["request"] == payload["policy_repair_gate"]["recommended_request"]
+    assert next_call["safe_to_call_now"] is False
+    assert next_call["requires_user_review"] is True
+    assert next_call["mutates_state"] is False
+    assert next_call["uploads"] is False
+    assert next_call["contacts_trackers"] is False
+    assert next_call["contacts_qbittorrent"] is False
+    assert next_call["after_call"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert next_call["approval"]["requires_manual_rule_review"] is True
+    assert next_call["safety"]["does_not_generate_rule_review_fingerprint_without_user_evidence"] is True
 
 
 def test_service_site_policies_blocks_placeholder_rule_review_fingerprint(monkeypatch) -> None:
@@ -23463,6 +23494,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "client_fields" in tools_by_name["site_policies"]["response_contract"]["policy_enforcement_qbit_fields"]
         assert "policy_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "next_call" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "blocked_trackers" in tools_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]
         assert "policy_execution_summary_fields" in tools_by_name["site_policies"]["response_contract"]
@@ -23488,6 +23520,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
         assert "recommended_tool" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
         assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
+        assert "next_call_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["site_policies"]["response_contract"]["next_call_fields"]
+        assert "requires_user_review" in tools_by_name["site_policies"]["response_contract"]["next_call_fields"]
+        assert "contacts_qbittorrent" in tools_by_name["site_policies"]["response_contract"]["next_call_fields"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["source_url_check_and_submit"]["path"] == "/v1/jobs/retorrent/from-url/check-and-submit"
         assert "check_and_submit_gate" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
