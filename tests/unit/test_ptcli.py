@@ -15671,6 +15671,42 @@ def test_source_url_retorrent_job_handoff_uploads_existing_target_package(monkey
     assert job["recovery_handoff"]["recommended_request"] == request
 
 
+def test_manual_remaining_sequence_uses_target_materials_report_for_upload_request() -> None:
+    target_request = {
+        "package_dir": "/tmp/target/U2-60635-to-MTEAM",
+        "torrent_file": "/tmp/exported/mteam-safe.torrent",
+        "write_payload": True,
+    }
+    sequence = ptcli_service._manual_retorrent_remaining_sequence_from_reports(
+        {"job_id": "abc123", "kind": "ptcli.retorrent", "status": "blocked", "request": {"mode": "manual_retorrent", "accept_rules": True, "confirm_upload": True}},
+        policy_report={"ready_for_live": True, "blockers": []},
+        material_report={"ready_for_target_upload": True, "blockers": []},
+        material_chain={"ready_for_target_package": True, "ready_for_target_upload": True, "blockers": []},
+        target_package={"ready": True, "target_upload_request": target_request, "blockers": []},
+        target_materials_report={
+            "kind": "ptcli.target_materials_final_report",
+            "ready_for_target_upload_preflight": True,
+            "ready_for_live_upload_attempt": False,
+            "target_upload": {"target_upload_request": target_request},
+            "blockers": [],
+        },
+        target_upload=None,
+        live_report=None,
+        duplicate_check={"searched": True, "exists": False},
+        missing_confirmations=[],
+        fallback_next_step={"tool": "get_job_summary", "endpoint": "/v1/jobs/abc123/summary", "method": "GET", "request": {"job_id": "abc123"}},
+    )
+
+    assert sequence["action"] == "target_upload_closure"
+    assert sequence["next_step"]["tool"] == "target_upload_job"
+    assert sequence["next_step"]["request"] == target_request
+    assert sequence["next_step"]["safe_to_call_now"] is True
+    assert sequence["target_materials"]["ready_for_target_upload_preflight"] is True
+    assert sequence["target_materials"]["target_upload_request"] == target_request
+    assert "target_materials_final_report.ready_for_target_upload_preflight" in sequence["steps"][3]["read"]
+    assert "target_materials_final_report" in sequence["read_order"]
+
+
 class _NonClosingBytesIO(io.BytesIO):
     def close(self) -> None:
         self.flush()
@@ -20161,6 +20197,8 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
     assert [step["step"] for step in sequence["steps"]] == ["duplicate_gate", "poll_job", "resolve_materials", "prepare_target_package", "target_upload_closure", "final_summary"]
     assert "material_chain_handoff.recommended_call" in sequence["steps"][1]["read"]
     assert sequence["steps"][2]["direct_call_ref"] == "manual_retorrent_sequence.material_chain.next_call"
+    assert "target_materials_final_report.ready_for_target_upload_preflight" in sequence["steps"][3]["read"]
+    assert "target_materials_final_report.target_upload.target_upload_request" in sequence["steps"][3]["read"]
     assert sequence["steps"][4]["tool"] == "target_upload_job"
     assert "uploaded_seeding_ready=true" in sequence["steps"][4]["continue_when"]
     assert sequence["steps"][5]["endpoint"] == "/v1/jobs/abc123/summary"
@@ -21177,6 +21215,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_prepare_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_evidence_summary" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -21186,6 +21225,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_prepare_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_evidence_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -21195,6 +21235,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_prepare_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_chain_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "manual_retorrent_remaining_sequence" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -21215,6 +21256,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_prepare_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "target_materials_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_request_template" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
@@ -22797,6 +22839,8 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["steps"][8]["tool"] == "target_package_prepare_job"
     assert "target_package_handoff.package_dir" in ready["steps"][8]["read"]
     assert "target_package_handoff.target_upload_request" in ready["steps"][8]["read"]
+    assert "target_materials_final_report.ready_for_target_upload_preflight" in ready["steps"][8]["read"]
+    assert "target_materials_final_report.target_upload.target_upload_request" in ready["steps"][8]["read"]
     assert ready["steps"][9]["tool"] == "target_upload_job"
     assert "target_upload_handoff.uploaded_seeding_ready" in ready["steps"][9]["read"]
     assert ready["steps"][10]["complete_when"] == "live_validation_completion_audit.report_allowed=true"
@@ -22924,6 +22968,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["runbook"][8]["step"] == "prepare_target_package"
     assert source_url_workflow["runbook"][8]["tool"] == "target_package_prepare_job"
     assert "target_package_handoff.next_step" in source_url_workflow["runbook"][8]["read"]
+    assert "target_materials_final_report.ready_for_target_upload_preflight" in source_url_workflow["runbook"][8]["read"]
+    assert "target_materials_final_report.target_upload.target_upload_request" in source_url_workflow["runbook"][8]["read"]
     assert source_url_workflow["runbook"][9]["step"] == "target_upload_closure"
     assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
     assert "target_upload_handoff.summary_file" in source_url_workflow["runbook"][9]["read"]
@@ -23289,6 +23335,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "materials_prepare_handoff.next_step" in source_url_workflow["runbook"][7]["read"]
         assert source_url_workflow["runbook"][8]["tool"] == "target_package_prepare_job"
         assert "target_package_handoff.next_step" in source_url_workflow["runbook"][8]["read"]
+        assert "target_materials_final_report.ready_for_target_upload_preflight" in source_url_workflow["runbook"][8]["read"]
+        assert "target_materials_final_report.target_upload.target_upload_request" in source_url_workflow["runbook"][8]["read"]
         assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
         assert "target_upload_handoff.uploaded_seeding_ready" in source_url_workflow["runbook"][9]["read"]
         assert source_url_workflow["runbook"][10]["complete_when"] == "live_validation_completion_audit.report_allowed=true"

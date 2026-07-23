@@ -514,12 +514,17 @@
             "target_package_handoff.description_draft",
             "target_package_handoff.target_upload_request",
             "target_package_handoff.next_step",
+            "target_materials_final_report.ready_for_target_upload_preflight",
+            "target_materials_final_report.target_upload.target_upload_request",
+            "target_materials_final_report.gates",
             "target_package_handoff.blockers",
+            "target_materials_final_report.blockers",
             "blockers"
           ],
-          "continue_when": "target_package_handoff.ready=true and target_package_handoff.target_upload_request is present",
-          "resume_with": "target_package_handoff.next_step; run target_upload_preflight with an MTEAM-safe torrent file before live upload",
+          "continue_when": "target_materials_final_report.ready_for_target_upload_preflight=true and target_package_handoff.target_upload_request is present",
+          "resume_with": "target_materials_final_report.target_upload.target_upload_request or target_package_handoff.next_step; run target_upload_preflight with an MTEAM-safe torrent file before live upload",
           "stop_when": [
+            "target_materials_final_report.blockers is not empty",
             "target_package_handoff.blockers is not empty",
             "duplicate_check missing or exists=true",
             "rule_check not ready",
@@ -529,7 +534,7 @@
         {
           "step": "target_upload_closure",
           "tool": "target_upload_job",
-          "request_from": "target_package_handoff.target_upload_request plus confirm_upload, download_uploaded_torrent, inject_uploaded_torrent, wait_uploaded_complete, uploaded_save_path/path, qBittorrent category/tag/rate limits",
+          "request_from": "target_materials_final_report.target_upload.target_upload_request or target_package_handoff.target_upload_request plus confirm_upload, download_uploaded_torrent, inject_uploaded_torrent, wait_uploaded_complete, uploaded_save_path/path, qBittorrent category/tag/rate limits",
           "read": [
             "job_id",
             "status",

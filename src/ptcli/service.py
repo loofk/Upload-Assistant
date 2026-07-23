@@ -2406,16 +2406,16 @@ def _source_url_check_and_submit_manual_sequence(
             "tool": "target_package_prepare_job",
             "endpoint": "/v1/jobs/target/package/prepare",
             "request_from": "material_chain_handoff.recommended_call when next_step.domain is target_description or target_package; otherwise material_options plus source_info, duplicate_check, rule_check, and qBittorrent content evidence",
-            "read": ["material_chain_handoff.ready_for_target_upload", "material_chain_handoff.direct_calls.target_package", "target_package_handoff.ready", "target_package_handoff.target_upload_request", "target_package_handoff.blockers"],
-            "continue_when": "target_package_handoff.ready=true and target_upload_request is present",
-            "stop_when": "target_package_handoff.blockers is not empty",
+            "read": ["material_chain_handoff.ready_for_target_upload", "material_chain_handoff.direct_calls.target_package", "target_package_handoff.ready", "target_package_handoff.target_upload_request", "target_materials_final_report.ready_for_target_upload_preflight", "target_materials_final_report.target_upload.target_upload_request", "target_package_handoff.blockers", "target_materials_final_report.blockers"],
+            "continue_when": "target_materials_final_report.ready_for_target_upload_preflight=true and target_package_handoff.target_upload_request is present",
+            "stop_when": "target_package_handoff.blockers is not empty or target_materials_final_report.blockers is not empty",
             "direct_call_ref": "manual_retorrent_sequence.material_chain.direct_calls.target_package",
         },
         {
             "step": "target_upload_closure",
             "tool": "target_upload_job",
             "endpoint": "/v1/jobs/target/upload",
-            "request_from": "target_package_handoff.target_upload_request plus confirm_upload=true, download_uploaded_torrent=true, inject_uploaded_torrent=true, wait_uploaded_complete=true, qBittorrent category/tag/rate limits",
+            "request_from": "target_materials_final_report.target_upload.target_upload_request or target_package_handoff.target_upload_request plus confirm_upload=true, download_uploaded_torrent=true, inject_uploaded_torrent=true, wait_uploaded_complete=true, qBittorrent category/tag/rate limits",
             "read": ["target_upload_handoff.ready_for_live_upload", "target_upload_handoff.uploaded_seeding_ready", "uploaded_torrent_hash", "qbit_enforcement_summary", "blockers"],
             "continue_when": "target_upload_handoff.uploaded_seeding_ready=true",
             "stop_when": "confirm_upload missing, fresh duplicate exists, rule obligations not ready, or uploaded torrent seeding evidence missing",
@@ -27884,6 +27884,7 @@ def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dic
     manual_handoff = _job_manual_retorrent_handoff(job, summary_payload)
     policy_report = _job_policy_execution_final_report(job, summary_payload)
     material_report = _job_material_preparation_final_report(job, summary_payload)
+    target_materials_report = _job_target_materials_final_report(job, summary_payload)
     target_upload = _job_target_upload_handoff(job, summary_payload)
     closure = _job_closure_summary(job, summary_payload)
     live_gate = _job_live_completion_gate(job, summary_payload)
@@ -27910,6 +27911,7 @@ def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dic
         material_report=material_report,
         material_chain=_job_material_chain_handoff(job, summary_payload),
         target_package=_job_target_package_handoff(job, summary_payload),
+        target_materials_report=target_materials_report,
         target_upload=target_upload,
         live_report=live_report,
         duplicate_check=duplicate_check,
@@ -28089,6 +28091,7 @@ def _job_manual_retorrent_remaining_sequence(job: dict[str, Any], summary_payloa
     material_report = _job_material_preparation_final_report(job, summary_payload)
     material_chain = _job_material_chain_handoff(job, summary_payload)
     target_package = _job_target_package_handoff(job, summary_payload)
+    target_materials_report = _job_target_materials_final_report(job, summary_payload)
     target_upload = _job_target_upload_handoff(job, summary_payload)
     live_gate = _job_live_completion_gate(job, summary_payload)
     live_report = _job_live_user_report(job, summary_payload)
@@ -28101,6 +28104,7 @@ def _job_manual_retorrent_remaining_sequence(job: dict[str, Any], summary_payloa
         material_report=material_report,
         material_chain=material_chain,
         target_package=target_package,
+        target_materials_report=target_materials_report,
         target_upload=target_upload,
         live_report=live_report,
         duplicate_check=duplicate_check,
@@ -28116,6 +28120,7 @@ def _manual_retorrent_remaining_sequence_from_reports(
     material_report: dict[str, Any] | None,
     material_chain: dict[str, Any] | None,
     target_package: dict[str, Any] | None,
+    target_materials_report: dict[str, Any] | None,
     target_upload: dict[str, Any] | None,
     live_report: dict[str, Any] | None,
     duplicate_check: dict[str, Any],
@@ -28126,7 +28131,7 @@ def _manual_retorrent_remaining_sequence_from_reports(
     runtime = _job_runtime(job)
     material_call = material_chain.get("recommended_call") if isinstance(material_chain, dict) and isinstance(material_chain.get("recommended_call"), dict) else {}
     target_package_call = _manual_remaining_target_package_call(material_chain, target_package)
-    target_upload_call = target_upload.get("next_step") if isinstance(target_upload, dict) and isinstance(target_upload.get("next_step"), dict) else target_upload.get("recommended_call") if isinstance(target_upload, dict) and isinstance(target_upload.get("recommended_call"), dict) else {}
+    target_upload_call = _manual_remaining_target_upload_call(target_materials_report, target_package, target_upload)
     next_step = _manual_remaining_next_step(
         job_id,
         runtime,
@@ -28148,7 +28153,7 @@ def _manual_retorrent_remaining_sequence_from_reports(
         _manual_remaining_step("poll_status", "get_job_status", f"/v1/jobs/{job_id}" if job_id else None, "GET", {"job_id": job_id} if job_id else None, ["status", "runtime", "job_handoff", "manual_retorrent_remaining_sequence", "material_chain_handoff"], "status not in queued,running", "status=failed or status=cancelled", repeat_when="status in queued,running"),
         _manual_remaining_step("policy_gate", "site_policies", "/v1/site-policies", "POST", None, ["policy_execution_final_report", "policy_application_handoff", "policy_config_apply_handoff"], "policy_execution_final_report.ready_for_live=true", "policy_execution_final_report.ready_for_live=false"),
         _manual_remaining_step("material_chain", material_call.get("tool") or "metadata_prepare_job or materials_prepare_job", material_call.get("endpoint"), material_call.get("method") or "POST", material_call.get("request"), ["material_chain_handoff.next_step", "material_chain_handoff.recommended_call", "material_chain_handoff.direct_calls", "material_preparation_final_report"], "material_chain_handoff.ready_for_target_package=true", "material_chain_handoff.blockers is non-empty and recommended_call.safe_to_call_now=false"),
-        _manual_remaining_step("target_package", target_package_call.get("tool") or "target_package_prepare_job", target_package_call.get("endpoint") or "/v1/jobs/target/package/prepare", target_package_call.get("method") or "POST", target_package_call.get("request"), ["target_package_handoff", "material_chain_handoff.direct_calls.target_package"], "target_package_handoff.ready=true", "target_package_handoff.blockers is non-empty"),
+        _manual_remaining_step("target_package", target_package_call.get("tool") or "target_package_prepare_job", target_package_call.get("endpoint") or "/v1/jobs/target/package/prepare", target_package_call.get("method") or "POST", target_package_call.get("request"), ["target_package_handoff", "target_materials_final_report", "target_materials_final_report.ready_for_target_upload_preflight", "target_materials_final_report.target_upload.target_upload_request", "material_chain_handoff.direct_calls.target_package"], "target_materials_final_report.ready_for_target_upload_preflight=true and target_package_handoff.target_upload_request is present", "target_package_handoff.blockers is non-empty or target_materials_final_report.blockers is non-empty"),
         _manual_remaining_step("target_upload_closure", target_upload_call.get("tool") or "target_upload_job", target_upload_call.get("endpoint") or "/v1/jobs/target/upload", target_upload_call.get("method") or "POST", target_upload_call.get("request"), ["target_upload_handoff", "live_completion_gate", "qbit_enforcement_summary"], "target_upload_handoff.uploaded_seeding_ready=true", "confirm_upload missing or uploaded torrent seeding evidence missing"),
         _manual_remaining_step("final_summary", "get_job_summary", f"/v1/jobs/{job_id}/summary" if job_id else None, "GET", {"job_id": job_id} if job_id else None, ["manual_retorrent_final_report", "live_validation_final_report", "live_validation_completion_audit", "closure_summary"], "manual_retorrent_final_report.report_allowed=true and closure_summary.complete=true", "manual_retorrent_final_report.blockers is non-empty"),
     ]
@@ -28166,6 +28171,13 @@ def _manual_retorrent_remaining_sequence_from_reports(
             "next_call": material_call or None,
             "direct_calls": material_chain.get("direct_calls") if isinstance(material_chain, dict) and isinstance(material_chain.get("direct_calls"), dict) else {},
         },
+        "target_materials": {
+            "available": isinstance(target_materials_report, dict),
+            "ready_for_target_upload_preflight": target_materials_report.get("ready_for_target_upload_preflight") is True if isinstance(target_materials_report, dict) else False,
+            "ready_for_live_upload_attempt": target_materials_report.get("ready_for_live_upload_attempt") is True if isinstance(target_materials_report, dict) else False,
+            "target_upload_request": _nested_dict(target_materials_report, "target_upload").get("target_upload_request") if isinstance(target_materials_report, dict) else None,
+            "blockers": _string_list(target_materials_report.get("blockers")) if isinstance(target_materials_report, dict) else [],
+        },
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
@@ -28173,10 +28185,10 @@ def _manual_retorrent_remaining_sequence_from_reports(
         "recommended_request": next_step.get("request"),
         "recommended_call": {key: next_step.get(key) for key in ("tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review") if key in next_step},
         "steps": steps,
-        "read_order": ["manual_retorrent_remaining_sequence", "material_chain_handoff", "manual_retorrent_final_report", "job_handoff", "closure_summary", "live_validation_completion_audit"],
+        "read_order": ["manual_retorrent_remaining_sequence", "target_materials_final_report", "target_package_handoff", "material_chain_handoff", "manual_retorrent_final_report", "job_handoff", "closure_summary", "live_validation_completion_audit"],
         "complete_when": ["manual_retorrent_final_report.report_allowed=true", "live_validation_completion_audit.report_allowed=true", "closure_summary.complete=true"],
-        "stop_when": ["duplicate_check.exists=true", "confirm_upload missing for live upload", "policy_execution_final_report.ready_for_live=false", "material_chain_handoff.blockers is non-empty and recommended_call.safe_to_call_now=false"],
-        "blockers": _manual_remaining_blockers(duplicate_check, missing_confirmations, policy_report, material_chain, target_package, target_upload, live_report),
+        "stop_when": ["duplicate_check.exists=true", "confirm_upload missing for live upload", "policy_execution_final_report.ready_for_live=false", "target_materials_final_report.blockers is non-empty", "material_chain_handoff.blockers is non-empty and recommended_call.safe_to_call_now=false"],
+        "blockers": _manual_remaining_blockers(duplicate_check, missing_confirmations, policy_report, material_chain, target_package, target_materials_report, target_upload, live_report),
         "next_actions": _manual_remaining_next_actions(action, next_step),
     }
 
@@ -28197,6 +28209,28 @@ def _manual_remaining_target_package_call(material_chain: dict[str, Any] | None,
             "requires_user_review": False,
         }
     return {}
+
+
+def _manual_remaining_target_upload_call(target_materials_report: dict[str, Any] | None, target_package: dict[str, Any] | None, target_upload: dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(target_upload, dict):
+        next_step = target_upload.get("next_step") if isinstance(target_upload.get("next_step"), dict) else {}
+        recommended_call = target_upload.get("recommended_call") if isinstance(target_upload.get("recommended_call"), dict) else {}
+        if next_step or recommended_call:
+            return next_step or recommended_call
+    target_request = _nested_dict(target_materials_report, "target_upload").get("target_upload_request") if isinstance(target_materials_report, dict) else None
+    if not isinstance(target_request, dict) and isinstance(target_package, dict):
+        target_request = target_package.get("target_upload_request") if isinstance(target_package.get("target_upload_request"), dict) else None
+    if not isinstance(target_request, dict):
+        return {}
+    return {
+        "tool": "target_upload_job",
+        "endpoint": "/v1/jobs/target/upload",
+        "method": "POST",
+        "request": target_request,
+        "safe_to_call_now": bool(target_materials_report.get("ready_for_target_upload_preflight")) if isinstance(target_materials_report, dict) else bool(target_package and target_package.get("ready")),
+        "requires_user_review": True,
+        "reason": "target_materials_ready_for_upload_closure",
+    }
 
 
 def _manual_remaining_next_step(
@@ -28232,6 +28266,8 @@ def _manual_remaining_next_step(
         return {"name": "target_package", "action": "target_package", "tool": target_package_call.get("tool") or "target_package_prepare_job", "endpoint": target_package_call.get("endpoint") or "/v1/jobs/target/package/prepare", "method": target_package_call.get("method") or "POST", "request": target_package_call.get("request"), "safe_to_call_now": bool(target_package_call.get("safe_to_call_now") or target_package_call.get("request")), "requires_user_review": target_package_call.get("requires_user_review") is not False}
     if isinstance(target_package, dict) and target_package.get("ready") is False:
         return {"name": "target_package", "action": "target_package", "tool": target_package_call.get("tool") or "target_package_prepare_job", "endpoint": target_package_call.get("endpoint") or "/v1/jobs/target/package/prepare", "method": target_package_call.get("method") or "POST", "request": target_package_call.get("request"), "safe_to_call_now": bool(target_package_call.get("request")), "requires_user_review": True}
+    if target_upload_call.get("request") and not isinstance(target_upload, dict):
+        return {"name": "target_upload_closure", "action": "target_upload_closure", "tool": target_upload_call.get("tool") or "target_upload_job", "endpoint": target_upload_call.get("endpoint") or "/v1/jobs/target/upload", "method": target_upload_call.get("method") or "POST", "request": target_upload_call.get("request"), "safe_to_call_now": bool(target_upload_call.get("safe_to_call_now")), "requires_user_review": True}
     if isinstance(target_upload, dict) and target_upload.get("uploaded_seeding_ready") is not True:
         return {"name": "target_upload_closure", "action": "target_upload_closure", "tool": target_upload_call.get("tool") or target_upload.get("recommended_tool"), "endpoint": target_upload_call.get("endpoint") or target_upload.get("recommended_endpoint"), "method": target_upload_call.get("method") or "POST", "request": target_upload_call.get("request") or target_upload.get("recommended_request"), "safe_to_call_now": bool(target_upload_call.get("request") or target_upload.get("recommended_request")), "requires_user_review": True}
     if isinstance(live_report, dict) and live_report.get("report_allowed") is True:
@@ -35187,15 +35223,15 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "prepare_target_package",
                     "tool": "target_package_prepare_job",
                     "request_from": "metadata_prepare_handoff/materials_prepare_handoff material_options plus source_info, duplicate_check, rule_check, and qBittorrent content evidence",
-                    "read": ["job_id", "status", "target_package_handoff.ready", "target_package_handoff.package_dir", "target_package_handoff.description_draft", "target_package_handoff.target_upload_request", "target_package_handoff.next_step", "target_package_handoff.blockers", "blockers"],
-                    "continue_when": "target_package_handoff.ready=true and target_package_handoff.target_upload_request is present",
-                    "resume_with": "target_package_handoff.next_step; run target_upload_preflight with an MTEAM-safe torrent file before live upload",
-                    "stop_when": ["target_package_handoff.blockers is not empty", "duplicate_check missing or exists=true", "rule_check not ready", "qBittorrent content evidence missing"],
+                    "read": ["job_id", "status", "target_package_handoff.ready", "target_package_handoff.package_dir", "target_package_handoff.description_draft", "target_package_handoff.target_upload_request", "target_package_handoff.next_step", "target_materials_final_report.ready_for_target_upload_preflight", "target_materials_final_report.target_upload.target_upload_request", "target_materials_final_report.gates", "target_package_handoff.blockers", "target_materials_final_report.blockers", "blockers"],
+                    "continue_when": "target_materials_final_report.ready_for_target_upload_preflight=true and target_package_handoff.target_upload_request is present",
+                    "resume_with": "target_materials_final_report.target_upload.target_upload_request or target_package_handoff.next_step; run target_upload_preflight with an MTEAM-safe torrent file before live upload",
+                    "stop_when": ["target_materials_final_report.blockers is not empty", "target_package_handoff.blockers is not empty", "duplicate_check missing or exists=true", "rule_check not ready", "qBittorrent content evidence missing"],
                 },
                 {
                     "step": "target_upload_closure",
                     "tool": "target_upload_job",
-                    "request_from": "target_package_handoff.target_upload_request plus confirm_upload, download_uploaded_torrent, inject_uploaded_torrent, wait_uploaded_complete, uploaded_save_path/path, qBittorrent category/tag/rate limits",
+                    "request_from": "target_materials_final_report.target_upload.target_upload_request or target_package_handoff.target_upload_request plus confirm_upload, download_uploaded_torrent, inject_uploaded_torrent, wait_uploaded_complete, uploaded_save_path/path, qBittorrent category/tag/rate limits",
                     "read": ["job_id", "status", "target_upload_handoff.action", "target_upload_handoff.ready", "target_upload_handoff.uploaded_seeding_ready", "target_upload_handoff.summary_file", "target_upload_handoff.next_step", "target_upload_handoff.blockers", "agent_decision", "blockers"],
                     "continue_when": "target_upload_handoff.uploaded_seeding_ready=true and blockers=[]",
                     "resume_with": "target_upload_handoff.next_step or resume_job when uploaded torrent download/injection/wait evidence is incomplete",
