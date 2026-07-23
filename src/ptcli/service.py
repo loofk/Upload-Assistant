@@ -822,6 +822,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             if path in AGENT_MANIFEST_PATHS:
                 self._send_json(HTTPStatus.OK, agent_manifest_payload(base_url=self._request_base_url()))
                 return
+            if path == "/v1/agent/smoke":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                self._send_json(HTTPStatus.OK, agent_smoke_payload(query, base_url=self._request_base_url()))
+                return
             if path == "/v1/sites":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -955,6 +962,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
                 "/v1/retorrent/check": lambda payload: asyncio.run(retorrent_check(payload)),
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
+                "/v1/agent/smoke": lambda payload: agent_smoke_payload(payload, base_url=self._request_base_url()),
                 "/v1/agent/run-preview": agent_run_preview_payload,
                 "/v1/retorrent/source-url/preflight": source_url_retorrent_preflight_payload,
                 "/v1/sites": sites_payload,
@@ -31314,6 +31322,175 @@ def health_payload() -> dict[str, Any]:
     }
 
 
+def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str | None = None) -> dict[str, Any]:
+    """Return a no-network post-deploy smoke report for AI agents."""
+    request = request if isinstance(request, dict) else {}
+    base_url = (base_url or os.environ.get("PTCLI_PUBLIC_BASE_URL") or "http://127.0.0.1:8080").rstrip("/")
+    health = health_payload()
+    tools = _agent_tool_schemas()
+    tool_names = [str(tool.get("name")) for tool in tools if isinstance(tool, dict)]
+    required_tools = [
+        "agent_smoke",
+        "deployment_check",
+        "readiness_bundle",
+        "goal_progress",
+        "agent_manifest",
+        "source_url_check_and_submit",
+        "get_job_status",
+        "get_job_summary",
+        "resume_job",
+        "daily_candidate_run_and_deliver",
+        "submit_daily_candidate_job",
+    ]
+    missing_tools = [tool for tool in required_tools if tool not in tool_names]
+    deployment = deployment_check_payload(request)
+    readiness = readiness_bundle_payload(request)
+    goal_progress = goal_progress_payload(request)
+    manifest_summary = _agent_smoke_manifest_summary(base_url)
+    checks = _agent_smoke_checks(health, missing_tools, manifest_summary, deployment, readiness, goal_progress)
+    blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
+    warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
+    recommended_call = _agent_smoke_recommended_call(blockers, readiness, goal_progress, request)
+    ready = not blockers
+    return {
+        "kind": "ptcli.agent_smoke",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "dry_run": True,
+        "mutates_state": False,
+        "live_upload": False,
+        "base_url": base_url,
+        "request": request,
+        "health": health,
+        "tools": {
+            "count": len(tool_names),
+            "required": required_tools,
+            "missing": missing_tools,
+            "key_endpoints": _agent_smoke_key_endpoints(tools),
+        },
+        "manifest": manifest_summary,
+        "deployment": {
+            "ready": deployment.get("ready") is True,
+            "status": deployment.get("status"),
+            "deployment_final_report": deployment.get("deployment_final_report"),
+            "agent_handoff": deployment.get("agent_handoff"),
+            "seedbox_bootstrap_handoff": deployment.get("seedbox_bootstrap_handoff"),
+        },
+        "readiness": {
+            "ready": readiness.get("ready") is True,
+            "status": readiness.get("status"),
+            "next_call": readiness.get("next_call"),
+            "seedbox_live_runbook_final_report": readiness.get("seedbox_live_runbook_final_report"),
+            "live_execution_package": readiness.get("live_execution_package"),
+        },
+        "goal_progress": {
+            "status": goal_progress.get("status"),
+            "completion_estimate": goal_progress.get("completion_estimate"),
+            "goal_distance_report": goal_progress.get("goal_distance_report"),
+            "next_step": goal_progress.get("next_step"),
+        },
+        "run_order": _agent_smoke_run_order(base_url, request),
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": ["agent_smoke", "deployment.deployment_final_report", "readiness.seedbox_live_runbook_final_report", "goal_progress.goal_distance_report"],
+        "complete_when": ["agent_smoke.ready=true", "deployment.deployment_final_report.ready=true", "readiness.seedbox_live_runbook_final_report.ready=true for live validation input"],
+        "stop_when": ["agent_smoke.blockers is non-empty", "deployment.deployment_final_report.blockers is non-empty", "readiness.seedbox_live_runbook_final_report.blockers is non-empty before live tracker action"],
+        "safety": {
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "does_not_upload": True,
+            "requires_confirm_upload_for_live_upload": True,
+            "requires_accept_rules_for_live_upload": True,
+        },
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_actions": _agent_smoke_next_actions(ready, recommended_call, warnings),
+    }
+
+
+def _agent_smoke_manifest_summary(base_url: str) -> dict[str, Any]:
+    manifest = agent_manifest_payload(base_url=base_url)
+    discovery = manifest.get("discovery") if isinstance(manifest.get("discovery"), dict) else {}
+    return {
+        "ready": bool(manifest.get("schema_version") and manifest.get("tools") and manifest.get("default_workflows")),
+        "schema_version": manifest.get("schema_version"),
+        "base_url": manifest.get("base_url"),
+        "paths": {
+            "well_known": f"{base_url}/.well-known/ptcli-agent.json",
+            "openclaw": f"{base_url}/v1/openclaw/skill.json",
+            "hermes": f"{base_url}/v1/hermes/skill.json",
+            "openapi": discovery.get("openapi") or f"{base_url}/openapi.json",
+            "tools": discovery.get("tools") or f"{base_url}/v1/tools",
+        },
+        "tool_count": len(manifest.get("tools") if isinstance(manifest.get("tools"), list) else []),
+        "workflow_count": len(manifest.get("default_workflows") if isinstance(manifest.get("default_workflows"), list) else []),
+        "required_first_read": ["deployment_check", "readiness_bundle", "goal_progress"],
+    }
+
+
+def _agent_smoke_key_endpoints(tools: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    key_names = {"agent_smoke", "deployment_check", "readiness_bundle", "goal_progress", "source_url_check_and_submit", "daily_candidate_run_and_deliver", "submit_daily_candidate_job", "get_job_status", "get_job_summary", "resume_job"}
+    return {
+        str(tool.get("name")): {"method": tool.get("method"), "path": tool.get("path"), "safety": tool.get("safety")}
+        for tool in tools
+        if isinstance(tool, dict) and tool.get("name") in key_names
+    }
+
+
+def _agent_smoke_checks(health: dict[str, Any], missing_tools: list[str], manifest: dict[str, Any], deployment: dict[str, Any], readiness: dict[str, Any], goal_progress: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"name": "health", "ok": health.get("status") == "ok", "message": "ptcli service health endpoint is alive."},
+        {"name": "tools.required", "ok": not missing_tools, "message": "Required AI tools are present." if not missing_tools else f"Missing required AI tools: {', '.join(missing_tools)}"},
+        {"name": "manifest.discovery", "ok": manifest.get("ready") is True, "message": "Agent manifest discovery is ready." if manifest.get("ready") is True else "Agent manifest discovery is incomplete."},
+        {"name": "deployment.final_report", "ok": deployment.get("ready") is True, "message": "Deployment final report is ready." if deployment.get("ready") is True else "Deployment final report is blocked.", "details": deployment.get("deployment_final_report")},
+        {"name": "readiness.bundle", "ok": readiness.get("ready") is True, "blocking": False, "message": "Readiness bundle is ready for the supplied live request." if readiness.get("ready") is True else "Readiness bundle needs live request/config input before first live validation.", "details": readiness.get("seedbox_live_runbook_final_report")},
+        {"name": "goal.progress", "ok": goal_progress.get("status") == "ok", "blocking": False, "message": "Goal progress endpoint is readable.", "details": goal_progress.get("goal_distance_report")},
+    ]
+
+
+def _agent_smoke_recommended_call(blockers: list[str], readiness: dict[str, Any], goal_progress: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+    if blockers:
+        return {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "request": _agent_smoke_query_request(request), "safe_to_call_now": True, "requires_user_review": False, "reason": "repair_deployment_before_agent_live_actions"}
+    readiness_next = readiness.get("next_call") if isinstance(readiness.get("next_call"), dict) else {}
+    if readiness.get("ready") is not True and readiness_next.get("tool"):
+        return dict(readiness_next)
+    goal_next = goal_progress.get("next_step") if isinstance(goal_progress.get("next_step"), dict) else {}
+    if goal_next.get("tool"):
+        return dict(goal_next)
+    return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": request, "safe_to_call_now": True, "requires_user_review": False, "reason": "inspect_live_readiness"}
+
+
+def _agent_smoke_query_request(request: dict[str, Any]) -> dict[str, Any] | None:
+    allowed = {key: request[key] for key in ("config", "base_dir", "cookies_dir", "job_dir", "downloads_path", "compose_file", "client") if key in request}
+    return allowed or None
+
+
+def _agent_smoke_run_order(base_url: str, request: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"step": "health", "method": "GET", "url": f"{base_url}/health", "mutates_state": False},
+        {"step": "tools", "method": "GET", "url": f"{base_url}/v1/tools", "mutates_state": False},
+        {"step": "manifest", "method": "GET", "url": f"{base_url}/.well-known/ptcli-agent.json", "mutates_state": False},
+        {"step": "deployment", "tool": "deployment_check", "method": "GET", "endpoint": "/v1/deployment/check", "request": _agent_smoke_query_request(request), "continue_when": "deployment_final_report.ready=true"},
+        {"step": "readiness", "tool": "readiness_bundle", "method": "POST", "endpoint": "/v1/readiness/bundle", "request": request, "continue_when": "seedbox_live_runbook_final_report.ready=true before first live validation"},
+        {"step": "goal_progress", "tool": "goal_progress", "method": "GET", "endpoint": "/v1/goal/progress", "request": request, "continue_when": "goal_distance_report.next_work is understood"},
+    ]
+
+
+def _agent_smoke_next_actions(ready: bool, recommended_call: dict[str, Any], warnings: list[str]) -> list[str]:
+    if ready:
+        return ["AI smoke is ready; follow agent_smoke.recommended_call, then use source_url_check_and_submit or daily_candidate_run_and_deliver according to the user request."]
+    if recommended_call.get("tool"):
+        return ["Resolve agent_smoke.blockers by following agent_smoke.recommended_call, then rerun agent_smoke before live tracker or qBittorrent actions."]
+    if warnings:
+        return ["Review agent_smoke.warnings, then rerun agent_smoke with source_url/target/save_path when preparing first live validation."]
+    return ["Inspect agent_smoke.checks before continuing."]
+
+
 def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return a local deployment readiness report without touching trackers or qBittorrent."""
     request = request or {}
@@ -35034,6 +35211,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     daily_candidate_batch_schema = _daily_candidate_batch_status_tool_request_schema()
     return [
         {
+            "name": "agent_smoke",
+            "method": "GET",
+            "path": "/v1/agent/smoke",
+            "description": "Run a no-network post-deploy smoke audit for AI agents: health, tool discovery, manifest discovery, deployment final report, readiness runbook, and goal progress next call.",
+            "input_schema": readiness_bundle_request_schema,
+            "response_contract": _agent_smoke_response_contract(),
+            "workflow_hints": {"read_first": "agent_smoke", "then": "recommended_call", "rerun_after": "deployment or readiness repair"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+        },
+        {
             "name": "agent_run_preview",
             "method": "POST",
             "path": "/v1/agent/run-preview",
@@ -36355,6 +36542,20 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
         "step_fields": ["index", "step", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when", "complete_when", "resume_with"],
         "closure_examples": ["complete", "resume", "stop"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_create_jobs", "does_not_upload"],
+    }
+
+
+def _agent_smoke_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "base_url", "request", "health", "tools", "manifest", "deployment", "readiness", "goal_progress", "run_order", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "checks", "blockers", "warnings", "next_actions"],
+        "tool_fields": ["count", "required", "missing", "key_endpoints"],
+        "manifest_fields": ["ready", "schema_version", "base_url", "paths", "tool_count", "workflow_count", "required_first_read"],
+        "deployment_fields": ["ready", "status", "deployment_final_report", "agent_handoff", "seedbox_bootstrap_handoff"],
+        "readiness_fields": ["ready", "status", "next_call", "seedbox_live_runbook_final_report", "live_execution_package"],
+        "goal_progress_fields": ["status", "completion_estimate", "goal_distance_report", "next_step"],
+        "run_order_fields": ["step", "tool", "method", "url", "endpoint", "request", "continue_when", "mutates_state"],
+        "check_fields": ["name", "ok", "blocking", "message", "details"],
+        "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload", "requires_confirm_upload_for_live_upload", "requires_accept_rules_for_live_upload"],
     }
 
 
@@ -38402,6 +38603,40 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    agent_smoke_response_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "dry_run": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "base_url": {"type": "string"},
+            "request": {"type": "object"},
+            "health": {"type": "object"},
+            "tools": {"type": "object"},
+            "manifest": {"type": "object"},
+            "deployment": {"type": "object"},
+            "readiness": {"type": "object"},
+            "goal_progress": {"type": "object"},
+            "run_order": {"type": "array", "items": {"type": "object"}},
+            "recommended_call": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_method": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
+            "read_order": {"type": "array", "items": {"type": "string"}},
+            "complete_when": {"type": "array", "items": {"type": "string"}},
+            "stop_when": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
+            "checks": {"type": "array", "items": {"type": "object"}},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     source_url_preflight_response_schema = {
         "type": "object",
         "properties": {
@@ -38590,6 +38825,27 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "requestBody": {"required": False, "content": {"application/json": {"schema": agent_run_preview_request_schema}}},
                     "responses": {"200": {"description": "No-network AI workflow preview for source-url retorrent automation.", "content": {"application/json": {"schema": agent_run_preview_response_schema}}}},
                 }
+            },
+            "/v1/agent/smoke": {
+                "get": {
+                    "operationId": "smokePtcliAgentDeployment",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "source_url", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_id", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "base_dir", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {"description": "No-network AI smoke audit for deployed ptcli service discovery and first-call readiness.", "content": {"application/json": {"schema": agent_smoke_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "postSmokePtcliAgentDeployment",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": _readiness_bundle_tool_request_schema()}}},
+                    "responses": {"200": {"description": "No-network AI smoke audit for deployed ptcli service discovery and first-call readiness.", "content": {"application/json": {"schema": agent_smoke_response_schema}}}},
+                },
             },
             "/v1/retorrent/source-url/preflight": {
                 "post": {

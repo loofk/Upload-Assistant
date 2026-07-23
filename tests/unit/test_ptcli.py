@@ -21271,6 +21271,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}/cancel" in paths
     assert "/.well-known/ptcli-agent.json" in paths
     tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
+    assert tool_by_name["agent_smoke"]["path"] == "/v1/agent/smoke"
+    assert tool_by_name["agent_smoke"]["method"] == "GET"
+    assert tool_by_name["agent_smoke"]["safety"]["mutates_state"] is False
+    assert tool_by_name["agent_smoke"]["safety"]["does_not_contact_trackers"] is True
+    assert "run_order" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "manifest" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "deployment" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "readiness" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert tool_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
     assert tool_by_name["agent_run_preview"]["safety"]["mutates_state"] is False
     assert "closure_contract" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
@@ -22905,6 +22913,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/agent-manifest" in openapi["paths"]
     assert "/v1/openclaw/skill.json" in openapi["paths"]
     assert "/v1/hermes/skill.json" in openapi["paths"]
+    assert "/v1/agent/smoke" in openapi["paths"]
+    assert "post" in openapi["paths"]["/v1/agent/smoke"]
     assert "/v1/agent/run-preview" in openapi["paths"]
     assert "/v1/goal/progress" in openapi["paths"]
     assert "/v1/retorrent/source-url/preflight" in openapi["paths"]
@@ -23451,6 +23461,33 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert "Run and deliver the daily candidate digest" in daily_ready["next_actions"][0]
 
 
+def test_agent_smoke_exposes_post_deploy_handoff(tmp_path) -> None:
+    payload = ptcli_service.agent_smoke_payload(
+        {
+            "base_dir": str(tmp_path),
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "save_path": "/downloads",
+        },
+        base_url="http://ptcli.local:8080",
+    )
+
+    assert payload["kind"] == "ptcli.agent_smoke"
+    assert payload["dry_run"] is True
+    assert payload["mutates_state"] is False
+    assert payload["live_upload"] is False
+    assert payload["tools"]["missing"] == []
+    assert payload["manifest"]["ready"] is True
+    assert payload["manifest"]["paths"]["well_known"] == "http://ptcli.local:8080/.well-known/ptcli-agent.json"
+    assert [step["step"] for step in payload["run_order"]] == ["health", "tools", "manifest", "deployment", "readiness", "goal_progress"]
+    assert payload["recommended_call"]["tool"] == "deployment_check"
+    assert payload["recommended_endpoint"] == "/v1/deployment/check"
+    assert payload["safety"]["does_not_contact_trackers"] is True
+    assert payload["safety"]["does_not_contact_qbittorrent"] is True
+    assert any(check["name"] == "deployment.final_report" for check in payload["checks"])
+    assert "deployment.deployment_final_report" in payload["read_order"]
+
+
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     manifest = ptcli_service.agent_manifest_payload(base_url="http://ptcli.local:8080")
 
@@ -23505,7 +23542,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["next_step_source"].startswith("next_call")
     assert manifest["closure_contract"]["recommended_call_fields"][0] == "next_call"
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Prefer manual_retorrent_remaining_sequence.next_call")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "goal_progress", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "site_policy_rule_review", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_apply_limits", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_smoke", "agent_run_preview", "source_url_retorrent_preflight", "goal_progress", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "site_policy_rule_review", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_apply_limits", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
@@ -23685,7 +23722,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["target_upload"].endswith("/v1/target/upload")
         assert payload["discovery"]["target_upload_job"].endswith("/v1/jobs/target/upload")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidate_refill_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"agent_smoke", "agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidate_refill_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert "target_materials_final_report" in tools_by_name["target_package_prepare"]["response_contract"]["required_fields"]
         assert "target_materials_final_report_fields" in tools_by_name["target_package_prepare"]["response_contract"]
         assert "ready_for_target_upload_preflight" in tools_by_name["target_package_prepare"]["response_contract"]["target_materials_final_report_fields"]
@@ -23747,6 +23784,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "copyable_config" in tools_by_name["site_policy_rule_review"]["response_contract"]["config_apply_final_report_fields"]
         assert "copyable_config_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
         assert "python_update_snippet" in tools_by_name["site_policy_rule_review"]["response_contract"]["copyable_config_fields"]
+        assert tools_by_name["agent_smoke"]["path"] == "/v1/agent/smoke"
+        assert "run_order" in tools_by_name["agent_smoke"]["response_contract"]["required_fields"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
