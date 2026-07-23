@@ -3674,6 +3674,7 @@ def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[st
     target_audit = _daily_candidate_target_audit(target_fulfillment_report, operational_report)
     run_loop_report = _daily_candidate_run_loop_report(schedule_result, delivery_result, report, operational_report, target_fulfillment_report, target_audit, blockers)
     run_final_report = _daily_candidate_run_final_report(run_loop_report, report, operational_report, target_fulfillment_report, target_audit, blockers)
+    run_final_decision = _daily_candidate_run_final_decision(run_final_report, run_loop_report, report, operational_report, target_fulfillment_report, target_audit, delivery_result, blockers)
     ok = bool(schedule_result.get("ok")) and (not delivery_requested or bool(delivery_result and delivery_result.get("ok"))) and not blockers
     return {
         "kind": "ptcli.daily_candidate_run_and_deliver",
@@ -3696,8 +3697,9 @@ def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[st
         "daily_candidate_target_audit": target_audit,
         "daily_candidate_run_loop_report": run_loop_report,
         "daily_candidate_run_final_report": run_final_report,
+        "daily_candidate_run_final_decision": run_final_decision,
         "notification_payload": schedule_result.get("notification_payload"),
-        "next_call": run_final_report.get("recommended_call") or run_loop_report.get("recommended_call") or report.get("next_call"),
+        "next_call": run_final_decision.get("recommended_call") or run_final_report.get("recommended_call") or run_loop_report.get("recommended_call") or report.get("next_call"),
         "blockers": blockers,
         "next_actions": _daily_candidate_run_final_next_actions(run_final_report, blockers),
         "safety": {
@@ -3894,6 +3896,161 @@ def _daily_candidate_run_final_next_actions(report: dict[str, Any], blockers: li
     if action == "report_complete":
         return ["Report that the daily candidate target is met and the digest has been delivered."]
     return ["Inspect daily_candidate_run_final_report.read_order before choosing the next daily candidate action."]
+
+
+def _daily_candidate_run_final_decision(
+    final_report: dict[str, Any],
+    run_loop_report: dict[str, Any],
+    run_report: dict[str, Any],
+    operational_report: dict[str, Any],
+    target_fulfillment_report: dict[str, Any],
+    target_audit: dict[str, Any],
+    delivery_result: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    action = _daily_candidate_run_final_decision_action(final_report, run_loop_report, operational_report, target_fulfillment_report, blockers)
+    recommended_call = _daily_candidate_run_final_decision_call(action, final_report, run_loop_report, operational_report, target_fulfillment_report)
+    delivery = final_report.get("delivery") if isinstance(final_report.get("delivery"), dict) else {}
+    approval = final_report.get("approval") if isinstance(final_report.get("approval"), dict) else {}
+    target = final_report.get("target") if isinstance(final_report.get("target"), dict) else {}
+    return {
+        "kind": "ptcli.daily_candidate_run_final_decision",
+        "ready": action in {"report_complete", "ask_user_approval", "auto_refill_next", "poll_jobs", "deliver_digest"} and not blockers,
+        "report_allowed": action in {"report_complete", "ask_user_approval", "deliver_digest"} and not blockers,
+        "action": action,
+        "status": "blocked" if blockers else "complete" if action == "report_complete" else "waiting_user_approval" if action == "ask_user_approval" else "ready",
+        "verdict": final_report.get("verdict") or operational_report.get("verdict"),
+        "target": {
+            "target_count": target.get("target_count"),
+            "ready_count": target.get("ready_count"),
+            "safe_to_submit_count": target.get("safe_to_submit_count"),
+            "shortfall_count": target.get("shortfall_count"),
+            "ready_target_met": target.get("ready_target_met"),
+        },
+        "delivery": {
+            "delivered": delivery.get("delivered"),
+            "requested": operational_report.get("delivery", {}).get("requested") if isinstance(operational_report.get("delivery"), dict) else None,
+            "performed": bool(delivery_result),
+            "payload_fingerprint": delivery_result.get("payload_fingerprint") if isinstance(delivery_result, dict) else None,
+        },
+        "approval": {
+            "required": action == "ask_user_approval" or approval.get("required") is True,
+            "can_submit_after_approval": action == "ask_user_approval",
+            "submit_call": recommended_call if action == "ask_user_approval" else approval.get("submit_call"),
+            "required_user_inputs": ["explicit candidate approval", "accept_rules=true", "confirm_upload=true", "save_path or path"] if action == "ask_user_approval" else [],
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "safe_to_call_now": bool(recommended_call.get("safe_to_call_now")),
+        "requires_user_review": bool(recommended_call.get("requires_user_review")),
+        "reports": {
+            "daily_candidate_run_final_report": final_report,
+            "daily_candidate_run_loop_report": run_loop_report,
+            "run_and_deliver_report": run_report,
+            "daily_candidate_operational_final_report": operational_report,
+            "daily_candidate_target_fulfillment_report": target_fulfillment_report,
+            "daily_candidate_target_audit": target_audit,
+        },
+        "read_order": ["daily_candidate_run_final_decision", "daily_candidate_run_final_report", "daily_candidate_run_loop_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_target_audit", "run_and_deliver_report", "delivery_result"],
+        "complete_when": _daily_candidate_run_final_decision_complete_when(action),
+        "stop_when": [
+            "daily_candidate_run_final_decision.blockers is non-empty",
+            "daily_candidate_run_final_decision.action=ask_user_approval and explicit approval is missing",
+            "submit_daily_candidate_job must not be called unless confirm_upload=true and accept_rules=true",
+            "run_and_deliver itself must not submit or upload torrents",
+        ],
+        "safety": {
+            "run_and_deliver_submits_candidates": False,
+            "run_and_deliver_uploads_torrents": False,
+            "delivery_only": action in {"deliver_digest", "ask_user_approval", "report_complete"},
+            "submit_requires_explicit_user_approval": True,
+            "live_upload_requires_confirm_upload": True,
+            "does_not_bypass_site_rules": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_run_final_decision_next_actions(action, blockers),
+    }
+
+
+def _daily_candidate_run_final_decision_action(
+    final_report: dict[str, Any],
+    run_loop_report: dict[str, Any],
+    operational_report: dict[str, Any],
+    target_fulfillment_report: dict[str, Any],
+    blockers: list[str],
+) -> str:
+    if blockers:
+        return "resolve_blockers"
+    final_action = str(final_report.get("action") or "")
+    operational_action = str(operational_report.get("action") or "")
+    fulfillment_action = str(target_fulfillment_report.get("action") or "")
+    loop_action = str(run_loop_report.get("action") or "")
+    for action in (final_action, operational_action, fulfillment_action, loop_action):
+        if action in {"report_complete", "ask_user_approval", "auto_refill_next", "poll_jobs", "deliver_digest"}:
+            return action
+        if action == "request_user_approval":
+            return "ask_user_approval"
+        if action in {"refill_shortfall", "rerun_for_shortfall"}:
+            return "auto_refill_next"
+        if action == "publish_digest" or action == "publish_notification":
+            return "deliver_digest"
+    return "inspect_daily_candidate_run"
+
+
+def _daily_candidate_run_final_decision_call(
+    action: str,
+    final_report: dict[str, Any],
+    run_loop_report: dict[str, Any],
+    operational_report: dict[str, Any],
+    target_fulfillment_report: dict[str, Any],
+) -> dict[str, Any]:
+    for source in (final_report, run_loop_report, operational_report, target_fulfillment_report):
+        call = source.get("recommended_call") if isinstance(source.get("recommended_call"), dict) else {}
+        if call.get("tool") or call.get("endpoint"):
+            selected = dict(call)
+            break
+    else:
+        selected = {}
+    if action == "report_complete" and not selected:
+        selected = {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": None, "safe_to_call_now": True, "requires_user_review": False}
+    selected.setdefault("method", "GET" if selected.get("tool") in {"get_job_status", "get_job_summary", "daily_candidate_batch_status"} else "POST")
+    selected["safe_to_call_now"] = bool(action in {"report_complete", "auto_refill_next", "poll_jobs", "deliver_digest"} and selected.get("tool") and selected.get("requires_user_review") is not True)
+    selected["requires_user_review"] = bool(action == "ask_user_approval" or selected.get("requires_user_review") is True)
+    selected.setdefault("reason", action)
+    return selected
+
+
+def _daily_candidate_run_final_decision_complete_when(action: str) -> list[str]:
+    if action == "report_complete":
+        return ["daily_candidate_run_final_decision.report_allowed=true", "target.ready_target_met=true", "delivery.delivered=true"]
+    if action == "ask_user_approval":
+        return ["user explicitly approves approval.submit_call", "submitted job is then followed through get_job_status/get_job_summary"]
+    if action == "auto_refill_next":
+        return ["repeat call returns ready candidates or no more safe candidates are available"]
+    if action == "poll_jobs":
+        return ["pending candidate jobs leave queued/running", "then reread daily_candidate_run_final_decision"]
+    if action == "deliver_digest":
+        return ["delivery_result.ok=true", "then reread daily_candidate_run_final_decision"]
+    return ["daily_candidate_run_final_decision.action becomes one of report_complete, ask_user_approval, auto_refill_next, poll_jobs, or deliver_digest"]
+
+
+def _daily_candidate_run_final_decision_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve daily_candidate_run_final_decision.blockers before continuing the daily candidate loop."]
+    if action == "ask_user_approval":
+        return ["Present daily_candidate_run_final_decision.approval.submit_call to the user; call it only after explicit approval."]
+    if action == "auto_refill_next":
+        return ["Call daily_candidate_run_final_decision.recommended_call to try filling the daily 10-candidate target; this does not submit or upload torrents."]
+    if action == "poll_jobs":
+        return ["Poll daily candidate jobs with daily_candidate_run_final_decision.recommended_call, then refresh run-and-deliver status."]
+    if action == "deliver_digest":
+        return ["Publish the daily candidate digest with daily_candidate_run_final_decision.recommended_call; do not submit candidates."]
+    if action == "report_complete":
+        return ["Report the completed daily candidate target and delivered digest evidence."]
+    return ["Inspect daily_candidate_run_final_decision.read_order before taking the next daily candidate action."]
 
 
 def _daily_candidate_run_loop_report(
@@ -39400,13 +39557,14 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Run enabled daily candidate schedules and deliver the resulting digest to local files or webhook in one AI-callable step. This creates candidate scan jobs but never submits candidates or uploads torrents.",
             "input_schema": candidate_run_and_deliver_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "delivery_audit", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_push_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_target_audit", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
+                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "delivery_audit", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_push_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_target_audit", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "daily_candidate_run_final_decision", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
                 "run_and_deliver_report_fields": ["ready", "action", "schedule_status", "schedule_job_count", "delivery_requested", "delivery_status", "delivery_ok", "notification_delivered", "file_delivery", "webhook_delivery", "payload_fingerprint", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers"],
                 "daily_candidate_operational_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "approval", "completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_fulfillment_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_audit_fields": ["ready", "status", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "ready_target_met", "delivered", "delivery_succeeded_but_target_shortfall", "recommended_call", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_run_loop_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "reports", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "schedule_job_count"],
                 "daily_candidate_run_final_report_fields": ["ready", "report_allowed", "verdict", "action", "source_action", "target", "delivery", "approval", "automatic_loop", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "reports", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_run_final_decision_fields": ["ready", "report_allowed", "action", "status", "verdict", "target", "delivery", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "reports", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "delivery_result_fields": _daily_candidate_delivery_response_contract()["required_fields"],
                 "handoff_fields": ["daily_candidate_run_final_report", "daily_candidate_run_loop_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "schedule_result.schedule_digest", "delivery_result.payload_fingerprint"],
             },
@@ -39752,6 +39910,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_approval_final_report_fields": ["ready", "report_allowed", "status", "action", "approval_required", "can_submit_after_approval", "target", "candidate", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "after_submit_calls", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_run_loop_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "reports", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "schedule_job_count"],
                 "daily_candidate_run_final_report_fields": ["ready", "report_allowed", "verdict", "action", "source_action", "target", "delivery", "approval", "automatic_loop", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "reports", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_run_final_decision_fields": ["ready", "report_allowed", "action", "status", "verdict", "target", "delivery", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "reports", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "loop_control", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "daily_candidate_refill_final_report_fields": ["ready", "report_allowed", "verdict", "action", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "target_met", "candidate_job_count", "automatic_loop", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
@@ -41565,7 +41724,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
             "tool": "daily_candidate_run_and_deliver",
             "description": "Find up to 10 ranked source/target retorrent candidates, deliver the digest, then submit approved candidates through the inherited-identity handoff.",
             "required_fields": ["source_tracker", "target"],
-            "read_result": ["next_call", "daily_candidate_run_final_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
+            "read_result": ["next_call", "daily_candidate_run_final_decision", "daily_candidate_run_final_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
             "runbook": [
                 {
                     "step": "preflight",
@@ -41577,9 +41736,9 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "run_and_deliver_digest",
                     "tool": "daily_candidate_run_and_deliver",
-                    "read": ["next_call", "daily_candidate_run_final_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
-                    "continue_when": "daily_candidate_operational_final_report.delivery.delivered=true and daily_candidate_run_handoff.pending_job_count=0",
-                    "repeat_when": "daily_candidate_run_handoff.pending_job_count>0",
+                    "read": ["next_call", "daily_candidate_run_final_decision", "daily_candidate_run_final_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
+                    "continue_when": "daily_candidate_run_final_decision.action in ask_user_approval,report_complete,auto_refill_next,poll_jobs,deliver_digest",
+                    "repeat_when": "daily_candidate_run_final_decision.action in auto_refill_next,poll_jobs,deliver_digest and daily_candidate_run_final_decision.safe_to_call_now=true",
                     "stop_when": ["blockers is non-empty"],
                 },
                 {
@@ -42293,6 +42452,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_target_audit": {"type": ["object", "null"]},
             "daily_candidate_run_loop_report": {"type": "object"},
             "daily_candidate_run_final_report": {"type": "object"},
+            "daily_candidate_run_final_decision": {"type": "object"},
             "notification_payload": {"type": ["object", "null"]},
             "next_call": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
