@@ -23322,6 +23322,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbittorrent" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "qbittorrent_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "qbit_enforcement_summary" in tool_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
+    assert "policy_limit_progress" in tool_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
+    assert "qbit_policy_limit_progress_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "missing_roles" in tool_by_name["goal_progress"]["response_contract"]["qbit_policy_limit_progress_fields"]
+    assert "qbit_client_fields" in tool_by_name["goal_progress"]["response_contract"]["qbit_policy_limit_role_fields"]
     assert "tracker_adapters" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "tracker_adapter_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "adapter_extension_final_report" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
@@ -26621,6 +26625,14 @@ services:
     assert qbit["status"] in {"configured_unverified", "live_evidence_pending"}
     assert qbit["next_step"]["tool"] in {"ptcli_doctor", "qbit_inspect"}
     assert qbit["complete_when"].startswith("qbit_enforcement_summary.ready=true")
+    assert qbit["policy_limit_ready"] is False
+    assert qbit["policy_limit_progress"]["kind"] == "ptcli.qbit_policy_limit_progress"
+    assert qbit["policy_limit_progress"]["ready"] is False
+    assert qbit["policy_limit_progress"]["role_count"] == 2
+    assert qbit["policy_limit_progress"]["missing_roles"] == ["source:U2", "target:MTEAM"]
+    assert qbit["policy_limit_progress"]["roles"][0]["missing_fields"] == ["qbit_client_fields"]
+    assert "policy_limit_progress" in qbit["read_order"]
+    assert "policy_limit_progress.ready=false before live upload" in qbit["stop_when"]
     assert payload["evidence"]["daily_candidates"]["configured"] is False
     assert payload["evidence"]["daily_candidates"]["schedule_handoff"]["action"] == "configure_schedule"
     assert payload["evidence"]["daily_candidates"]["daily_schedule_gate"] is None
