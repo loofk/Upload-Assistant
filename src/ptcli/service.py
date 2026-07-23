@@ -5674,6 +5674,14 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     policy_config_repair_handoff = _site_policy_config_repair_handoff(policy_config_handoff, policy_repair_gate, config_update_plan, context)
     policy_config_apply_handoff = _site_policy_config_apply_handoff(policy_config_handoff, policy_config_repair_handoff, config_update_plan, context)
     site_policy_config_apply_final_report = _site_policy_config_apply_final_report(policy_config_apply_handoff, policy_repair_gate, policy_execution_handoff, config_update_plan, context)
+    policy_config_repair_package = _site_policy_config_repair_package(
+        config_update_plan,
+        policy_config_handoff,
+        policy_config_repair_handoff,
+        policy_config_apply_handoff,
+        site_policy_config_apply_final_report,
+        context,
+    )
     overall_ready = bool(report.get("ready")) and bool(policy_setup_summary.get("ready"))
     rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
     site_policy_profiles = {str(item.get("tracker")): item.get("policy_profile") for item in matrix if item.get("tracker")}
@@ -5729,6 +5737,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_config_repair_handoff": policy_config_repair_handoff,
         "policy_config_apply_handoff": policy_config_apply_handoff,
         "site_policy_config_apply_final_report": site_policy_config_apply_final_report,
+        "policy_config_repair_package": policy_config_repair_package,
         "policy_handoff": policy_handoff,
         "next_step": policy_handoff.get("next_step"),
         "next_call": next_call,
@@ -6462,6 +6471,7 @@ def _site_policy_copyable_config(preferred_patch: dict[str, Any] | None, fallbac
         "preferred_shape": "structured" if isinstance(preferred_patch, dict) else "flat" if isinstance(fallback_patch, dict) else None,
         "trackers": trackers,
         "patch_sha256": patch_hash,
+        "preferred_patch": patch,
         "python_update_snippet": python_update_snippet,
         "json_patch": patch_json,
         "manual_apply_note": "Paste python_update_snippet into data/config.py after the config dict is defined, or merge json_patch into config['PTCLI']['SITE_POLICIES']; keep stricter local limits if already configured.",
@@ -16155,6 +16165,147 @@ def _site_policy_config_apply_final_next_actions(ready: bool, manual_review_requ
     if blockers:
         return ["Apply site_policy_config_apply_final_report.copyable_config manually, then call verification and inspect blockers."]
     return ["Inspect site_policy_config_apply_final_report.recommended_call before touching live automation."]
+
+
+def _site_policy_config_repair_package(
+    config_update_plan: dict[str, Any],
+    config_handoff: dict[str, Any],
+    repair_handoff: dict[str, Any],
+    apply_handoff: dict[str, Any],
+    final_report: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Stable copy/edit/verify package for repairing PTCLI.SITE_POLICIES."""
+    copyable_config = final_report.get("copyable_config") if isinstance(final_report.get("copyable_config"), dict) else {}
+    items = config_update_plan.get("items") if isinstance(config_update_plan.get("items"), list) else []
+    tracker_repairs = [_site_policy_config_repair_package_item(item, copyable_config) for item in items if isinstance(item, dict)]
+    blockers = list(
+        dict.fromkeys(
+            _string_list(config_update_plan.get("blockers"))
+            + _string_list(config_handoff.get("blockers"))
+            + _string_list(repair_handoff.get("blockers"))
+            + _string_list(apply_handoff.get("blockers"))
+            + _string_list(final_report.get("blockers"))
+        )
+    )
+    manual_review = final_report.get("manual_review") if isinstance(final_report.get("manual_review"), dict) else {}
+    verification = final_report.get("verification") if isinstance(final_report.get("verification"), dict) else {}
+    ready = bool(final_report.get("ready") is True and apply_handoff.get("ready") is True and not blockers)
+    review_ready = not any(item.get("needs_rule_review_fingerprint") for item in tracker_repairs)
+    return {
+        "kind": "ptcli.site_policy_config_repair_package",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "action": "verify_policy_ready" if ready else "manual_rule_review_then_apply_patch" if manual_review.get("required") else "apply_patch_then_verify",
+        "config_path": final_report.get("config_path") or config_update_plan.get("config_path") or 'config["PTCLI"]["SITE_POLICIES"]',
+        "preferred_shape": final_report.get("preferred_shape") or config_update_plan.get("preferred_shape") or "structured",
+        "apply_order": _string_list(final_report.get("apply_order")) or _string_list(config_update_plan.get("apply_order")),
+        "tracker_repairs": tracker_repairs,
+        "missing_summary": _site_policy_config_repair_package_missing_summary(tracker_repairs),
+        "manual_review": manual_review,
+        "manual_review_ready": review_ready,
+        "copyable_config": copyable_config,
+        "patch_sha256": copyable_config.get("patch_sha256"),
+        "python_update_snippet": copyable_config.get("python_update_snippet"),
+        "json_patch": copyable_config.get("json_patch"),
+        "merge_sources": _string_list(apply_handoff.get("merge_sources")),
+        "apply_contract": {
+            "edit_target": "data/config.py",
+            "config_key": "PTCLI.SITE_POLICIES",
+            "safe_to_auto_apply": False,
+            "requires_explicit_config_edit": True,
+            "keep_stricter_local_limits": True,
+            "rule_review_fingerprint_source": "site_policy_rule_review only; do not invent this value",
+        },
+        "verification": verification,
+        "recommended_call": final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else {},
+        "recommended_tool": final_report.get("recommended_tool"),
+        "recommended_endpoint": final_report.get("recommended_endpoint"),
+        "recommended_method": final_report.get("recommended_method"),
+        "recommended_request": final_report.get("recommended_request"),
+        "read_order": ["policy_config_repair_package", "tracker_repairs", "manual_review", "copyable_config", "apply_contract", "verification"],
+        "complete_when": [
+            "manual_review_ready=true",
+            "copyable_config.ready=true",
+            "config edit was explicitly applied",
+            "verification.success_when is satisfied",
+        ],
+        "stop_when": [
+            "manual_review.required=true and manual_review_ready=false",
+            "copyable_config.ready=false",
+            "rule_review_fingerprint is placeholder",
+            "verification returns blockers",
+        ],
+        "safety": {
+            "mutates_state": False,
+            "mutates_filesystem": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "does_not_edit_config": True,
+            "safe_to_auto_apply": False,
+            "does_not_generate_rule_review_fingerprint_without_user_evidence": True,
+        },
+        "blockers": blockers,
+        "next_actions": _site_policy_config_repair_package_next_actions(ready, bool(manual_review.get("required")), review_ready, blockers),
+        "request": _site_policy_rerun_request(request_context, {"accept_rules": True}),
+    }
+
+
+def _site_policy_config_repair_package_item(item: dict[str, Any], copyable_config: dict[str, Any]) -> dict[str, Any]:
+    tracker = str(item.get("tracker") or "")
+    patch = item.get("structured_template") if isinstance(item.get("structured_template"), dict) else item.get("flat_template") if isinstance(item.get("flat_template"), dict) else {}
+    copyable_patch = _site_policy_copyable_tracker_patch(copyable_config, tracker)
+    missing_fields = _string_list(item.get("missing_fields"))
+    placeholder_fields = _string_list(item.get("placeholder_fields"))
+    disabled_automation = _string_list(item.get("disabled_automation"))
+    return {
+        "tracker": tracker,
+        "roles": _string_list(item.get("roles")),
+        "ready": item.get("ready") is True,
+        "config_path": item.get("config_path"),
+        "missing_fields": missing_fields,
+        "placeholder_fields": placeholder_fields,
+        "disabled_automation": disabled_automation,
+        "needs_rule_review_fingerprint": "rule_review_fingerprint" in missing_fields or "rule_review_fingerprint" in placeholder_fields,
+        "needs_rate_limit": any(field in {"download_rate_limit", "upload_rate_limit"} for field in missing_fields),
+        "needs_seeding_requirement": any(field in {"min_seed_time_hours", "min_ratio"} for field in missing_fields),
+        "patch": patch,
+        "copyable_patch": copyable_patch,
+        "manual_steps": _string_list(item.get("manual_steps")),
+    }
+
+
+def _site_policy_copyable_tracker_patch(copyable_config: dict[str, Any], tracker: str) -> dict[str, Any]:
+    patch = copyable_config.get("preferred_patch")
+    if not isinstance(patch, dict):
+        raw = copyable_config.get("json_patch")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                patch = json.loads(raw)
+            except json.JSONDecodeError:
+                patch = {}
+    return patch.get(tracker) if isinstance(patch, dict) and isinstance(patch.get(tracker), dict) else {}
+
+
+def _site_policy_config_repair_package_missing_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "tracker_count": len(items),
+        "blocked_trackers": [item.get("tracker") for item in items if item.get("ready") is not True],
+        "rule_review_trackers": [item.get("tracker") for item in items if item.get("needs_rule_review_fingerprint")],
+        "rate_limit_trackers": [item.get("tracker") for item in items if item.get("needs_rate_limit")],
+        "seeding_trackers": [item.get("tracker") for item in items if item.get("needs_seeding_requirement")],
+        "disabled_automation_trackers": [item.get("tracker") for item in items if _string_list(item.get("disabled_automation"))],
+    }
+
+
+def _site_policy_config_repair_package_next_actions(ready: bool, manual_review_required: bool, review_ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Run policy_config_repair_package.verification, then continue with readiness_bundle before live automation."]
+    if manual_review_required and not review_ready:
+        return ["Review tracker rule pages, call site_policy_rule_review with real reviewer/reviewed_at evidence, merge the returned fingerprint patch, then apply copyable_config manually."]
+    if blockers:
+        return ["Apply policy_config_repair_package.copyable_config manually, keep stricter local limits, then run verification and inspect remaining blockers."]
+    return ["Inspect policy_config_repair_package.recommended_call before editing config."]
 
 
 def _site_policy_execution_summary_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -40363,7 +40514,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "site_policy_final_report", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "site_policy_final_report", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_config_repair_package", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -40420,6 +40571,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_config_repair_handoff_fields": ["ready", "status", "action", "accepted_rules", "config_path", "preferred_shape", "preferred_patch", "apply_order", "manual_review", "edit_config", "rerun", "tracker_items", "read_order", "complete_when", "stop_when", "safety", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "policy_config_apply_handoff_fields": ["ready", "status", "action", "config_path", "preferred_shape", "preferred_patch", "structured_patch", "flat_patch", "apply_order", "manual_review", "edit_config", "merge_sources", "patch_paths", "verification", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "site_policy_config_apply_final_report_fields": ["ready", "report_allowed", "verdict", "status", "action", "accepted_rules", "config_path", "preferred_shape", "apply_order", "manual_review", "copyable_config", "preferred_patch", "patch_paths", "verification", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "policy_config_repair_package_fields": ["ready", "status", "action", "config_path", "preferred_shape", "apply_order", "tracker_repairs", "missing_summary", "manual_review", "manual_review_ready", "copyable_config", "patch_sha256", "python_update_snippet", "json_patch", "merge_sources", "apply_contract", "verification", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "policy_config_repair_package_item_fields": ["tracker", "roles", "ready", "config_path", "missing_fields", "placeholder_fields", "disabled_automation", "needs_rule_review_fingerprint", "needs_rate_limit", "needs_seeding_requirement", "patch", "copyable_patch", "manual_steps"],
                 "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "config_update_plan", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "rule_obligations"],
                 "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
             },
@@ -40438,7 +40591,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "config_patch_fields": ["config_path", "preferred_shape", "structured_patch", "flat_patch", "safe_to_auto_apply", "mutates_state", "apply_order"],
                 "rule_review_final_report_fields": ["ready", "report_allowed", "verdict", "action", "requested_trackers", "requested_roles", "review_items", "rule_review_package", "config_patch", "merged_config_patch", "merge_plan", "after_edit", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "config_apply_final_report_fields": ["ready", "report_allowed", "verdict", "action", "config_path", "patch_source", "preferred_patch", "fallback_patch", "copyable_config", "apply_order", "manual_steps", "verification", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-                "copyable_config_fields": ["ready", "config_path", "preferred_shape", "trackers", "patch_sha256", "python_update_snippet", "json_patch", "manual_apply_note", "verify_after_apply", "safety"],
+                "copyable_config_fields": ["ready", "config_path", "preferred_shape", "trackers", "patch_sha256", "preferred_patch", "python_update_snippet", "json_patch", "manual_apply_note", "verify_after_apply", "safety"],
                 "config_apply_verification_fields": ["tool", "endpoint", "method", "request", "read", "continue_when", "stop_when"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "after_edit"],
             },
@@ -43198,6 +43351,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_config_repair_handoff": {"type": "object"},
             "policy_config_apply_handoff": {"type": "object"},
             "site_policy_config_apply_final_report": {"type": "object"},
+            "policy_config_repair_package": {"type": "object"},
             "policy_handoff": {"type": "object"},
             "next_step": {"type": "object"},
             "next_call": {"type": "object"},

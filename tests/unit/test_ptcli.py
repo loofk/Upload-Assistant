@@ -21248,6 +21248,16 @@ def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> No
     assert apply_handoff["action"] == "verify_policy_ready"
     assert apply_handoff["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert apply_handoff["safety"]["does_not_edit_config"] is True
+    repair_package = payload["policy_config_repair_package"]
+    assert repair_package["kind"] == "ptcli.site_policy_config_repair_package"
+    assert repair_package["ready"] is True
+    assert repair_package["action"] == "verify_policy_ready"
+    assert repair_package["manual_review_ready"] is True
+    assert repair_package["missing_summary"]["blocked_trackers"] == []
+    assert repair_package["copyable_config"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20 MiB/s"
+    assert repair_package["tracker_repairs"][0]["copyable_patch"]["qbit_limits"]["download_limit"] == "20 MiB/s"
+    assert repair_package["apply_contract"]["safe_to_auto_apply"] is False
+    assert repair_package["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["policy_gap_summary"]["by_role"]["source"]["trackers"] == ["U2"]
     assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
 
@@ -21458,6 +21468,25 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert apply_final["copyable_config"]["trackers"] == ["U2", "MTEAM"]
     assert apply_final["recommended_call"]["tool"] == "site_policy_rule_review"
     assert apply_final["recommended_call"]["requires_user_review"] is True
+    repair_package = payload["policy_config_repair_package"]
+    assert repair_package["kind"] == "ptcli.site_policy_config_repair_package"
+    assert repair_package["ready"] is False
+    assert repair_package["status"] == "blocked"
+    assert repair_package["action"] == "manual_rule_review_then_apply_patch"
+    assert repair_package["manual_review"]["required"] is True
+    assert repair_package["manual_review_ready"] is False
+    assert repair_package["missing_summary"]["blocked_trackers"] == ["U2", "MTEAM"]
+    assert repair_package["missing_summary"]["rule_review_trackers"] == ["U2", "MTEAM"]
+    assert repair_package["missing_summary"]["rate_limit_trackers"] == ["U2", "MTEAM"]
+    assert repair_package["missing_summary"]["seeding_trackers"] == ["U2", "MTEAM"]
+    assert repair_package["copyable_config"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert repair_package["tracker_repairs"][0]["needs_rule_review_fingerprint"] is True
+    assert repair_package["tracker_repairs"][0]["needs_rate_limit"] is True
+    assert repair_package["tracker_repairs"][0]["needs_seeding_requirement"] is True
+    assert repair_package["tracker_repairs"][0]["copyable_patch"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert repair_package["apply_contract"]["rule_review_fingerprint_source"] == "site_policy_rule_review only; do not invent this value"
+    assert repair_package["safety"]["does_not_edit_config"] is True
+    assert repair_package["safety"]["does_not_generate_rule_review_fingerprint_without_user_evidence"] is True
     assert apply_final["safety"]["requires_human_config_edit"] is True
     assert payload["agent_summary"]["policy_coverage_ready"] is False
     assert payload["agent_summary"]["execution_ready"] is False
@@ -22856,6 +22885,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_repair_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "site_policy_config_apply_final_report" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_config_repair_package" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
     assert "qbit_runtime_handoff" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
@@ -22909,6 +22939,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_config_apply_final_report_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "copyable_config" in tool_by_name["site_policies"]["response_contract"]["site_policy_config_apply_final_report_fields"]
     assert "recommended_call" in tool_by_name["site_policies"]["response_contract"]["site_policy_config_apply_final_report_fields"]
+    assert "policy_config_repair_package_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "tracker_repairs" in tool_by_name["site_policies"]["response_contract"]["policy_config_repair_package_fields"]
+    assert "apply_contract" in tool_by_name["site_policies"]["response_contract"]["policy_config_repair_package_fields"]
+    assert "policy_config_repair_package_item_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "copyable_patch" in tool_by_name["site_policies"]["response_contract"]["policy_config_repair_package_item_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -22941,6 +22976,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_apply_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
     assert "copyable_config" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_final_report_fields"]
     assert "copyable_config_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "preferred_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["copyable_config_fields"]
     assert "python_update_snippet" in tool_by_name["site_policy_rule_review"]["response_contract"]["copyable_config_fields"]
     assert "verification" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_final_report_fields"]
     assert "continue_when" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_verification_fields"]
@@ -23630,6 +23666,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_repair_handoff" in site_policy_schema["properties"]
     assert "policy_config_apply_handoff" in site_policy_schema["properties"]
     assert "site_policy_config_apply_final_report" in site_policy_schema["properties"]
+    assert "policy_config_repair_package" in site_policy_schema["properties"]
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "policy_execution_plan" in site_policy_schema["properties"]
     assert "policy_execution_sequence" in site_policy_schema["properties"]
