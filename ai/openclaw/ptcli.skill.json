@@ -107,6 +107,32 @@
         "restriction": "Use job_control_summary.dry_run_request/recommended_request first, or fall back to job_handoff.recommended_request plus allowlisted overrides."
       }
     },
+    "next_call_policy": {
+      "primary_field": "next_call",
+      "manual_sequence_field": "manual_retorrent_remaining_sequence.next_call",
+      "daily_batch_field": "daily_candidate_batch_next_call",
+      "read_before_call": [
+        "next_call.ready",
+        "next_call.safe_to_call_now",
+        "next_call.requires_user_review",
+        "next_call.uploads",
+        "next_call.contacts_trackers",
+        "next_call.contacts_qbittorrent",
+        "next_call.approval",
+        "next_call.safety",
+        "blockers"
+      ],
+      "execute_when": "next_call.ready=true and next_call.safe_to_call_now=true and blockers=[]",
+      "require_user_review_when": "next_call.requires_user_review=true or next_call.uploads=true or next_call.mutates_state=true",
+      "stop_when": [
+        "next_call.ready=false",
+        "next_call.safe_to_call_now=false and no explicit user approval",
+        "next_call.uploads=true and confirm_upload was not explicitly supplied",
+        "duplicate_check.exists=true",
+        "blockers is non-empty"
+      ],
+      "after_call": "Follow next_call.after_call; poll returned job ids through get_job_status, then read get_job_summary when terminal."
+    },
     "mandatory_preflight": [
       "goal_progress",
       "deployment_check",
@@ -142,10 +168,11 @@
     "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
     "must": [
       "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
-      "Read policy_application_handoff, live_validation_completion_audit, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
+      "Use next_call as the primary next-tool contract when present; read next_call.safe_to_call_now, next_call.requires_user_review, next_call.uploads, next_call.approval, next_call.safety, and next_call.after_call before executing it.",
+      "Read policy_application_handoff, live_validation_completion_audit, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_call, manual_retorrent_remaining_sequence.next_call, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
       "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
       "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
-      "Treat status=blocked as recoverable only when job_control_summary.recommended_call, next_step, or job_handoff.recommended_request names a safe tool.",
+      "Treat status=blocked as recoverable only when next_call, manual_retorrent_remaining_sequence.next_call, job_control_summary.recommended_call, or job_handoff.recommended_request names a safe tool.",
       "Report final source, target, torrent hash, content path, uploaded torrent injection, seeding wait, summary_file, and blockers."
     ],
     "must_not": [
@@ -166,7 +193,8 @@
         "status",
         "blockers",
         "next_actions",
-        "next_step",
+        "next_call",
+        "manual_retorrent_remaining_sequence.next_call",
         "recommended_tool",
         "recommended_request"
       ],
@@ -236,8 +264,10 @@
       "closure_handoff.target.uploaded_seeding_ready=false",
       "closure_handoff.blockers is not empty"
     ],
-    "next_step_source": "job_control_summary when present, otherwise job_handoff or closure_handoff.next_step",
+    "next_step_source": "next_call when present, then manual_retorrent_remaining_sequence.next_call, then job_control_summary, job_handoff, or closure_handoff.next_step",
     "recommended_call_fields": [
+      "next_call",
+      "manual_retorrent_remaining_sequence.next_call",
       "live_validation_completion_audit.recommended_call",
       "live_user_report.recommended_call",
       "job_control_summary.recommended_call",
@@ -258,10 +288,10 @@
       "stop_duplicate": "Do not upload; report duplicate_check.dupes to the user.",
       "collect_confirmations": "Ask the user for explicit accept_rules/confirm_upload confirmation before resume.",
       "configure_policy": "Call site_policies or update PTCLI.SITE_POLICIES before live work.",
-      "prepare_materials": "Use closure_handoff.next_step or resume_job with allowlisted material overrides.",
-      "repair_target_payload": "Use closure_handoff.next_step after fixing target upload payload blockers.",
-      "repair_qbit": "Use closure_handoff.next_step after reviewing qBittorrent evidence and rate-limit blockers.",
-      "resolve_blockers": "Stop and report closure_handoff.blockers unless next_step provides a safe tool call.",
+      "prepare_materials": "Prefer manual_retorrent_remaining_sequence.next_call or next_call; otherwise use closure_handoff.next_step or resume_job with allowlisted material overrides.",
+      "repair_target_payload": "Prefer manual_retorrent_remaining_sequence.next_call or next_call after fixing target upload payload blockers.",
+      "repair_qbit": "Prefer manual_retorrent_remaining_sequence.next_call or next_call after reviewing qBittorrent evidence and rate-limit blockers.",
+      "resolve_blockers": "Stop and report closure_handoff.blockers unless next_call or manual_retorrent_remaining_sequence.next_call provides a safe tool call.",
       "inspect": "Read get_job_summary and report uncertainty; do not attempt live upload."
     }
   },
@@ -424,6 +454,11 @@
           "tool": "get_job_status",
           "read": [
             "status",
+            "next_call",
+            "next_call.ready",
+            "next_call.safe_to_call_now",
+            "next_call.after_call",
+            "manual_retorrent_remaining_sequence.next_call",
             "policy_application_handoff.ready",
             "policy_application_handoff.missing_request_fields",
             "policy_application_handoff.missing_confirmations",
@@ -454,7 +489,8 @@
             "status=blocked",
             "status=failed",
             "status=cancelled"
-          ]
+          ],
+          "then_follow": "If status=blocked and manual_retorrent_remaining_sequence.next_call.ready=true, follow next_call_policy before calling it."
         },
         {
           "step": "prepare_metadata",
@@ -538,6 +574,10 @@
           "read": [
             "job_id",
             "status",
+            "manual_retorrent_remaining_sequence.next_call",
+            "manual_retorrent_remaining_sequence.next_call.safe_to_call_now",
+            "manual_retorrent_remaining_sequence.next_call.approval",
+            "manual_retorrent_remaining_sequence.next_call.safety",
             "target_upload_handoff.action",
             "target_upload_handoff.ready",
             "target_upload_handoff.uploaded_seeding_ready",
@@ -548,7 +588,7 @@
             "blockers"
           ],
           "continue_when": "target_upload_handoff.uploaded_seeding_ready=true and blockers=[]",
-          "resume_with": "target_upload_handoff.next_step or resume_job when uploaded torrent download/injection/wait evidence is incomplete",
+          "resume_with": "manual_retorrent_remaining_sequence.next_call when ready; otherwise target_upload_handoff.next_step or resume_job when uploaded torrent download/injection/wait evidence is incomplete",
           "stop_when": [
             "confirm_upload missing",
             "fresh duplicate exists",
@@ -560,6 +600,12 @@
           "step": "closure_decision",
           "tool": "get_job_summary",
           "read": [
+            "next_call",
+            "manual_retorrent_remaining_sequence.next_call",
+            "manual_retorrent_remaining_sequence.next_call.safe_to_call_now",
+            "manual_retorrent_remaining_sequence.next_call.requires_user_review",
+            "manual_retorrent_remaining_sequence.next_call.uploads",
+            "manual_retorrent_remaining_sequence.next_call.after_call",
             "policy_application_report",
             "policy_application_handoff.ready",
             "policy_application_handoff.applied_request_fields",
@@ -602,7 +648,7 @@
             "candidate_submission"
           ],
           "complete_when": "live_validation_completion_audit.report_allowed=true",
-          "resume_with": "job_handoff when job_handoff.action=resume; pass only job_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
+          "resume_with": "manual_retorrent_remaining_sequence.next_call or next_call when safe; otherwise job_handoff when job_handoff.action=resume with allowlisted overrides only",
           "stop_when": [
             "seedbox_live_validation_completion_report.status=duplicate_stopped",
             "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null",
@@ -717,6 +763,10 @@
           "step": "inspect",
           "tool": "get_job_status",
           "read": [
+            "next_call",
+            "next_call.safe_to_call_now",
+            "next_call.after_call",
+            "manual_retorrent_remaining_sequence.next_call",
             "job_handoff",
             "closure_handoff",
             "resume_plan",
@@ -726,8 +776,9 @@
             "blockers",
             "next_actions"
           ],
-          "continue_when": "job_handoff.action=resume and resume_plan.allowed=true",
+          "continue_when": "next_call.tool=resume_job or job_handoff.action=resume and resume_plan.allowed=true",
           "stop_when": [
+            "next_call.ready=false and job_handoff.action!=resume",
             "job_handoff.action=done",
             "job_handoff.action=stop",
             "resume_plan.allowed=false",

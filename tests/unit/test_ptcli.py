@@ -22860,7 +22860,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["steps"][9]["tool"] == "target_upload_job"
     assert "target_upload_handoff.uploaded_seeding_ready" in ready["steps"][9]["read"]
     assert ready["steps"][10]["complete_when"] == "live_validation_completion_audit.report_allowed=true"
-    assert ready["steps"][10]["resume_with"].startswith("job_handoff")
+    assert ready["steps"][10]["resume_with"].startswith("manual_retorrent_remaining_sequence.next_call")
     assert "source_url_check_and_submit" in ready["next_actions"][0]
 
     daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
@@ -22916,6 +22916,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
     assert manifest["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["tool"] == "source_url_check_and_submit"
+    assert manifest["skill_contract"]["next_call_policy"]["primary_field"] == "next_call"
+    assert manifest["skill_contract"]["next_call_policy"]["manual_sequence_field"] == "manual_retorrent_remaining_sequence.next_call"
+    assert "next_call.safe_to_call_now" in manifest["skill_contract"]["next_call_policy"]["read_before_call"]
+    assert manifest["skill_contract"]["next_call_policy"]["execute_when"] == "next_call.ready=true and next_call.safe_to_call_now=true and blockers=[]"
     assert "deployment_check" in manifest["skill_contract"]["mandatory_preflight"]
     assert "goal_progress" in manifest["skill_contract"]["mandatory_preflight"]
     assert "policy_application_handoff" in manifest["skill_contract"]["mandatory_preflight"]
@@ -22927,7 +22931,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_validation_completion_audit.failed_checks=[]" in manifest["skill_contract"]["completion_evidence"]
     assert "live_validation_completion_audit.blockers=[]" in manifest["skill_contract"]["completion_evidence"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in manifest["skill_contract"]["completion_evidence"]
-    assert "Read policy_application_handoff, live_validation_completion_audit, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call." in manifest["agent_instructions"]["must"]
+    assert "Use next_call as the primary next-tool contract when present; read next_call.safe_to_call_now, next_call.requires_user_review, next_call.uploads, next_call.approval, next_call.safety, and next_call.after_call before executing it." in manifest["agent_instructions"]["must"]
+    assert "Read policy_application_handoff, live_validation_completion_audit, live_validation_final_report, live_user_report, job_control_summary, blockers, next_actions, next_call, manual_retorrent_remaining_sequence.next_call, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call." in manifest["agent_instructions"]["must"]
     assert "Do not bypass site_policies, rule_obligations, policy_execution_handoff, policy_application_handoff, or duplicate_check." in manifest["agent_instructions"]["must_not"]
     assert "site policy config_audit reports missing_fields or placeholder_fields" in manifest["agent_instructions"]["ask_user_when"]
     assert manifest["tool_selection"]["manual_link_to_target"] == "source_url_check_and_submit"
@@ -22937,8 +22942,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["final_report_field"] == "live_validation_completion_audit"
     assert manifest["closure_contract"]["complete_when"] == "live_validation_completion_audit.report_allowed=true"
     assert manifest["closure_contract"]["live_validation_report_field"] == "seedbox_live_validation_completion_report"
-    assert manifest["closure_contract"]["next_step_source"].startswith("job_control_summary")
-    assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
+    assert manifest["closure_contract"]["next_step_source"].startswith("next_call")
+    assert manifest["closure_contract"]["recommended_call_fields"][0] == "next_call"
+    assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Prefer manual_retorrent_remaining_sequence.next_call")
     assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "goal_progress", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "site_policy_rule_review", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
@@ -22968,6 +22974,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "recovery_handoff" in source_url_workflow["runbook"][4]["read"]
     assert "job_handoff.action=stop" in source_url_workflow["runbook"][4]["stop_when"]
     assert "job_handoff.action" in source_url_workflow["runbook"][5]["read"]
+    assert "next_call.safe_to_call_now" in source_url_workflow["runbook"][5]["read"]
+    assert "manual_retorrent_remaining_sequence.next_call" in source_url_workflow["runbook"][5]["read"]
+    assert source_url_workflow["runbook"][5]["then_follow"].startswith("If status=blocked")
     assert "policy_config_apply_handoff.ready" in source_url_workflow["runbook"][5]["read"]
     assert "recovery_handoff.action" in source_url_workflow["runbook"][5]["read"]
     assert "blocked_recovery_report.action" in source_url_workflow["runbook"][5]["read"]
@@ -22988,6 +22997,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "target_materials_final_report.target_upload.target_upload_request" in source_url_workflow["runbook"][8]["read"]
     assert source_url_workflow["runbook"][9]["step"] == "target_upload_closure"
     assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
+    assert "manual_retorrent_remaining_sequence.next_call.safe_to_call_now" in source_url_workflow["runbook"][9]["read"]
+    assert "manual_retorrent_remaining_sequence.next_call.approval" in source_url_workflow["runbook"][9]["read"]
     assert "target_upload_handoff.summary_file" in source_url_workflow["runbook"][9]["read"]
     assert source_url_workflow["runbook"][10]["step"] == "closure_decision"
     assert "policy_application_handoff.applied_request_fields" in source_url_workflow["runbook"][10]["read"]
@@ -22996,7 +23007,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][10]["read"]
     assert "closure_summary.next_step" in source_url_workflow["runbook"][10]["read"]
     assert source_url_workflow["runbook"][10]["complete_when"] == "live_validation_completion_audit.report_allowed=true"
-    assert source_url_workflow["runbook"][10]["resume_with"].startswith("job_handoff")
+    assert "manual_retorrent_remaining_sequence.next_call.after_call" in source_url_workflow["runbook"][10]["read"]
+    assert source_url_workflow["runbook"][10]["resume_with"].startswith("manual_retorrent_remaining_sequence.next_call")
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -23079,6 +23091,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["schema_version"] == "ptcli.agent_manifest.v1"
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
         assert payload["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+        assert payload["skill_contract"]["next_call_policy"]["primary_field"] == "next_call"
+        assert payload["skill_contract"]["next_call_policy"]["manual_sequence_field"] == "manual_retorrent_remaining_sequence.next_call"
         assert "target duplicate check" in payload["skill_contract"]["mandatory_preflight"]
         assert "target_upload_handoff.uploaded_seeding_ready=true" in payload["skill_contract"]["completion_evidence"]
         assert "live_validation_final_report.report_allowed=true" in payload["skill_contract"]["completion_evidence"]
@@ -23356,7 +23370,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
         assert "target_upload_handoff.uploaded_seeding_ready" in source_url_workflow["runbook"][9]["read"]
         assert source_url_workflow["runbook"][10]["complete_when"] == "live_validation_completion_audit.report_allowed=true"
-        assert source_url_workflow["runbook"][10]["resume_with"].startswith("job_handoff")
+        assert source_url_workflow["runbook"][10]["resume_with"].startswith("manual_retorrent_remaining_sequence.next_call")
         assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][10]["stop_when"]
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "config_audit" in tools_by_name["site_profiles"]["response_contract"]["policy_profile_fields"]
