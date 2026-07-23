@@ -14205,6 +14205,17 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["reporting_gate"]["live_evidence_required"] is False
     assert job["reporting_gate"]["safety"]["read_only"] is True
     assert job["reporting_gate"]["safety"]["mutates_state"] is False
+    assert job["resume_gate"]["kind"] == "ptcli.resume_gate"
+    assert job["resume_gate"]["action"] == "preview_resume"
+    assert job["resume_gate"]["can_preview_now"] is True
+    assert job["resume_gate"]["can_execute_after_review"] is True
+    assert job["resume_gate"]["safe_to_call_now"] is True
+    assert job["resume_gate"]["dry_run_request"] == {"job_id": job["job_id"], "dry_run": True}
+    assert job["resume_gate"]["execute_request"] == {"job_id": job["job_id"]}
+    assert job["resume_gate"]["safety"]["read_only"] is True
+    assert job["resume_gate"]["safety"]["execute_requires_user_review"] is True
+    assert job["resume_gate"]["execute_side_effects"]["uploads"] is False
+    assert job["resume_gate"]["confirmations"]["requires_confirm_upload"] is False
     assert job["job_progress_handoff"]["kind"] == "ptcli.job_progress_handoff"
     assert job["job_progress_handoff"]["action"] == "resolve_blockers"
     assert job["job_progress_handoff"]["current_stage"]["name"] == "source_identified"
@@ -14249,6 +14260,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["next_call"] == job["next_call"]
     assert summary["job_summary_final_report"] == job["job_summary_final_report"]
     assert summary["reporting_gate"] == job["reporting_gate"]
+    assert summary["resume_gate"] == job["resume_gate"]
     assert summary["workflow_context"]["recovery_handoff"] == job["recovery_handoff"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["resume_execution_handoff"] == job["resume_execution_handoff"]
@@ -14261,6 +14273,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert listed["job_summary_final_report"]["action"] == "preview_resume"
     assert listed["reporting_gate"]["primary_report_field"] == "job_final_report"
     assert listed["reporting_gate"] == job["reporting_gate"]
+    assert listed["resume_gate"] == job["resume_gate"]
     assert listed["next_call"]["action"] == "preview_resume"
     assert listed["resume_final_report"]["recommended_call"]["request"] == {"job_id": job["job_id"], "dry_run": True}
     assert listed["blocked_recovery_report"] == job["blocked_recovery_report"]
@@ -21686,6 +21699,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "resume_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_gate" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "resume_gate_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "resume_gate_fields" in tool_by_name["get_job_summary"]["response_contract"]
+    assert "can_preview_now" in tool_by_name["get_job_summary"]["response_contract"]["resume_gate_fields"]
+    assert "can_execute_after_review" in tool_by_name["get_job_summary"]["response_contract"]["resume_gate_fields"]
     assert "reporting_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "reporting_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "reporting_gate" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -22813,6 +22833,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "automation_action" in summary_schema["properties"]
     assert "job_summary_final_report" in summary_schema["properties"]
     assert "reporting_gate" in summary_schema["properties"]
+    assert "resume_gate" in summary_schema["properties"]
     assert "job_lifecycle_control" in summary_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
@@ -22892,6 +22913,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_execution_gate" in job_schema["properties"]
     assert "policy_execution_final_report" in job_schema["properties"]
     assert "reporting_gate" in job_schema["properties"]
+    assert "resume_gate" in job_schema["properties"]
     assert "materials_handoff" in job_schema["properties"]
     assert "material_preparation_final_report" in job_schema["properties"]
     assert "retorrent_stage_handoff" in job_schema["properties"]
@@ -24184,6 +24206,13 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_control_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "job_control_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "job_control_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "resume_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_gate" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "resume_gate_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "resume_gate_fields" in tools_by_name["get_job_summary"]["response_contract"]
+        assert "can_preview_now" in tools_by_name["get_job_summary"]["response_contract"]["resume_gate_fields"]
+        assert "can_execute_after_review" in tools_by_name["get_job_summary"]["response_contract"]["resume_gate_fields"]
         assert "reporting_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "reporting_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "reporting_gate" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
