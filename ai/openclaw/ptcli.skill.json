@@ -51727,6 +51727,8 @@
           "policy_repair_ready",
           "policy_repair_gate",
           "rule_review_request",
+          "rule_review_preview",
+          "rule_review_verification_bundle",
           "config_update_plan",
           "policy_config_handoff",
           "policy_config_repair_handoff",
@@ -51742,6 +51744,32 @@
           "next_step",
           "read_order",
           "blockers"
+        ],
+        "rule_review_preview_fields": [
+          "ready",
+          "status",
+          "request",
+          "rule_review_package",
+          "verification_bundle",
+          "config_apply_final_report",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "rule_review_verification_bundle_fields": [
+          "ready",
+          "requested_trackers",
+          "expected_fingerprints",
+          "verification_call",
+          "read",
+          "continue_when",
+          "stop_when",
+          "safety"
         ],
         "tracker_adapter_evidence_fields": [
           "ready",

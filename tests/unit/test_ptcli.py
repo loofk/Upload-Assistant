@@ -24509,6 +24509,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "job_lifecycle_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "rule_review_request" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "rule_review_preview" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "rule_review_verification_bundle" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "rule_review_preview_fields" in goal_progress_tool["response_contract"]
+    assert "rule_review_verification_bundle_fields" in goal_progress_tool["response_contract"]
     assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_config_apply_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
@@ -26573,6 +26577,7 @@ services:
     assert "site_policy_config" in distance["remaining_capability_ids"]
     assert distance["next_work"]["primary_capability_id"] == "site_policy_config"
     assert distance["recommended_call"]["tool"] == "site_policy_rule_review"
+    assert distance["recommended_call"]["after_success"]["verify_with"] == "verification_bundle.verification_call"
     assert "critical_path_ready=true" in distance["completion_gate"]["must_not_mark_complete_until"]
     plan = payload["critical_path_plan"]
     assert plan["kind"] == "ptcli.goal_critical_path_plan"
@@ -26598,6 +26603,14 @@ services:
     assert payload["source_context"]["target"] == "MTEAM"
     assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
+    policy_evidence = payload["evidence"]["site_policies"]
+    assert policy_evidence["rule_review_preview"]["kind"] == "ptcli.goal_rule_review_preview"
+    assert policy_evidence["rule_review_preview"]["status"] == "blocked"
+    assert policy_evidence["rule_review_verification_bundle"]["kind"] == "ptcli.site_policy_rule_review_verification_bundle"
+    assert policy_evidence["rule_review_verification_bundle"]["ready"] is False
+    assert policy_evidence["rule_review_verification_bundle"]["expected_fingerprints"] == {}
+    assert policy_evidence["rule_review_verification_bundle"]["verification_call"]["endpoint"] == "/v1/site-policies"
+    assert "rule_review_verification_bundle" in policy_evidence["read_order"]
     qbit = payload["evidence"]["qbittorrent"]
     assert qbit["kind"] == "ptcli.goal_qbittorrent_evidence"
     assert qbit["configured"] is True

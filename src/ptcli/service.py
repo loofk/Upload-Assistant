@@ -6158,7 +6158,7 @@ def _site_policy_rule_review_verification_bundle(context: dict[str, Any], review
     expected_fingerprints = {
         str(item.get("tracker")): item.get("rule_review_fingerprint")
         for item in reviews
-        if item.get("tracker") and item.get("rule_review_fingerprint")
+        if ready and item.get("tracker") and item.get("rule_review_fingerprint")
     }
     return {
         "kind": "ptcli.site_policy_rule_review_verification_bundle",
@@ -38129,6 +38129,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     policy_config_repair_handoff = site_policies.get("policy_config_repair_handoff") if isinstance(site_policies.get("policy_config_repair_handoff"), dict) else {}
     policy_config_apply_handoff = site_policies.get("policy_config_apply_handoff") if isinstance(site_policies.get("policy_config_apply_handoff"), dict) else {}
     site_policy_config_apply_final_report = site_policies.get("site_policy_config_apply_final_report") if isinstance(site_policies.get("site_policy_config_apply_final_report"), dict) else {}
+    rule_review_preview = _goal_progress_rule_review_preview(site_policies)
     daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
     daily_candidate_config_final_report = deployment.get("daily_candidate_config_final_report") if isinstance(deployment.get("daily_candidate_config_final_report"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
@@ -38173,6 +38174,8 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "policy_repair_ready": policy_repair_gate.get("ready"),
                 "policy_repair_gate": policy_repair_gate or None,
                 "rule_review_request": policy_repair_gate.get("rule_review_request") if isinstance(policy_repair_gate.get("rule_review_request"), dict) else None,
+                "rule_review_preview": rule_review_preview or None,
+                "rule_review_verification_bundle": rule_review_preview.get("verification_bundle") if isinstance(rule_review_preview, dict) and isinstance(rule_review_preview.get("verification_bundle"), dict) else None,
                 "config_update_plan": {
                     "ready": config_update_plan.get("ready"),
                     "preferred_shape": config_update_plan.get("preferred_shape"),
@@ -38228,7 +38231,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 else policy_config_handoff.get("next_step")
                 if isinstance(policy_config_handoff.get("next_step"), dict)
                 else None,
-                "read_order": ["site_policy_config_apply_final_report", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
+                "read_order": ["rule_review_preview", "rule_review_verification_bundle", "site_policy_config_apply_final_report", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
                 "blockers": _string_list(site_policies.get("blockers")),
             },
             "tracker_adapters": _goal_progress_tracker_adapter_evidence(tracker_adapters),
@@ -39959,6 +39962,7 @@ def _goal_progress_distance_report(
     if not critical_remaining:
         critical_remaining = remaining_items[:3]
     next_work = _goal_progress_distance_next_work(critical_remaining, next_step, blockers)
+    recommended_call = _goal_progress_distance_recommended_call(next_step, blockers, focus_now)
     return {
         "kind": "ptcli.goal_distance_report",
         "status": "complete" if estimate.get("critical_path_ready") else "in_progress",
@@ -39984,14 +39988,7 @@ def _goal_progress_distance_report(
             for item in critical_remaining
         ],
         "next_work": next_work,
-        "recommended_call": {
-            "tool": next_step.get("tool"),
-            "endpoint": next_step.get("endpoint"),
-            "method": next_step.get("method"),
-            "request": next_step.get("request") if "request" in next_step else None,
-            "reason": next_step.get("reason") or focus_now.get("phase_id"),
-            "safe_to_call_now": not bool(blockers) or str(next_step.get("tool") or "") in {"site_policy_rule_review", "deployment_check", "readiness_bundle", "goal_progress"},
-        },
+        "recommended_call": recommended_call,
         "completion_gate": {
             "critical_path_ready": estimate.get("critical_path_ready"),
             "must_not_mark_complete_until": critical_path_plan.get("must_not_mark_complete_until") if isinstance(critical_path_plan.get("must_not_mark_complete_until"), list) else [],
@@ -40000,6 +39997,27 @@ def _goal_progress_distance_report(
         "blockers": blockers,
         "next_actions": next_work.get("next_actions") if isinstance(next_work.get("next_actions"), list) else [],
     }
+
+
+def _goal_progress_distance_recommended_call(next_step: dict[str, Any], blockers: list[str], focus_now: dict[str, Any]) -> dict[str, Any]:
+    tool = str(next_step.get("tool") or "")
+    call = {
+        "tool": next_step.get("tool"),
+        "endpoint": next_step.get("endpoint"),
+        "method": next_step.get("method"),
+        "request": next_step.get("request") if "request" in next_step else None,
+        "reason": next_step.get("reason") or focus_now.get("phase_id"),
+        "safe_to_call_now": not bool(blockers) or tool in {"site_policy_rule_review", "deployment_check", "readiness_bundle", "goal_progress"},
+    }
+    if tool == "site_policy_rule_review":
+        call["after_success"] = {
+            "read": ["rule_review_final_report", "verification_bundle", "config_apply_final_report", "merged_config_patch"],
+            "copy_to_config": "config_apply_final_report.copyable_config.preferred_patch",
+            "verify_with": "verification_bundle.verification_call",
+            "continue_when": "verification_bundle.expected_fingerprints are configured and site_policies.policy_execution_handoff.ready=true",
+            "stop_when": ["verification_bundle.expected_fingerprints is empty", "site_policies still reports placeholder or missing rule_review_fingerprint"],
+        }
+    return call
 
 
 def _goal_progress_distance_next_work(critical_remaining: list[dict[str, Any]], next_step: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
@@ -40107,6 +40125,47 @@ def _goal_progress_next_actions(
     if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
         actions.append("Configure a daily candidate schedule and validate a 10-item candidate digest before enabling push delivery.")
     return actions
+
+
+def _goal_progress_rule_review_preview(site_policies: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(site_policies, dict):
+        return None
+    repair_gate = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
+    request = repair_gate.get("rule_review_request") if isinstance(repair_gate.get("rule_review_request"), dict) else {}
+    if not request:
+        next_step = repair_gate.get("next_step") if isinstance(repair_gate.get("next_step"), dict) else {}
+        if next_step.get("tool") == "site_policy_rule_review" and isinstance(next_step.get("request"), dict):
+            request = next_step["request"]
+    if not request:
+        return None
+    try:
+        preview = site_policy_rule_review_payload(request)
+    except ServiceError as exc:
+        return {
+            "kind": "ptcli.goal_rule_review_preview",
+            "ready": False,
+            "status": "blocked",
+            "request": request,
+            "blockers": [str(exc)],
+            "next_actions": ["Fix the rule_review_request, then rerun goal_progress."],
+        }
+    return {
+        "kind": "ptcli.goal_rule_review_preview",
+        "ready": preview.get("ready") is True,
+        "status": preview.get("status"),
+        "request": preview.get("request"),
+        "rule_review_package": preview.get("rule_review_package") if isinstance(preview.get("rule_review_package"), dict) else None,
+        "verification_bundle": preview.get("verification_bundle") if isinstance(preview.get("verification_bundle"), dict) else None,
+        "config_apply_final_report": preview.get("config_apply_final_report") if isinstance(preview.get("config_apply_final_report"), dict) else None,
+        "recommended_tool": preview.get("recommended_tool"),
+        "recommended_endpoint": preview.get("recommended_endpoint"),
+        "recommended_request": preview.get("recommended_request"),
+        "read_order": ["rule_review_preview.rule_review_package", "rule_review_preview.verification_bundle", "rule_review_preview.config_apply_final_report", "blockers"],
+        "continue_when": "site_policy_rule_review.ready=true, then copy merged_config_patch into config and run verification_bundle.verification_call.",
+        "stop_when": ["rules_reviewed=false", "reviewer/reviewed_at placeholders remain", "verification_bundle.expected_fingerprints is empty after rule-review submission"],
+        "blockers": _string_list(preview.get("blockers")),
+        "next_actions": _string_list(preview.get("next_actions")),
+    }
 
 
 def _goal_progress_site_policy_next_step(site_policies: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -41052,7 +41111,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "daily_candidate_refill_final_report_fields": ["ready", "report_allowed", "verdict", "action", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "target_met", "candidate_job_count", "automatic_loop", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
+                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "rule_review_preview", "rule_review_verification_bundle", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
+                "rule_review_preview_fields": ["ready", "status", "request", "rule_review_package", "verification_bundle", "config_apply_final_report", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+                "rule_review_verification_bundle_fields": ["ready", "requested_trackers", "expected_fingerprints", "verification_call", "read", "continue_when", "stop_when", "safety"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
