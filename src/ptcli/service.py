@@ -3588,6 +3588,7 @@ def _daily_candidate_refill_loop_report(
     after_state = _daily_candidate_refill_loop_state(after_batch)
     action = _daily_candidate_refill_loop_action(ok, after_batch, after_state, progress, blockers)
     recommended_call = _daily_candidate_refill_loop_recommended_call(action, after_batch, followup)
+    loop_control = _daily_candidate_refill_loop_control(action, after_state, progress, recommended_call, followup, blockers)
     return {
         "kind": "ptcli.daily_candidate_refill_loop_report",
         "ready": ok and action in {"submit_available", "continue_refill", "poll_jobs", "deliver_digest", "report_target_met"},
@@ -3608,6 +3609,7 @@ def _daily_candidate_refill_loop_report(
         "recommended_method": recommended_call.get("method"),
         "recommended_request": recommended_call.get("request"),
         "recommended_call": recommended_call,
+        "loop_control": loop_control,
         "read_order": ["refill_loop_report", "after_batch.daily_candidate_batch_publish_payload", "after_batch.daily_candidate_submission_plan", "after_batch.daily_candidate_refill_plan", "after_batch.daily_candidate_tracking_report"],
         "continue_when": _daily_candidate_refill_loop_continue_when(action),
         "stop_when": _daily_candidate_refill_loop_stop_when(action),
@@ -3621,6 +3623,60 @@ def _daily_candidate_refill_loop_report(
         "blockers": blockers,
         "next_actions": _daily_candidate_refill_loop_next_actions(action, after_state, blockers),
     }
+
+
+def _daily_candidate_refill_loop_control(action: str, after_state: dict[str, Any], progress: dict[str, Any], recommended_call: dict[str, Any], followup: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    shortfall = int(after_state.get("ready_shortfall_count") or 0)
+    safe_count = int(after_state.get("safe_to_submit_count") or 0)
+    running_count = int(after_state.get("running_count") or 0)
+    no_progress = int(progress.get("candidate_job_count_delta") or 0) <= 0 and int(progress.get("ready_count_delta") or 0) <= 0
+    should_continue = action == "continue_refill" and bool(recommended_call.get("safe_to_call_now")) and shortfall > 0 and not blockers and not no_progress
+    should_submit = action == "submit_available" and safe_count > 0
+    should_poll = action == "poll_jobs" or running_count > 0
+    should_deliver = action in {"deliver_digest", "report_target_met"} and shortfall == 0
+    complete = shortfall == 0 and not running_count and not blockers
+    return {
+        "kind": "ptcli.daily_candidate_refill_loop_control",
+        "ready": bool(should_continue or should_submit or should_poll or should_deliver or complete) and not blockers,
+        "action": action,
+        "complete": complete,
+        "target_count": int(after_state.get("target_count") or 0),
+        "ready_count": int(after_state.get("ready_count") or 0),
+        "safe_to_submit_count": safe_count,
+        "ready_shortfall_count": shortfall,
+        "running_count": running_count,
+        "blocked_count": int(after_state.get("blocked_count") or 0),
+        "no_progress": no_progress,
+        "should_continue_refill": should_continue,
+        "should_submit": should_submit,
+        "should_poll": should_poll,
+        "should_deliver": should_deliver,
+        "next_call": recommended_call or None,
+        "after_call": followup,
+        "repeat_until": [
+            "loop_control.complete=true",
+            "loop_control.no_progress=true",
+            "loop_control.blockers is non-empty",
+            "loop_control.should_submit=true and user approval is required",
+        ],
+        "read_order": ["refill_loop_report.loop_control", "refill_loop_report.recommended_call", "after_batch.daily_candidate_refill_plan", "after_batch.daily_candidate_batch_next_call"],
+        "blockers": blockers,
+        "next_actions": _daily_candidate_refill_loop_control_next_actions(should_continue, should_submit, should_poll, should_deliver, shortfall, blockers),
+    }
+
+
+def _daily_candidate_refill_loop_control_next_actions(should_continue: bool, should_submit: bool, should_poll: bool, should_deliver: bool, shortfall: int, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve refill_loop_report.loop_control.blockers before continuing the daily candidate loop."]
+    if should_submit:
+        return ["Ask the user to approve refill_loop_report.loop_control.next_call before submitting any candidate."]
+    if should_continue:
+        return [f"Call refill_loop_report.loop_control.next_call to continue filling {shortfall} missing ready candidate(s)."]
+    if should_poll:
+        return ["Call refill_loop_report.loop_control.after_call until running jobs settle."]
+    if should_deliver:
+        return ["Deliver the daily candidate digest and wait for explicit user approval before submitting candidates."]
+    return ["Stop automatic refill and report the current refill loop state."]
 
 
 def _daily_candidate_refill_loop_state(batch: dict[str, Any]) -> dict[str, Any]:
@@ -34703,7 +34759,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "before_after_fields": ["candidate_job_count", "ready_count", "ready_shortfall_count"],
                 "progress_fields": ["candidate_job_count_delta", "ready_count_delta"],
                 "followup_fields": ["tool", "endpoint", "method", "request"],
-                "refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "loop_control", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
             },
             "workflow_hints": {"read_before": "daily_candidate_batch_status", "repeat_until": "after.ready_shortfall_count=0 or blockers is non-empty", "submit_with": "submit_daily_candidate_job only after user approval"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
@@ -35106,7 +35163,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_scheduler_final_report", "refill_loop_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
-                "daily_candidate_refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "loop_control", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],

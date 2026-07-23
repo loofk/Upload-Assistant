@@ -17667,6 +17667,20 @@ def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, 
     assert loop_report["recommended_endpoint"] == "/v1/jobs/candidates/daily/refill"
     assert loop_report["recommended_request"] == refill["after_batch"]["daily_candidate_refill_plan"]["recommended_request"]
     assert loop_report["recommended_call"]["safe_to_call_now"] is True
+    loop_control = loop_report["loop_control"]
+    assert loop_control["kind"] == "ptcli.daily_candidate_refill_loop_control"
+    assert loop_control["ready"] is True
+    assert loop_control["action"] == "continue_refill"
+    assert loop_control["complete"] is False
+    assert loop_control["ready_shortfall_count"] == 18
+    assert loop_control["should_continue_refill"] is True
+    assert loop_control["should_submit"] is False
+    assert loop_control["should_poll"] is False
+    assert loop_control["should_deliver"] is False
+    assert loop_control["no_progress"] is False
+    assert loop_control["next_call"] == loop_report["recommended_call"]
+    assert loop_control["after_call"] == refill["followup"]
+    assert "loop_control.complete=true" in loop_control["repeat_until"]
     assert loop_report["safety"]["submits_candidates"] is False
     assert loop_report["safety"]["uploads_torrents"] is False
     assert refill["followup"]["tool"] == "daily_candidate_batch_status"
@@ -21350,6 +21364,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "refill_job_id" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
     assert "before_batch" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
     assert "after_batch" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["required_fields"]
+    assert "loop_control" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["refill_loop_report_fields"]
+    assert "refill_loop_control_fields" in tool_by_name["daily_candidate_refill_job"]["response_contract"]
+    assert "should_continue_refill" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["refill_loop_control_fields"]
     assert tool_by_name["daily_candidate_delivery"]["path"] == "/v1/candidates/daily/deliver"
     assert tool_by_name["daily_candidate_delivery"]["method"] == "POST"
     assert "daily_candidate_batch_publish_payload" in tool_by_name["daily_candidate_delivery"]["input_schema"]["properties"]
@@ -22554,6 +22571,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "refill_loop_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "refill" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "daily_candidate_refill_loop_report_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "daily_candidate_refill_loop_control_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "site_policy_profiles" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
