@@ -25095,6 +25095,9 @@ services:
     assert runbook_steps["prepare_env"]["env_template"]["ready"] is True
     assert runbook_steps["build_and_start_api"]["command"].endswith("up -d --build ptcli-api")
     assert runbook_steps["verify_api_contracts"]["requests"][2]["url"] == "http://127.0.0.1:8080/v1/tools"
+    assert runbook_steps["verify_api_contracts"]["requests"][3]["url"] == "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
+    assert runbook_steps["verify_api_contracts"]["requests"][4]["url"] == "http://127.0.0.1:8080/v1/openclaw/skill.json"
+    assert runbook_steps["verify_api_contracts"]["requests"][5]["url"] == "http://127.0.0.1:8080/v1/hermes/skill.json"
     assert runbook_steps["readiness_bundle"]["request"]["json"]["target"] == "MTEAM"
     assert runbook_steps["first_live_validation"]["continue_when"].startswith("doctor_result_handoff.live_safe_to_attempt=true")
     assert payload["deployment_handoff"]["deployment_runbook"]["steps"][3]["name"] == "check_deployment"
@@ -25110,6 +25113,15 @@ services:
     assert bootstrap["compose"]["start_api"].endswith("up -d --build ptcli-api")
     assert bootstrap["qbit"]["configured"] is True
     assert bootstrap["daily_candidates"]["configured"] is True
+    verification_endpoints = [item["endpoint"] for item in bootstrap["verification_requests"]]
+    assert verification_endpoints[:6] == [
+        "/health",
+        "/openapi.json",
+        "/v1/tools",
+        "/.well-known/ptcli-agent.json",
+        "/v1/openclaw/skill.json",
+        "/v1/hermes/skill.json",
+    ]
     assert bootstrap["recommended_tool"] == "readiness_bundle"
     assert bootstrap["recommended_endpoint"] == "/v1/readiness/bundle"
     assert bootstrap["next_step"]["request"]["target"] == "MTEAM"
