@@ -22607,6 +22607,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_config_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_goal_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_goal_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "report_allowed" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_final_report_fields"]
     assert "goal_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "delivery" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
@@ -23653,6 +23656,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "daily_candidate_config_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_goal_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_goal_final_report_fields" in goal_progress_tool["response_contract"]
     assert "refill_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "goal_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_handoff_fields" in goal_progress_tool["response_contract"]
@@ -23745,6 +23750,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_schedule_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_target_fulfillment_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_goal_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_goal_final_report_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "daily_scheduler_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "summary_evidence" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "refill_loop_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -25593,6 +25600,14 @@ services:
     assert payload["evidence"]["daily_candidates"]["daily_candidate_final_report"] is None
     assert payload["evidence"]["daily_candidates"]["daily_candidate_delivery_final_report"] is None
     assert payload["evidence"]["daily_candidates"]["daily_candidate_schedule_final_report"]["verdict"] == "schedule_missing"
+    daily_goal_report = payload["evidence"]["daily_candidates"]["daily_candidate_goal_final_report"]
+    assert daily_goal_report["kind"] == "ptcli.daily_candidate_goal_final_report"
+    assert daily_goal_report["report_allowed"] is False
+    assert daily_goal_report["verdict"] == "schedule_missing"
+    assert daily_goal_report["action"] == "configure_schedule"
+    assert daily_goal_report["target"]["target_count"] == 10
+    assert daily_goal_report["approval"]["required_before_submit"] is True
+    assert daily_goal_report["safety"]["daily_digest_complete_does_not_mean_torrents_uploaded"] is True
     daily_handoff = payload["evidence"]["daily_candidates"]["goal_handoff"]
     assert daily_handoff["kind"] == "ptcli.goal_daily_candidate_handoff"
     assert daily_handoff["action"] == "configure_schedule"
@@ -25648,6 +25663,15 @@ services:
     assert daily_evidence["daily_scheduler_final_report"]["action"] == "refill_shortfall"
     assert daily_evidence["daily_candidate_target_fulfillment_report"]["target"]["shortfall_count"] == 9
     assert daily_evidence["delivery_result"]["channel_attempted"] is True
+    daily_goal_report = daily_evidence["daily_candidate_goal_final_report"]
+    assert daily_goal_report["kind"] == "ptcli.daily_candidate_goal_final_report"
+    assert daily_goal_report["report_allowed"] is False
+    assert daily_goal_report["verdict"] == "target_shortfall"
+    assert daily_goal_report["action"] == "refill_shortfall"
+    assert daily_goal_report["target"]["ready_count"] == 1
+    assert daily_goal_report["target"]["shortfall_count"] == 9
+    assert daily_goal_report["delivery"]["delivered"] is True
+    assert daily_goal_report["recommended_call"]["tool"] == "daily_candidate_refill_job"
     assert daily_evidence["next_step"]["tool"] == "daily_candidate_refill_job"
     assert daily_evidence["next_step"]["reason"] == "daily_scheduler_final_report.refill_shortfall"
     refill_summary = tmp_path / "ptcli-daily-refill-summary.json"
@@ -25711,6 +25735,12 @@ services:
     assert refill_evidence["summary_file"] == str(refill_summary)
     assert refill_evidence["summary_evidence"]["has_refill_loop_report"] is True
     assert refill_evidence["refill_loop_report"]["action"] == "continue_refill"
+    refill_goal_report = refill_evidence["daily_candidate_goal_final_report"]
+    assert refill_goal_report["verdict"] == "target_shortfall"
+    assert refill_goal_report["action"] == "continue_refill"
+    assert refill_goal_report["target"]["ready_count"] == 2
+    assert refill_goal_report["target"]["shortfall_count"] == 8
+    assert refill_goal_report["recommended_call"]["tool"] == "daily_candidate_refill_job"
     assert refill_evidence["next_step"]["tool"] == "daily_candidate_refill_job"
     assert refill_evidence["next_step"]["reason"] == "refill_loop_report.continue_refill"
     assert refill_evidence["goal_handoff"]["refill"]["loop_call"]["request"]["excluded_source_ids"] == ["60635"]
@@ -25854,6 +25884,14 @@ services:
     assert schedule_report["action"] == "create_schedule_jobs"
     assert schedule_report["target_count"] == 10
     assert schedule_report["recommended_tool"] == "daily_candidates_schedule_job"
+    goal_report = daily["daily_candidate_goal_final_report"]
+    assert goal_report["kind"] == "ptcli.daily_candidate_goal_final_report"
+    assert goal_report["report_allowed"] is False
+    assert goal_report["verdict"] == "target_shortfall"
+    assert goal_report["action"] == "refill_shortfall"
+    assert goal_report["configured"] is True
+    assert goal_report["target"]["target_count"] == 10
+    assert goal_report["recommended_call"]["tool"] == "daily_candidates_schedule_job"
     assert daily["next_step"]["tool"] == "daily_candidates_schedule_job"
     assert daily["next_step"]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
     assert daily["next_step"]["request"]["schedules"][0]["job_request"]["source_tracker"] == "U2"
