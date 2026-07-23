@@ -15564,6 +15564,7 @@
           "recommended_action",
           "decision_summary",
           "candidate_field_completeness",
+          "candidate_field_contract_report",
           "publish_cards",
           "policy_risk_summary",
           "approval_queue",
@@ -15675,6 +15676,20 @@
           "items",
           "continue_when",
           "stop_when"
+        ],
+        "candidate_field_contract_report_fields": [
+          "ready",
+          "report_allowed",
+          "item_count",
+          "ready_count",
+          "missing_count",
+          "required_output_contract",
+          "missing_by_source_id",
+          "items",
+          "field_completeness",
+          "complete_when",
+          "stop_when",
+          "next_actions"
         ],
         "candidate_executability_matrix_fields": [
           "ready",
@@ -18637,6 +18652,7 @@
           "recommended_action",
           "decision_summary",
           "candidate_field_completeness",
+          "candidate_field_contract_report",
           "publish_cards",
           "policy_risk_summary",
           "approval_queue",
@@ -18752,6 +18768,34 @@
           "items",
           "continue_when",
           "stop_when"
+        ],
+        "candidate_field_contract_report_fields": [
+          "ready",
+          "report_allowed",
+          "item_count",
+          "ready_count",
+          "missing_count",
+          "required_output_contract",
+          "missing_by_source_id",
+          "items",
+          "field_completeness",
+          "complete_when",
+          "stop_when",
+          "next_actions"
+        ],
+        "daily_candidate_field_contract_report_fields": [
+          "ready",
+          "report_allowed",
+          "item_count",
+          "ready_count",
+          "missing_count",
+          "required_output_contract",
+          "missing_by_source_id",
+          "items",
+          "field_completeness",
+          "complete_when",
+          "stop_when",
+          "next_actions"
         ],
         "downloadability_summary_fields": [
           "ready",
@@ -22719,6 +22763,8 @@
           "items",
           "top_item",
           "publish_cards",
+          "candidate_field_completeness",
+          "candidate_field_contract_report",
           "candidate_executability_matrix",
           "approval_queue",
           "approval_prompts",
@@ -23965,6 +24011,7 @@
           "items",
           "top_item",
           "candidate_field_completeness",
+          "candidate_field_contract_report",
           "candidate_executability_matrix",
           "completion_items",
           "top_completion",
@@ -24112,6 +24159,20 @@
           "items",
           "continue_when",
           "stop_when"
+        ],
+        "daily_candidate_field_contract_report_fields": [
+          "ready",
+          "report_allowed",
+          "item_count",
+          "ready_count",
+          "missing_count",
+          "required_output_contract",
+          "missing_by_source_id",
+          "items",
+          "field_completeness",
+          "complete_when",
+          "stop_when",
+          "next_actions"
         ],
         "daily_candidate_executability_matrix_fields": [
           "ready",
@@ -37397,6 +37458,7 @@
           "items",
           "top_item",
           "candidate_field_completeness",
+          "candidate_field_contract_report",
           "candidate_executability_matrix",
           "completion_items",
           "top_completion",
@@ -37586,6 +37648,20 @@
           "items",
           "continue_when",
           "stop_when"
+        ],
+        "daily_candidate_field_contract_report_fields": [
+          "ready",
+          "report_allowed",
+          "item_count",
+          "ready_count",
+          "missing_count",
+          "required_output_contract",
+          "missing_by_source_id",
+          "items",
+          "field_completeness",
+          "complete_when",
+          "stop_when",
+          "next_actions"
         ],
         "daily_candidate_executability_matrix_fields": [
           "ready",

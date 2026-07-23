@@ -21419,8 +21419,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
     assert "candidate_executability_matrix" in tool_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
     assert "candidate_executability_matrix" in tool_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+    assert "candidate_field_contract_report" in tool_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
     assert "candidate_executability_matrix_fields" in tool_by_name["daily_candidates_job"]["response_contract"]
     assert "candidate_executability_item_fields" in tool_by_name["daily_candidates_job"]["response_contract"]
+    assert "candidate_field_contract_report_fields" in tool_by_name["daily_candidates_job"]["response_contract"]
     assert "exclude_source_ids" in tool_by_name["daily_candidates_job"]["input_schema"]["properties"]
     assert tool_by_name["daily_candidate_refill_job"]["path"] == "/v1/jobs/candidates/daily/refill"
     assert tool_by_name["daily_candidate_refill_job"]["method"] == "POST"
@@ -21499,6 +21501,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_batch_publish_payload_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "publish_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "candidate_field_completeness" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+    assert "candidate_field_contract_report" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "candidate_executability_matrix" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "daily_candidate_batch_next_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "daily_candidate_submission_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
@@ -21521,6 +21524,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "read_only" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_candidate_next_call_fields"]
     assert "dry_run" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_candidate_next_call_fields"]
     assert "daily_candidate_field_completeness_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "daily_candidate_field_contract_report_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "required_output_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_field_contract_report_fields"]
     assert "daily_candidate_executability_matrix_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "next_phase" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_executability_matrix_fields"]
     assert "daily_candidate_executability_item_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
@@ -27560,6 +27565,16 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert field_completeness["missing_by_source_id"] == {}
     assert field_completeness["items"][0]["source_id"] == "60635"
     assert field_completeness["items"][0]["target"] == "MTEAM"
+    field_contract = result["digest"]["push_payload"]["candidate_field_contract_report"]
+    assert field_contract["kind"] == "ptcli.daily_candidate_field_contract_report"
+    assert field_contract["ready"] is True
+    assert field_contract["report_allowed"] is True
+    assert field_contract["missing_by_source_id"] == {}
+    assert "promotion_or_free_status" in field_contract["required_output_contract"]
+    assert "metadata.imdb_or_tmdb_or_douban" in field_contract["required_output_contract"]
+    assert field_contract["items"][0]["checks"]["duplicate_check"] is True
+    assert field_contract["items"][0]["checks"]["downloadability"] is True
+    assert field_contract["items"][0]["summary"]["freeleech_like"] is True
     approval_queue = result["digest"]["approval_queue"]
     assert approval_queue["kind"] == "ptcli.daily_candidate_approval_queue"
     assert approval_queue["ready"] is True

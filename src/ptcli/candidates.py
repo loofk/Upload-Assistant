@@ -1096,6 +1096,7 @@ def _candidate_push_payload(
     decision_summary = _push_decision_summary(items, ready_items, blocked_items, recommendation)
     publish_cards = [item["publish_card"] for item in items if isinstance(item.get("publish_card"), dict)]
     candidate_field_completeness = _candidate_field_completeness(items)
+    candidate_field_contract_report = _candidate_field_contract_report(items, candidate_field_completeness)
     return {
         "kind": "ptcli.daily_candidates_push_payload",
         "title": "Daily PT retorrent candidates",
@@ -1114,6 +1115,7 @@ def _candidate_push_payload(
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "decision_summary": decision_summary,
         "candidate_field_completeness": candidate_field_completeness,
+        "candidate_field_contract_report": candidate_field_contract_report,
         "publish_cards": publish_cards,
         "approval_queue": approval_queue,
         "approval_prompts": approval_queue["approval_prompts"],
@@ -1282,6 +1284,96 @@ def _candidate_field_completeness(items: list[dict[str, Any]]) -> dict[str, Any]
         "continue_when": "candidate_field_completeness.ready=true before publishing the daily candidate digest as complete.",
         "stop_when": ["candidate_field_completeness.missing_by_source_id is non-empty"],
     }
+
+
+def _candidate_field_contract_report(items: list[dict[str, Any]], field_completeness: dict[str, Any]) -> dict[str, Any]:
+    reports = [_candidate_field_contract_item(item) for item in items]
+    missing_by_source_id = {str(report["source_id"] or report["rank"]): report["missing_fields"] for report in reports if report["missing_fields"]}
+    ready_items = [report for report in reports if report.get("ready")]
+    return {
+        "kind": "ptcli.daily_candidate_field_contract_report",
+        "ready": not missing_by_source_id,
+        "report_allowed": not missing_by_source_id,
+        "item_count": len(reports),
+        "ready_count": len(ready_items),
+        "missing_count": len(missing_by_source_id),
+        "required_output_contract": [
+            "source_tracker",
+            "source_id",
+            "title",
+            "size",
+            "published_at",
+            "promotion_or_free_status",
+            "metadata.imdb_or_tmdb_or_douban",
+            "duplicate_check",
+            "downloadability",
+            "recommendation_reason",
+            "risk_or_blockers",
+            "action.submit_entry",
+        ],
+        "missing_by_source_id": missing_by_source_id,
+        "items": reports,
+        "field_completeness": {
+            "ready": field_completeness.get("ready"),
+            "missing_by_source_id": field_completeness.get("missing_by_source_id") if isinstance(field_completeness.get("missing_by_source_id"), dict) else {},
+        },
+        "complete_when": ["candidate_field_contract_report.report_allowed=true", "candidate_field_contract_report.missing_by_source_id={}"],
+        "stop_when": ["candidate_field_contract_report.missing_by_source_id is non-empty before reporting a daily digest as complete"],
+        "next_actions": _candidate_field_contract_next_actions(missing_by_source_id),
+    }
+
+
+def _candidate_field_contract_item(item: dict[str, Any]) -> dict[str, Any]:
+    card = item.get("publish_card") if isinstance(item.get("publish_card"), dict) else {}
+    metadata = card.get("metadata") if isinstance(card.get("metadata"), dict) else item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    duplicate = card.get("duplicate_check") if isinstance(card.get("duplicate_check"), dict) else {}
+    downloadability = card.get("downloadability") if isinstance(card.get("downloadability"), dict) else item.get("downloadability_summary") if isinstance(item.get("downloadability_summary"), dict) else {}
+    recommendation = card.get("recommendation") if isinstance(card.get("recommendation"), dict) else item.get("recommendation") if isinstance(item.get("recommendation"), dict) else {}
+    risk = card.get("risk") if isinstance(card.get("risk"), dict) else item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+    action = card.get("action") if isinstance(card.get("action"), dict) else {}
+    checks = {
+        "source_tracker": bool(card.get("source_tracker") or item.get("source_tracker")),
+        "source_id": bool(card.get("source_id") or item.get("source_id")),
+        "title": bool(card.get("title") or item.get("title")),
+        "size": bool(card.get("size") or item.get("size")),
+        "published_at": bool(card.get("published_at") or item.get("published_at")),
+        "promotion_or_free_status": bool(card.get("promotion") or item.get("promotion") or card.get("freeleech_like") is not None),
+        "metadata.imdb_or_tmdb_or_douban": _candidate_metadata_ready(metadata),
+        "duplicate_check": duplicate.get("clear") is True or duplicate.get("searched") is True or item.get("duplicate_status") in {"not_found", "exists"},
+        "downloadability": downloadability.get("ready") is True or downloadability.get("downloadable") is True,
+        "recommendation_reason": bool(recommendation.get("reason") or recommendation.get("reasons") or item.get("recommended_action")),
+        "risk_or_blockers": bool(risk or item.get("blockers") is not None),
+        "action.submit_entry": bool(action.get("endpoint") or action.get("request") or item.get("action_endpoint") or item.get("submit_request")),
+    }
+    missing = [name for name, ready in checks.items() if not ready]
+    return {
+        "rank": item.get("rank"),
+        "source_tracker": card.get("source_tracker") or item.get("source_tracker"),
+        "source_id": card.get("source_id") or item.get("source_id"),
+        "target": card.get("target") or item.get("target"),
+        "title": card.get("title") or item.get("title"),
+        "ready": not missing,
+        "checks": checks,
+        "missing_fields": missing,
+        "summary": {
+            "size": card.get("size") or item.get("size"),
+            "published_at": card.get("published_at") or item.get("published_at"),
+            "promotion": card.get("promotion") or item.get("promotion"),
+            "freeleech_like": card.get("freeleech_like"),
+            "metadata_ready": _candidate_metadata_ready(metadata),
+            "duplicate_clear": duplicate.get("clear"),
+            "downloadability_ready": downloadability.get("ready"),
+            "risk_level": risk.get("level") or risk.get("risk_level"),
+            "can_submit": action.get("can_submit") if "can_submit" in action else item.get("can_submit"),
+        },
+    }
+
+
+def _candidate_field_contract_next_actions(missing_by_source_id: dict[str, list[str]]) -> list[str]:
+    if not missing_by_source_id:
+        return ["Candidate digest output contract is complete; publish the digest or request user approval before submit."]
+    first_source_id, missing = next(iter(missing_by_source_id.items()))
+    return [f"Fill candidate output fields for {first_source_id}: {', '.join(missing)}."]
 
 
 def _candidate_field_completeness_item(item: dict[str, Any], required_fields: list[str]) -> dict[str, Any]:
