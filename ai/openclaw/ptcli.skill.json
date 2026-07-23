@@ -51472,6 +51472,7 @@
           "delivery_audit",
           "daily_candidate_config_final_report",
           "daily_candidate_schedule_final_report",
+          "daily_candidate_target_progress",
           "daily_candidate_goal_final_report",
           "goal_handoff",
           "next_step",
@@ -51501,6 +51502,23 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "daily_candidate_target_progress_fields": [
+          "ready",
+          "target_count",
+          "selected_count",
+          "ready_count",
+          "safe_to_submit_count",
+          "pending_job_count",
+          "shortfall_count",
+          "target_met",
+          "ready_target_met",
+          "action",
+          "summary_file",
+          "recommended_call",
+          "continue_when",
+          "stop_when",
+          "safety"
         ],
         "daily_candidate_goal_final_report_fields": [
           "ready",
