@@ -22630,6 +22630,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submission_ready" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+    assert "seedbox_live_validation_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+    assert "seedbox_live_validation_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "report_allowed" in tool_by_name["goal_progress"]["response_contract"]["seedbox_live_validation_final_report_fields"]
     assert "live_validation_followup" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "job_lifecycle_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -23663,6 +23666,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "adapter_extension_final_report" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
     assert "tracker_rollout_handoff" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
     assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "seedbox_live_validation_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "seedbox_live_validation_final_report_fields" in goal_progress_tool["response_contract"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_completion_audit" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
@@ -23758,6 +23763,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "adapter_extension_final_report" in tools_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
         assert "tracker_rollout_handoff" in tools_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
         assert "live_submission_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "seedbox_live_validation_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "seedbox_live_validation_final_report_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_completion_audit" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -26177,6 +26184,16 @@ services:
     assert payload["evidence"]["live_validation"]["best"]["live_submission_final_report"]["verdict"] == "submit_check_and_submit"
     assert payload["evidence"]["live_validation"]["live_submission_final_report"]["submission"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["evidence"]["live_validation"]["live_submission_final_report"]["safety"]["must_not_report_live_complete"] is True
+    final_report = payload["evidence"]["live_validation"]["seedbox_live_validation_final_report"]
+    assert final_report["kind"] == "ptcli.seedbox_live_validation_final_report"
+    assert final_report["ready"] is False
+    assert final_report["report_allowed"] is False
+    assert final_report["verdict"] == "doctor_ready_submit_live_job"
+    assert final_report["phase"] == "after_doctor_before_submit"
+    assert final_report["submission_ready"] is True
+    assert final_report["recommended_call"]["tool"] == "source_url_check_and_submit"
+    assert final_report["recommended_call"]["requires_user_review"] is True
+    assert "live_validation_completion_audit.report_allowed=true" in final_report["complete_when"]
     assert payload["evidence"]["live_validation"]["best"]["recommended_tool"] == "source_url_check_and_submit"
     assert payload["evidence"]["live_validation"]["best"]["recommended_request"]["accept_rules"] is True
     assert payload["evidence"]["live_validation"]["best"]["recommended_request"]["confirm_upload"] is True
