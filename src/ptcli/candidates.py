@@ -13,6 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list, unsupported_trackers
+from src.ptcli.mteam_api import MTeamApiClient
 from src.ptcli.policies import build_site_policy, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import (
@@ -87,7 +88,7 @@ async def build_daily_candidates(
     discovered_seeds: list[CandidateSeed] = []
     skipped_source_ids: list[str] = []
     try:
-        discovered_seeds = await fetch_recent_candidate_seeds(source, base_dir=base_dir, limit=scan_limit)
+        discovered_seeds = await fetch_recent_candidate_seeds(source, config=config, base_dir=base_dir, limit=scan_limit)
         seeds = _filter_excluded_candidate_seeds(discovered_seeds, excluded_source_ids)
         excluded_lookup = set(excluded_source_ids)
         skipped_source_ids = [seed.torrent_id for seed in discovered_seeds if str(seed.torrent_id) in excluded_lookup]
@@ -193,10 +194,10 @@ async def build_daily_candidates(
     }
 
 
-async def fetch_recent_candidate_seeds(tracker: str, *, base_dir: str | None = None, limit: int = MAX_CANDIDATE_SCAN) -> list[CandidateSeed]:
+async def fetch_recent_candidate_seeds(tracker: str, *, config: dict[str, Any] | None = None, base_dir: str | None = None, limit: int = MAX_CANDIDATE_SCAN) -> list[CandidateSeed]:
     source = normalize_tracker(tracker)
     if source in MTEAM_API_TRACKERS:
-        raise ValueError("MTEAM candidate discovery is not enabled yet; use MTEAM as a target first.")
+        return await fetch_mteam_candidate_seeds(config or {}, source, limit=limit)
     if source not in GENERIC_DETAILS_BASE_URLS:
         raise ValueError(f"Candidate discovery is not enabled for tracker: {source}")
     cookiefile = _cookie_path(source, base_dir)
@@ -209,6 +210,100 @@ async def fetch_recent_candidate_seeds(tracker: str, *, base_dir: str | None = N
         response = await client.get(url)
     response.raise_for_status()
     return parse_recent_candidate_seeds(source, response.text, base_url=GENERIC_DETAILS_BASE_URLS[source], limit=limit)
+
+
+async def fetch_mteam_candidate_seeds(config: dict[str, Any], tracker: str = "MTEAM", *, limit: int = MAX_CANDIDATE_SCAN) -> list[CandidateSeed]:
+    source = normalize_tracker(tracker)
+    async with MTeamApiClient(config) as client:
+        payload = await client.search_torrents(page_size=min(limit, 100))
+    torrents = _mteam_torrent_list(payload)
+    seeds: list[CandidateSeed] = []
+    seen: set[str] = set()
+    for torrent in torrents:
+        if not isinstance(torrent, dict):
+            continue
+        torrent_id = _optional_string(torrent.get("id") or torrent.get("torrentId") or torrent.get("torrent_id"))
+        if not torrent_id or torrent_id in seen:
+            continue
+        seen.add(torrent_id)
+        seeds.append(
+            CandidateSeed(
+                tracker=source,
+                torrent_id=torrent_id,
+                title=_optional_string(torrent.get("name") or torrent.get("title")),
+                details_url=f"https://kp.m-team.cc/details/{torrent_id}",
+                size=_mteam_size(torrent.get("size")),
+                published_at=_optional_string(torrent.get("createdDate") or torrent.get("createdAt") or torrent.get("created") or torrent.get("addedDate") or torrent.get("added")),
+                promotion=_mteam_promotion(torrent),
+                seeders=_optional_int(torrent.get("seeders") or torrent.get("seed") or torrent.get("seedersCount")),
+                leechers=_optional_int(torrent.get("leechers") or torrent.get("leech") or torrent.get("leechersCount")),
+            )
+        )
+        if len(seeds) >= limit:
+            break
+    return seeds
+
+
+def _mteam_torrent_list(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("data", "torrents", "records", "items", "list"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            nested_items = _mteam_torrent_list(value)
+            if nested_items:
+                return nested_items
+    nested = payload.get("page") or payload.get("result")
+    if isinstance(nested, dict):
+        return _mteam_torrent_list(nested)
+    return []
+
+
+def _mteam_size(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
+        size = float(value)
+        units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        unit = 0
+        while size >= 1024 and unit < len(units) - 1:
+            size /= 1024
+            unit += 1
+        return f"{size:.1f} {units[unit]}" if unit else f"{int(size)} {units[unit]}"
+    return str(value).strip() or None
+
+
+def _mteam_promotion(torrent: dict[str, Any]) -> str | None:
+    labels = torrent.get("labelsNew")
+    values: list[str] = []
+    if isinstance(labels, list):
+        values.extend(str(label).strip() for label in labels if str(label).strip())
+    for key in ("promotion", "discount", "status", "discountStatus"):
+        value = torrent.get(key)
+        if value not in (None, "", [], {}):
+            values.append(str(value).strip())
+    normalized = ",".join(value for value in values if value)
+    return normalized.lower() or None
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_recent_candidate_seeds(tracker: str, html: str, *, base_url: str, limit: int = MAX_CANDIDATE_SCAN) -> list[CandidateSeed]:
@@ -300,7 +395,9 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
 
 async def _candidate_downloadability_summary(seed: CandidateSeed, source_policy: dict[str, Any], execute_request: dict[str, Any], *, accept_rules: bool, base_dir: str | None) -> dict[str, Any]:
     cookie_path = _cookie_path(seed.tracker, base_dir)
-    cookie_exists = await asyncio.to_thread(os.path.exists, cookie_path)
+    uses_api = seed.tracker in MTEAM_API_TRACKERS
+    cookie_exists = False if uses_api else await asyncio.to_thread(os.path.exists, cookie_path)
+    api_key_configured = bool(execute_request.get("source_tracker") in MTEAM_API_TRACKERS)
     adapter = source_download_adapter(seed.tracker)
     source_url = execute_request.get("source_url") or execute_request.get("source") or seed.details_url
     policy_allows_download = source_policy.get("allow_auto_download") is True
@@ -332,11 +429,17 @@ async def _candidate_downloadability_summary(seed: CandidateSeed, source_policy:
         "rules_accepted": bool(accept_rules),
         "manual_review_required": source_policy.get("manual_review_required") is True,
         "cookie": {
-            "required": True,
+            "required": not uses_api,
             "path": cookie_path,
             "exists": cookie_exists,
-            "status": "verified" if cookie_exists else "missing",
-            "note": "Candidate discovery already requires a valid cookie; source torrent download should reuse the same tracker session.",
+            "status": "not_required_api_key" if uses_api else "verified" if cookie_exists else "missing",
+            "note": "MTEAM source pulls use API key credentials." if uses_api else "Candidate discovery already requires a valid cookie; source torrent download should reuse the same tracker session.",
+        },
+        "api_key": {
+            "required": uses_api,
+            "configured": api_key_configured,
+            "config_path": "TRACKERS.MTEAM.api_key" if uses_api else None,
+            "status": "configured" if uses_api and api_key_configured else "not_required" if not uses_api else "missing",
         },
         "source_pull": {
             "tool": SOURCE_URL_RETORRENT_JOB_TOOL,
@@ -2675,6 +2778,7 @@ def _source_candidate_capability(source: str, *, base_dir: str | None = None, li
     info_adapter = source_info_adapter(normalized)
     download_adapter = source_download_adapter(normalized)
     cookie_path = _cookie_path(normalized, base_dir) if normalized in GENERIC_DETAILS_BASE_URLS else None
+    uses_api = normalized in MTEAM_API_TRACKERS
     blockers: list[str] = []
     if not adapter:
         blockers.append(f"{normalized} candidate discovery adapter is not enabled.")
@@ -2688,21 +2792,23 @@ def _source_candidate_capability(source: str, *, base_dir: str | None = None, li
         "source_info_adapter": info_adapter,
         "source_download_adapter": download_adapter,
         "candidate_discovery_adapter": adapter,
-        "implementation": "generic_recent_cookie" if adapter == "nexusphp_recent_or_search_html" else adapter,
-        "network_mode": "live_recent_listing_with_cookie" if adapter == "nexusphp_recent_or_search_html" else "not_enabled",
+        "implementation": "generic_recent_cookie" if adapter == "nexusphp_recent_or_search_html" else "mteam_api_search" if adapter == "mteam_api_search" else adapter,
+        "network_mode": "live_recent_listing_with_cookie" if adapter == "nexusphp_recent_or_search_html" else "live_api_search" if uses_api else "not_enabled",
         "scan": {
             "limit": max(1, min(int(limit or MAX_CANDIDATE_SCAN), MAX_CANDIDATE_SCAN)),
             "scan_limit": scan_limit,
             "default_scan_limit": MAX_CANDIDATE_SCAN,
             "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
-            "recent_url": _recent_url(normalized) if normalized in GENERIC_DETAILS_BASE_URLS else None,
-            "pagination": "first_recent_page",
-            "pagination_supported": False,
+            "recent_url": _recent_url(normalized) if normalized in GENERIC_DETAILS_BASE_URLS else f"{MTEAM_API_TRACKERS[normalized]}/api/torrent/search" if uses_api else None,
+            "pagination": "api_page_number" if uses_api else "first_recent_page",
+            "pagination_supported": uses_api,
             "exclude_source_ids": _normalize_source_ids(exclude_source_ids),
         },
         "credentials": {
             "cookie_required": normalized in GENERIC_DETAILS_BASE_URLS and normalized not in MTEAM_API_TRACKERS,
             "cookie_path": cookie_path,
+            "api_key_required": uses_api,
+            "api_key_config_path": f"TRACKERS.{normalized}.api_key" if uses_api else None,
         },
         "required_seed_outputs": ["source_id", "title", "details_url", "size", "published_at", "promotion", "seeders", "leechers"],
         "required_enrichment_outputs": ["imdb_id", "tmdb_id", "douban_id", "name", "description"],
@@ -2719,7 +2825,7 @@ def _source_candidate_capability(source: str, *, base_dir: str | None = None, li
 
 def _candidate_discovery_adapter(source: str) -> str | None:
     if source in MTEAM_API_TRACKERS:
-        return None
+        return "mteam_api_search"
     if source in GENERIC_DETAILS_BASE_URLS:
         return "nexusphp_recent_or_search_html"
     return None
@@ -2780,22 +2886,24 @@ def _normalize_scan_limit(scan_limit: int | None) -> int:
 
 
 def _candidate_discovery_static_pagination_plan(source_capability: dict[str, Any], targets: list[str], *, limit: int, scan_limit: int, exclude_source_ids: list[str]) -> dict[str, Any]:
+    adapter = source_capability.get("candidate_discovery_adapter")
+    pagination_supported = adapter == "mteam_api_search"
     can_increase = scan_limit < HARD_MAX_CANDIDATE_SCAN
     next_scan_limit = min(HARD_MAX_CANDIDATE_SCAN, max(scan_limit + MAX_CANDIDATE_SCAN, limit))
     return {
         "kind": "ptcli.daily_candidate_discovery_pagination_plan",
-        "pagination_supported": False,
-        "offset_supported": False,
+        "pagination_supported": pagination_supported,
+        "offset_supported": pagination_supported,
         "scan_limit": scan_limit,
         "default_scan_limit": MAX_CANDIDATE_SCAN,
         "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
         "can_increase_scan_limit": can_increase,
         "next_scan_limit": next_scan_limit if can_increase else None,
         "next_request_patch": {"scan_limit": next_scan_limit, "exclude_source_ids": exclude_source_ids} if can_increase else None,
-        "adapter": source_capability.get("candidate_discovery_adapter"),
+        "adapter": adapter,
         "safe_to_call_when": "rules/cookies are configured and previous digest.ready_shortfall_count>0",
         "stop_when": ["scan_limit reaches max_scan_limit", "pagination adapter is unavailable", "new candidates are still all excluded or blocked"],
-        "extension_required": "Implement tracker-specific page/offset cursor before setting pagination_supported=true.",
+        "extension_required": None if pagination_supported else "Implement tracker-specific page/offset cursor before setting pagination_supported=true.",
         "target_trackers": targets,
     }
 

@@ -17260,6 +17260,7 @@
           "rules_accepted",
           "manual_review_required",
           "cookie",
+          "api_key",
           "source_pull",
           "continue_when",
           "stop_when",
@@ -17335,6 +17336,12 @@
           "exists",
           "status",
           "note"
+        ],
+        "downloadability_api_key_fields": [
+          "required",
+          "configured",
+          "config_path",
+          "status"
         ],
         "downloadability_source_pull_fields": [
           "tool",
@@ -20637,6 +20644,7 @@
           "rules_accepted",
           "manual_review_required",
           "cookie",
+          "api_key",
           "source_pull",
           "continue_when",
           "stop_when",
@@ -20712,6 +20720,12 @@
           "exists",
           "status",
           "note"
+        ],
+        "downloadability_api_key_fields": [
+          "required",
+          "configured",
+          "config_path",
+          "status"
         ],
         "downloadability_source_pull_fields": [
           "tool",

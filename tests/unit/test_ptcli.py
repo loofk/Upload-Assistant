@@ -23589,8 +23589,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_field_completeness_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "downloadability_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "source_pull" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_summary_fields"]
+    assert "api_key" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_summary_fields"]
     assert "downloadability_cookie_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "status" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_cookie_fields"]
+    assert "downloadability_api_key_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "configured" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_api_key_fields"]
     assert "downloadability_source_pull_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "direct_cli_tool" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_source_pull_fields"]
     assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
@@ -25842,6 +25845,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_field_completeness_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "downloadability_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "source_pull" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
+        assert "api_key" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
         assert "candidate_discovery_profile" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
         assert "safe_to_submit_when" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
         assert "applied_before_scoring" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_dedupe_fields"]
@@ -25849,6 +25853,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "required_seed_outputs" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_profile_fields"]
         assert "downloadability_cookie_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "status" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_cookie_fields"]
+        assert "downloadability_api_key_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "configured" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_api_key_fields"]
         assert "downloadability_source_pull_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "direct_cli_tool" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_source_pull_fields"]
         assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
@@ -28556,6 +28562,65 @@ def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:
     assert seeds[0].size == "42.5 GiB"
     assert seeds[0].published_at == "2026-07-02 10:00"
     assert seeds[0].promotion == "free,2x"
+
+
+async def test_mteam_api_candidate_discovery_builds_seed(monkeypatch) -> None:
+    class FakeMTeamClient:
+        def __init__(self, config):
+            self.config = config
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def search_torrents(self, *, page_size):
+            assert page_size == 50
+            return {
+                "data": {
+                    "data": [
+                        {
+                            "id": 88001,
+                            "name": "MTEAM.Source.2026.2160p.WEB-DL",
+                            "size": 42 * 1024 * 1024 * 1024,
+                            "createdDate": "2026-07-20 12:00:00",
+                            "labelsNew": ["FREE", "2X"],
+                            "seeders": "18",
+                            "leechers": 4,
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr(ptcli_candidates, "MTeamApiClient", FakeMTeamClient)
+
+    seeds = await ptcli_candidates.fetch_recent_candidate_seeds("MTEAM", config={"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, limit=50)
+
+    assert len(seeds) == 1
+    assert seeds[0].tracker == "MTEAM"
+    assert seeds[0].torrent_id == "88001"
+    assert seeds[0].title == "MTEAM.Source.2026.2160p.WEB-DL"
+    assert seeds[0].details_url == "https://kp.m-team.cc/details/88001"
+    assert seeds[0].size == "42.0 GiB"
+    assert seeds[0].published_at == "2026-07-20 12:00:00"
+    assert seeds[0].promotion == "free,2x"
+    assert seeds[0].seeders == 18
+    assert seeds[0].leechers == 4
+
+
+def test_mteam_candidate_capability_uses_api_search() -> None:
+    capability = ptcli_candidates._source_candidate_capability("MTEAM", scan_limit=50)
+
+    assert capability["ready"] is True
+    assert capability["candidate_discovery_adapter"] == "mteam_api_search"
+    assert capability["implementation"] == "mteam_api_search"
+    assert capability["network_mode"] == "live_api_search"
+    assert capability["credentials"]["cookie_required"] is False
+    assert capability["credentials"]["api_key_required"] is True
+    assert capability["credentials"]["api_key_config_path"] == "TRACKERS.MTEAM.api_key"
+    assert capability["scan"]["recent_url"] == "https://api.m-team.cc/api/torrent/search"
+    assert capability["scan"]["pagination_supported"] is True
 
 
 def test_candidate_request_context_caps_limit_and_defaults() -> None:

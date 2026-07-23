@@ -67,17 +67,18 @@ class MTeamApiClient:
         return payload
 
     async def search_by_imdb(self, imdb: str) -> Any:
-        return await self.request(
-            "https://api.m-team.cc/api/torrent/search",
-            json={
-                "mode": "normal",
-                "visible": 1,
-                "categories": [],
-                "pageNumber": 1,
-                "pageSize": 100,
-                "imdb": imdb,
-            },
-        )
+        return await self.search_torrents(imdb=imdb, page_size=100)
+
+    async def search_torrents(self, *, page_number: int = 1, page_size: int = 50, **filters: Any) -> Any:
+        payload = {
+            "mode": "normal",
+            "visible": 1,
+            "categories": [],
+            "pageNumber": max(1, int(page_number or 1)),
+            "pageSize": max(1, min(int(page_size or 50), 100)),
+        }
+        payload.update({key: value for key, value in filters.items() if value not in (None, "", [], {})})
+        return await self.request("https://api.m-team.cc/api/torrent/search", json=payload)
 
     async def torrent_detail(self, torrent_id: str) -> Any:
         return await self.request("https://api.m-team.cc/api/torrent/detail", json={"id": int(torrent_id)})
