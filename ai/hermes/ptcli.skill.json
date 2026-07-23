@@ -46548,6 +46548,8 @@
           "delivery",
           "approval",
           "refill",
+          "completion_evidence",
+          "missing_evidence",
           "recommended_call",
           "recommended_tool",
           "recommended_endpoint",

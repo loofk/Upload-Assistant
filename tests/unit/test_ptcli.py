@@ -25746,6 +25746,61 @@ services:
     assert refill_evidence["goal_handoff"]["refill"]["loop_call"]["request"]["excluded_source_ids"] == ["60635"]
     assert refill_evidence["goal_handoff"]["refill"]["requires_user_approval_before_submit"] is True
     assert refill_evidence["goal_handoff"]["next_actions"][0].startswith("Call refill.loop_call")
+    complete_daily_summary = tmp_path / "ptcli-daily-complete-summary.json"
+    complete_daily_summary.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.daily_schedule.summary",
+                "status": "ok",
+                "ok": True,
+                "schedule_digest": {"target_count": 10, "selected_count": 10, "ready_count": 10, "shortfall_count": 0, "target_met": True, "pending_job_count": 0},
+                "daily_candidate_target_fulfillment_report": {
+                    "kind": "ptcli.daily_candidate_target_fulfillment_report",
+                    "ready": True,
+                    "status": "target_met",
+                    "action": "request_user_approval",
+                    "target": {"target_count": 10, "selected_count": 10, "ready_count": 10, "safe_to_submit_count": 10, "shortfall_count": 0, "pending_job_count": 0, "target_met": True, "ready_target_met": True},
+                    "blockers": [],
+                },
+                "daily_scheduler_final_report": {
+                    "kind": "ptcli.daily_scheduler_final_report",
+                    "ready": True,
+                    "report_allowed": True,
+                    "action": "request_user_approval",
+                    "delivery": {"delivered": True, "channel_attempted": True, "payload_fingerprint": "complete123"},
+                    "blockers": [],
+                },
+                "delivery_result": {"status": "delivered", "ok": True, "channel_attempted": True, "payload_fingerprint": "complete123"},
+                "delivery_audit": {"ready": True, "status": "delivered", "payload_fingerprint": "complete123", "channels": {"file": {"ok": True}}, "blockers": []},
+                "blockers": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    complete_daily_payload = ptcli_service.goal_progress_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(job_dir),
+            "downloads_path": str(downloads_dir),
+            "daily_candidate_summary_file": str(complete_daily_summary),
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+        }
+    )
+    complete_goal_report = complete_daily_payload["evidence"]["daily_candidates"]["daily_candidate_goal_final_report"]
+    assert complete_goal_report["report_allowed"] is True
+    assert complete_goal_report["verdict"] == "daily_digest_target_ready"
+    assert complete_goal_report["target"]["ready_target_met"] is True
+    assert complete_goal_report["delivery"]["delivered"] is True
+    assert complete_goal_report["missing_evidence"] == []
+    assert [item["name"] for item in complete_goal_report["completion_evidence"]] == [
+        "schedule_or_summary_evidence",
+        "ready_target_met",
+        "delivery_delivered",
+        "no_pending_jobs",
+        "no_blockers",
+    ]
     assert payload["evidence"]["site_policies"]["policy_repair_action"] == "review_rules"
     assert payload["evidence"]["site_policies"]["rule_review_request"]["source_tracker"] == "U2"
     assert payload["evidence"]["site_policies"]["rule_review_request"]["target"] == "MTEAM"

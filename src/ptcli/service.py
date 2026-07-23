@@ -34393,6 +34393,18 @@ def _goal_progress_daily_candidate_goal_final_report(
         or delivery.get("delivered") is True
     )
     submission_ready = bool(final_report.get("submission_ready") or operational_final.get("submission_ready") or safe_to_submit_count > 0)
+    completion_evidence = _goal_progress_daily_candidate_goal_completion_evidence(
+        evidence_configured=evidence_configured,
+        ready_target_met=ready_target_met,
+        delivered=delivered,
+        pending_job_count=pending_job_count,
+        blockers=blockers,
+        summary_file=daily_candidate_plan.get("summary_file"),
+        target_count=target_count,
+        ready_count=ready_count,
+        safe_to_submit_count=safe_to_submit_count,
+    )
+    missing_evidence = [item["name"] for item in completion_evidence if not item.get("ready")]
     action = _goal_progress_daily_candidate_goal_final_action(
         configured=evidence_configured,
         blockers=blockers,
@@ -34404,7 +34416,7 @@ def _goal_progress_daily_candidate_goal_final_report(
         scheduler_action=str(scheduler_final.get("action") or ""),
         refill_action=str(refill_loop_report.get("action") or ""),
     )
-    report_allowed = bool(evidence_configured and ready_target_met and delivered and pending_job_count == 0 and not blockers)
+    report_allowed = bool(not missing_evidence)
     recommended_call = _goal_progress_daily_candidate_goal_final_recommended_call(action, goal_handoff, scheduler_final, delivery_final, final_report, refill_loop_report)
     return {
         "kind": "ptcli.daily_candidate_goal_final_report",
@@ -34444,6 +34456,8 @@ def _goal_progress_daily_candidate_goal_final_report(
             "ready_shortfall_count": shortfall_count,
             "loop_report": refill_loop_report or None,
         },
+        "completion_evidence": completion_evidence,
+        "missing_evidence": missing_evidence,
         "recommended_call": recommended_call,
         "recommended_tool": recommended_call.get("tool"),
         "recommended_endpoint": recommended_call.get("endpoint"),
@@ -34462,6 +34476,52 @@ def _goal_progress_daily_candidate_goal_final_report(
         "blockers": blockers,
         "next_actions": _goal_progress_daily_candidate_goal_final_next_actions(action, shortfall_count, pending_job_count, safe_to_submit_count, blockers),
     }
+
+
+def _goal_progress_daily_candidate_goal_completion_evidence(
+    *,
+    evidence_configured: bool,
+    ready_target_met: bool,
+    delivered: bool,
+    pending_job_count: int,
+    blockers: list[str],
+    summary_file: Any,
+    target_count: int,
+    ready_count: int,
+    safe_to_submit_count: int,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "schedule_or_summary_evidence",
+            "ready": evidence_configured,
+            "value": summary_file,
+            "required": "configured schedule or daily schedule/refill summary evidence",
+        },
+        {
+            "name": "ready_target_met",
+            "ready": ready_target_met,
+            "value": {"target_count": target_count, "ready_count": ready_count, "safe_to_submit_count": safe_to_submit_count},
+            "required": "ready_count >= target_count for the daily candidate digest",
+        },
+        {
+            "name": "delivery_delivered",
+            "ready": delivered,
+            "value": delivered,
+            "required": "candidate digest delivered to file or webhook",
+        },
+        {
+            "name": "no_pending_jobs",
+            "ready": pending_job_count == 0,
+            "value": pending_job_count,
+            "required": "pending_job_count == 0",
+        },
+        {
+            "name": "no_blockers",
+            "ready": not blockers,
+            "value": blockers,
+            "required": "blockers == []",
+        },
+    ]
 
 
 def _goal_progress_daily_candidate_goal_final_action(
@@ -36138,7 +36198,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_scheduler_final_report", "refill_loop_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "daily_candidate_goal_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
-                "daily_candidate_goal_final_report_fields": ["ready", "report_allowed", "verdict", "status", "action", "configured", "evidence_configured", "summary_file", "target", "delivery", "approval", "refill", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_goal_final_report_fields": ["ready", "report_allowed", "verdict", "status", "action", "configured", "evidence_configured", "summary_file", "target", "delivery", "approval", "refill", "completion_evidence", "missing_evidence", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "loop_control", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
