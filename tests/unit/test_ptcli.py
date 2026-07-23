@@ -22971,6 +22971,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_run_loop_report_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "summary_evidence" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "refill_loop_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_refill_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_refill_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "refill" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "run_loop" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "daily_candidate_refill_loop_report_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -24043,6 +24045,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "daily_candidate_goal_final_report_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_run_loop_report_fields" in goal_progress_tool["response_contract"]
     assert "refill_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_refill_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_refill_final_report_fields" in goal_progress_tool["response_contract"]
     assert "goal_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_handoff_fields" in goal_progress_tool["response_contract"]
     assert "delivery" in goal_progress_tool["response_contract"]["daily_candidate_goal_handoff_fields"]
@@ -24147,6 +24151,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_scheduler_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "summary_evidence" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "refill_loop_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_refill_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_refill_final_report_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "goal_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_goal_handoff_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "delivery" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
@@ -26206,6 +26212,40 @@ services:
                     "blockers": [],
                     "next_actions": ["Call daily_candidate_refill_job again to fill 8 missing ready candidate(s)."],
                 },
+                "daily_candidate_refill_final_report": {
+                    "kind": "ptcli.daily_candidate_refill_final_report",
+                    "ready": True,
+                    "report_allowed": False,
+                    "verdict": "continue_refill",
+                    "action": "auto_refill_next",
+                    "target_count": 10,
+                    "ready_count": 2,
+                    "safe_to_submit_count": 2,
+                    "ready_shortfall_count": 8,
+                    "candidate_job_count": 2,
+                    "automatic_loop": {
+                        "safe_to_continue": True,
+                        "repeat_call": {
+                            "tool": "daily_candidate_refill_job",
+                            "endpoint": "/v1/jobs/candidates/daily/refill",
+                            "method": "POST",
+                            "request": {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "excluded_source_ids": ["60635"]},
+                            "safe_to_call_now": True,
+                            "requires_user_review": False,
+                        },
+                        "stop_reason": None,
+                    },
+                    "approval": {"required": False},
+                    "recommended_call": {
+                        "tool": "daily_candidate_refill_job",
+                        "endpoint": "/v1/jobs/candidates/daily/refill",
+                        "method": "POST",
+                        "request": {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "excluded_source_ids": ["60635"]},
+                        "safe_to_call_now": True,
+                        "requires_user_review": False,
+                    },
+                    "blockers": [],
+                },
             },
             ensure_ascii=False,
         ),
@@ -26225,16 +26265,22 @@ services:
     refill_evidence = refill_payload["evidence"]["daily_candidates"]
     assert refill_evidence["summary_file"] == str(refill_summary)
     assert refill_evidence["summary_evidence"]["has_refill_loop_report"] is True
+    assert refill_evidence["summary_evidence"]["has_refill_final_report"] is True
     assert refill_evidence["refill_loop_report"]["action"] == "continue_refill"
+    assert refill_evidence["daily_candidate_refill_final_report"]["action"] == "auto_refill_next"
     refill_goal_report = refill_evidence["daily_candidate_goal_final_report"]
     assert refill_goal_report["verdict"] == "target_shortfall"
-    assert refill_goal_report["action"] == "continue_refill"
+    assert refill_goal_report["action"] == "auto_refill_next"
     assert refill_goal_report["target"]["ready_count"] == 2
     assert refill_goal_report["target"]["shortfall_count"] == 8
     assert refill_goal_report["recommended_call"]["tool"] == "daily_candidate_refill_job"
+    assert refill_goal_report["recommended_call"]["reason"] == "daily_candidate_refill_final_report.auto_refill_next"
+    assert refill_goal_report["refill"]["final_action"] == "auto_refill_next"
+    assert refill_goal_report["refill"]["automatic_loop"]["safe_to_continue"] is True
     assert refill_evidence["next_step"]["tool"] == "daily_candidate_refill_job"
-    assert refill_evidence["next_step"]["reason"] == "refill_loop_report.continue_refill"
+    assert refill_evidence["next_step"]["reason"] == "daily_candidate_refill_final_report.auto_refill_next"
     assert refill_evidence["goal_handoff"]["refill"]["loop_call"]["request"]["excluded_source_ids"] == ["60635"]
+    assert refill_evidence["goal_handoff"]["refill"]["final_action"] == "auto_refill_next"
     assert refill_evidence["goal_handoff"]["refill"]["requires_user_approval_before_submit"] is True
     assert refill_evidence["goal_handoff"]["next_actions"][0].startswith("Call refill.loop_call")
     complete_daily_summary = tmp_path / "ptcli-daily-complete-summary.json"
