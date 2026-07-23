@@ -22815,7 +22815,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_lifecycle_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_preflight_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "live_execution_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+    assert "first_live_validation_handoff" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+    assert "seedbox_live_validation_start_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "seedbox_live_post_submit_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+    assert "agent_smoke_live_validation_handoff" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "recommended_request" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "request" in tool_by_name["goal_progress"]["response_contract"]["next_step_fields"]
     assert "ready_to_submit" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
@@ -23916,7 +23919,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "policy_runtime_contract" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "live_validation_preflight" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "live_validation_preflight_fields" in goal_progress_tool["response_contract"]
+    assert "first_live_validation_handoff" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
+    assert "seedbox_live_validation_start_report" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "seedbox_live_post_submit_report" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
+    assert "agent_smoke_live_validation_handoff" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
@@ -24024,7 +24030,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_runtime_contract" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "first_live_validation_handoff" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+        assert "seedbox_live_validation_start_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "seedbox_live_post_submit_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+        assert "agent_smoke_live_validation_handoff" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "rule_review_package" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
@@ -26147,6 +26156,11 @@ services:
     assert payload["evidence"]["live_validation"]["ready"] is False
     assert payload["evidence"]["live_validation_preflight"]["kind"] == "ptcli.goal_live_validation_preflight"
     assert payload["evidence"]["live_validation_preflight"]["ready"] is False
+    assert payload["evidence"]["live_validation_preflight"]["agent_smoke_live_validation_handoff"]["kind"] == "ptcli.agent_smoke_live_validation_handoff"
+    assert payload["evidence"]["live_validation_preflight"]["agent_smoke_live_validation_handoff"]["action"] == "repair_readiness"
+    assert payload["evidence"]["live_validation_preflight"]["seedbox_live_validation_start_report"]["start_allowed"] is False
+    assert "agent_smoke_live_validation_handoff" in payload["evidence"]["live_validation_preflight"]["read_order"]
+    assert "seedbox_live_validation_start_report" in payload["evidence"]["live_validation_preflight"]["read_order"]
     assert payload["next_step"]["tool"] == "site_policy_rule_review"
     assert payload["next_step"]["endpoint"] == "/v1/site-policies/rule-review"
     assert payload["next_step"]["request"] == payload["evidence"]["site_policies"]["rule_review_request"]
@@ -26275,11 +26289,18 @@ services:
     assert preflight["ready"] is True
     assert preflight["live_execution_package"]["ready"] is True
     assert preflight["live_validation_repair_plan"]["ready"] is True
+    assert preflight["first_live_validation_handoff"]["ready"] is True
+    assert preflight["seedbox_live_validation_start_report"]["start_allowed"] is True
+    assert preflight["agent_smoke_live_validation_handoff"]["ready"] is True
+    assert preflight["agent_smoke_live_validation_handoff"]["action"] == "run_doctor"
+    assert preflight["agent_smoke_live_validation_handoff"]["recommended_tool"] == "ptcli_doctor"
     assert preflight["seedbox_live_post_submit_report"]["kind"] == "ptcli.seedbox_live_post_submit_report"
     assert preflight["seedbox_live_post_submit_report"]["ready"] is True
     assert preflight["seedbox_live_post_submit_report"]["submit"]["tool"] == "source_url_check_and_submit"
     assert preflight["seedbox_live_post_submit_report"]["finish"]["final_report_field"] == "live_validation_completion_audit"
     assert "seedbox_live_post_submit_report" in preflight["read_order"]
+    assert "seedbox_live_validation_start_report" in preflight["read_order"]
+    assert "agent_smoke_live_validation_handoff" in preflight["read_order"]
     assert preflight["next_step"]["tool"] == "ptcli_doctor"
     assert preflight["next_step"]["request"]["argv"] == preflight["live_execution_package"]["steps"][0]["request"]["argv"]
     assert adapters["requested_trackers"] == ["U2", "MTEAM"]
