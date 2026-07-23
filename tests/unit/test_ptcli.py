@@ -19042,6 +19042,19 @@ def test_daily_candidate_run_and_deliver_runs_schedule_and_writes_digest(monkeyp
     assert target_audit["delivery_succeeded_but_target_shortfall"] is True
     assert target_audit["recommended_call"]["tool"] == "submit_daily_candidate_job"
     assert "short by 9" in target_audit["next_actions"][0]
+    loop_report = payload["daily_candidate_run_loop_report"]
+    assert loop_report["kind"] == "ptcli.daily_candidate_run_loop_report"
+    assert loop_report["ready"] is True
+    assert loop_report["action"] == "request_user_approval"
+    assert loop_report["target"]["target_count"] == 10
+    assert loop_report["target"]["safe_to_submit_count"] == 1
+    assert loop_report["target"]["shortfall_count"] == 9
+    assert loop_report["delivery"]["delivered"] is True
+    assert loop_report["approval"]["required"] is True
+    assert loop_report["recommended_call"]["tool"] == "submit_daily_candidate_job"
+    assert loop_report["recommended_call"]["safe_to_call_now"] is False
+    assert loop_report["safety"]["run_and_deliver_uploads_torrents"] is False
+    assert payload["next_call"] == loop_report["recommended_call"]
     assert payload["safety"]["uploads_torrents"] is False
     assert "explicit approval" in payload["next_actions"][0]
 
@@ -22546,7 +22559,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "delivery_audit" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "daily_candidate_target_audit" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
+    assert "daily_candidate_run_loop_report" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["run_and_deliver_report_fields"]
+    assert "daily_candidate_run_loop_report_fields" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]
+    assert "recommended_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_run_loop_report_fields"]
+    assert "schedule_job_count" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_run_loop_report_fields"]
     assert "daily_candidate_target_audit_fields" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]
     assert "delivery_succeeded_but_target_shortfall" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_target_audit_fields"]
     assert "delivery_audit" in tool_by_name["daily_candidate_delivery"]["response_contract"]["required_fields"]

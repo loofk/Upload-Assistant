@@ -22760,6 +22760,7 @@
           "daily_candidate_operational_final_report",
           "daily_candidate_target_fulfillment_report",
           "daily_candidate_target_audit",
+          "daily_candidate_run_loop_report",
           "notification_payload",
           "next_call",
           "blockers",
@@ -22852,6 +22853,27 @@
           "blockers",
           "next_actions"
         ],
+        "daily_candidate_run_loop_report_fields": [
+          "ready",
+          "status",
+          "action",
+          "target",
+          "delivery",
+          "approval",
+          "reports",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions",
+          "schedule_job_count"
+        ],
         "delivery_result_fields": [
           "kind",
           "status",
@@ -22875,6 +22897,7 @@
           "next_actions"
         ],
         "handoff_fields": [
+          "daily_candidate_run_loop_report",
           "daily_candidate_run_handoff",
           "daily_candidate_delivery_final_report",
           "schedule_result.schedule_digest",
