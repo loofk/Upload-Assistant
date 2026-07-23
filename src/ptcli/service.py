@@ -3561,6 +3561,7 @@ def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[st
     )
     target_audit = _daily_candidate_target_audit(target_fulfillment_report, operational_report)
     run_loop_report = _daily_candidate_run_loop_report(schedule_result, delivery_result, report, operational_report, target_fulfillment_report, target_audit, blockers)
+    run_final_report = _daily_candidate_run_final_report(run_loop_report, report, operational_report, target_fulfillment_report, target_audit, blockers)
     ok = bool(schedule_result.get("ok")) and (not delivery_requested or bool(delivery_result and delivery_result.get("ok"))) and not blockers
     return {
         "kind": "ptcli.daily_candidate_run_and_deliver",
@@ -3582,10 +3583,11 @@ def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[st
         "daily_candidate_target_fulfillment_report": target_fulfillment_report,
         "daily_candidate_target_audit": target_audit,
         "daily_candidate_run_loop_report": run_loop_report,
+        "daily_candidate_run_final_report": run_final_report,
         "notification_payload": schedule_result.get("notification_payload"),
-        "next_call": run_loop_report.get("recommended_call") or report.get("next_call"),
+        "next_call": run_final_report.get("recommended_call") or run_loop_report.get("recommended_call") or report.get("next_call"),
         "blockers": blockers,
-        "next_actions": _daily_candidate_run_loop_next_actions(run_loop_report, blockers),
+        "next_actions": _daily_candidate_run_final_next_actions(run_final_report, blockers),
         "safety": {
             "mutates_state": True,
             "submits_candidates": False,
@@ -3672,6 +3674,114 @@ def _daily_candidate_run_and_deliver_next_actions(report: dict[str, Any], blocke
     if report.get("notification_delivered") is True:
         return ["Read run_and_deliver_report and daily_candidate_delivery_final_report before choosing the next daily candidate action."]
     return ["Inspect schedule_result.daily_candidate_run_handoff, then retry delivery when publish.request is available."]
+
+
+def _daily_candidate_run_final_report(
+    run_loop_report: dict[str, Any],
+    run_report: dict[str, Any],
+    operational_report: dict[str, Any],
+    target_fulfillment_report: dict[str, Any],
+    target_audit: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    action = str(run_loop_report.get("action") or "inspect")
+    recommended_call = run_loop_report.get("recommended_call") if isinstance(run_loop_report.get("recommended_call"), dict) else {}
+    target = run_loop_report.get("target") if isinstance(run_loop_report.get("target"), dict) else {}
+    delivery = run_loop_report.get("delivery") if isinstance(run_loop_report.get("delivery"), dict) else {}
+    approval = run_loop_report.get("approval") if isinstance(run_loop_report.get("approval"), dict) else {}
+    report_allowed = bool(action == "report_complete" and target.get("ready_target_met") is True and delivery.get("delivered") is True and not blockers)
+    if blockers:
+        verdict = "blocked"
+        final_action = "resolve_blockers"
+    elif action == "refill_shortfall":
+        verdict = "target_shortfall"
+        final_action = "auto_refill_next"
+    elif action == "request_user_approval":
+        verdict = "waiting_user_approval"
+        final_action = "ask_user_approval"
+    elif action == "poll_jobs":
+        verdict = "jobs_running"
+        final_action = "poll_jobs"
+    elif action == "publish_digest":
+        verdict = "delivery_pending"
+        final_action = "deliver_digest"
+    elif action == "report_complete":
+        verdict = "daily_digest_target_ready"
+        final_action = "report_complete"
+    else:
+        verdict = "inspect"
+        final_action = "inspect"
+    automatic_loop = {
+        "safe_to_continue": final_action == "auto_refill_next" and recommended_call.get("safe_to_call_now") is True,
+        "should_continue_refill": final_action == "auto_refill_next" and recommended_call.get("safe_to_call_now") is True,
+        "should_stop": final_action in {"ask_user_approval", "report_complete", "resolve_blockers"} or bool(blockers),
+        "stop_reason": "blockers" if blockers else "user_approval_required" if final_action == "ask_user_approval" else "target_met" if final_action == "report_complete" else None,
+        "repeat_call": recommended_call if final_action == "auto_refill_next" and recommended_call.get("safe_to_call_now") is True else None,
+    }
+    return {
+        "kind": "ptcli.daily_candidate_run_final_report",
+        "ready": final_action in {"auto_refill_next", "ask_user_approval", "poll_jobs", "deliver_digest", "report_complete"} and not blockers,
+        "report_allowed": report_allowed,
+        "verdict": verdict,
+        "action": final_action,
+        "source_action": action,
+        "target": target,
+        "delivery": delivery,
+        "approval": {
+            "required": final_action == "ask_user_approval" or approval.get("required") is True or recommended_call.get("requires_user_review") is True,
+            "can_submit_now": final_action == "ask_user_approval",
+            "submit_call": recommended_call if final_action == "ask_user_approval" else None,
+            "required_user_inputs": ["explicit candidate approval", "accept_rules=true", "confirm_upload=true"] if final_action == "ask_user_approval" else [],
+        },
+        "automatic_loop": automatic_loop,
+        "recommended_call": recommended_call or {},
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "reports": {
+            "run_loop_report": run_loop_report.get("kind"),
+            "run_and_deliver_report": run_report.get("kind"),
+            "operational_final_report": operational_report.get("kind"),
+            "target_fulfillment_report": target_fulfillment_report.get("kind"),
+            "target_audit": target_audit.get("kind"),
+        },
+        "read_order": ["daily_candidate_run_final_report", "daily_candidate_run_loop_report", "daily_candidate_target_fulfillment_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "schedule_result"],
+        "complete_when": ["report_allowed=true", "target.ready_target_met=true", "delivery.delivered=true", "blockers=[]"],
+        "stop_when": [
+            "blockers is non-empty",
+            "approval.required=true and explicit user approval is missing",
+            "recommended_call.safe_to_call_now=false for auto_refill_next",
+        ],
+        "safety": {
+            "read_only_report": True,
+            "run_and_deliver_submits_candidates": False,
+            "run_and_deliver_uploads_torrents": False,
+            "auto_refill_creates_candidate_scan_jobs_only": True,
+            "submit_requires_explicit_user_approval": True,
+            "live_upload_requires_confirm_upload": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_run_final_next_actions({"action": final_action, "recommended_call": recommended_call, "automatic_loop": automatic_loop}, blockers),
+    }
+
+
+def _daily_candidate_run_final_next_actions(report: dict[str, Any], blockers: list[str]) -> list[str]:
+    action = str(report.get("action") or "inspect")
+    automatic_loop = report.get("automatic_loop") if isinstance(report.get("automatic_loop"), dict) else {}
+    if blockers:
+        return ["Resolve daily_candidate_run_final_report.blockers, then rerun daily_candidate_run_and_deliver or inspect batch status."]
+    if action == "auto_refill_next" and automatic_loop.get("safe_to_continue") is True:
+        return ["Call daily_candidate_run_final_report.automatic_loop.repeat_call to fill the daily 10-candidate target; this does not submit or upload torrents."]
+    if action == "ask_user_approval":
+        return ["Show the delivered daily candidate digest to the user and wait for explicit approval before submitting any candidate."]
+    if action == "poll_jobs":
+        return ["Poll pending daily candidate jobs, then reread daily_candidate_run_final_report."]
+    if action == "deliver_digest":
+        return ["Deliver the candidate digest through daily_candidate_delivery; this does not submit or upload torrents."]
+    if action == "report_complete":
+        return ["Report that the daily candidate target is met and the digest has been delivered."]
+    return ["Inspect daily_candidate_run_final_report.read_order before choosing the next daily candidate action."]
 
 
 def _daily_candidate_run_loop_report(
@@ -34150,6 +34260,8 @@ def _merge_daily_candidate_summary_evidence(daily_plan: dict[str, Any], summary:
         daily_plan["daily_candidate_refill_final_report"] = summary["daily_candidate_refill_final_report"]
     if isinstance(summary.get("daily_candidate_run_loop_report"), dict):
         daily_plan["daily_candidate_run_loop_report"] = summary["daily_candidate_run_loop_report"]
+    if isinstance(summary.get("daily_candidate_run_final_report"), dict):
+        daily_plan["daily_candidate_run_final_report"] = summary["daily_candidate_run_final_report"]
     approval_final_report = summary.get("daily_candidate_approval_final_report")
     if not isinstance(approval_final_report, dict):
         approval_final_report = summary.get("approval_final_report")
@@ -34187,6 +34299,7 @@ def _merge_daily_candidate_summary_evidence(daily_plan: dict[str, Any], summary:
         "has_refill_loop_report": isinstance(summary.get("refill_loop_report"), dict),
         "has_refill_final_report": isinstance(summary.get("daily_candidate_refill_final_report"), dict),
         "has_run_loop_report": isinstance(summary.get("daily_candidate_run_loop_report"), dict),
+        "has_run_final_report": isinstance(summary.get("daily_candidate_run_final_report"), dict),
         "has_approval_final_report": isinstance(approval_final_report, dict),
     }
 
@@ -36411,6 +36524,7 @@ def _goal_progress_daily_candidate_evidence(daily_candidate_plan: dict[str, Any]
     refill_loop_report = daily_candidate_plan.get("refill_loop_report") if isinstance(daily_candidate_plan.get("refill_loop_report"), dict) else {}
     refill_final_report = daily_candidate_plan.get("daily_candidate_refill_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_refill_final_report"), dict) else {}
     run_loop_report = daily_candidate_plan.get("daily_candidate_run_loop_report") if isinstance(daily_candidate_plan.get("daily_candidate_run_loop_report"), dict) else {}
+    run_final_report = daily_candidate_plan.get("daily_candidate_run_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_run_final_report"), dict) else {}
     approval_final_report = daily_candidate_plan.get("daily_candidate_approval_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_approval_final_report"), dict) else {}
     delivery_result = daily_candidate_plan.get("delivery_result") if isinstance(daily_candidate_plan.get("delivery_result"), dict) else {}
     delivery_audit = daily_candidate_plan.get("delivery_audit") if isinstance(daily_candidate_plan.get("delivery_audit"), dict) else {}
@@ -36427,6 +36541,7 @@ def _goal_progress_daily_candidate_evidence(daily_candidate_plan: dict[str, Any]
         refill_loop_report,
         refill_final_report,
         run_loop_report,
+        run_final_report,
         approval_final_report,
         delivery_result,
         delivery_audit,
@@ -36470,6 +36585,7 @@ def _goal_progress_daily_candidate_evidence(daily_candidate_plan: dict[str, Any]
         "daily_candidate_operational_final_report": operational_final or None,
         "daily_candidate_target_fulfillment_report": target_fulfillment or None,
         "daily_candidate_run_loop_report": run_loop_report or None,
+        "daily_candidate_run_final_report": run_final_report or None,
         "daily_candidate_approval_final_report": approval_final_report or None,
         "daily_scheduler_final_report": scheduler_final or None,
         "refill_loop_report": refill_loop_report or None,
@@ -36651,13 +36767,14 @@ def _goal_progress_daily_candidate_goal_final_report(
     refill_loop_report: dict[str, Any],
     refill_final_report: dict[str, Any],
     run_loop_report: dict[str, Any],
+    run_final_report: dict[str, Any],
     approval_final_report: dict[str, Any],
     delivery_result: dict[str, Any],
     delivery_audit: dict[str, Any],
     goal_handoff: dict[str, Any],
 ) -> dict[str, Any]:
     configured = bool(daily_candidate_plan.get("configured"))
-    has_run_evidence = bool(schedule_digest or final_report or delivery_final or operational_final or target_fulfillment or scheduler_final or refill_loop_report or refill_final_report or run_loop_report or approval_final_report)
+    has_run_evidence = bool(schedule_digest or final_report or delivery_final or operational_final or target_fulfillment or scheduler_final or refill_loop_report or refill_final_report or run_loop_report or run_final_report or approval_final_report)
     evidence_configured = configured or has_run_evidence
     target = target_fulfillment.get("target") if isinstance(target_fulfillment.get("target"), dict) else {}
     counts = final_report.get("counts") if isinstance(final_report.get("counts"), dict) else {}
@@ -36671,29 +36788,33 @@ def _goal_progress_daily_candidate_goal_final_report(
             + _string_list(refill_final_report.get("blockers"))
             + _string_list(refill_loop_report.get("blockers"))
             + _string_list(run_loop_report.get("blockers"))
+            + _string_list(run_final_report.get("blockers"))
             + _string_list(approval_final_report.get("blockers"))
             + _string_list(delivery_audit.get("blockers"))
         )
     )
     run_loop_target = run_loop_report.get("target") if isinstance(run_loop_report.get("target"), dict) else {}
+    run_final_target = run_final_report.get("target") if isinstance(run_final_report.get("target"), dict) else {}
     run_loop_delivery = run_loop_report.get("delivery") if isinstance(run_loop_report.get("delivery"), dict) else {}
+    run_final_delivery = run_final_report.get("delivery") if isinstance(run_final_report.get("delivery"), dict) else {}
     refill_target = refill_final_report.get("target") if isinstance(refill_final_report.get("target"), dict) else {}
     target_count = _first_int(target.get("target_count"), schedule_digest.get("target_count"), counts.get("target_count"), schedule_handoff.get("target_count"), DEFAULT_CANDIDATE_LIMIT)
     selected_count = _first_int(target.get("selected_count"), schedule_digest.get("selected_count"), counts.get("selected_count"))
-    ready_count = _first_int(target.get("ready_count"), run_loop_target.get("ready_count"), refill_target.get("ready_count"), refill_final_report.get("ready_count"), schedule_digest.get("ready_count"), counts.get("ready_count"), refill_loop_report.get("safe_to_submit_count"))
-    safe_to_submit_count = _first_int(target.get("safe_to_submit_count"), run_loop_target.get("safe_to_submit_count"), refill_target.get("safe_to_submit_count"), refill_final_report.get("safe_to_submit_count"), target.get("safe_count"), counts.get("safe_to_submit_count"), refill_loop_report.get("safe_to_submit_count"))
+    ready_count = _first_int(target.get("ready_count"), run_final_target.get("ready_count"), run_loop_target.get("ready_count"), refill_target.get("ready_count"), refill_final_report.get("ready_count"), schedule_digest.get("ready_count"), counts.get("ready_count"), refill_loop_report.get("safe_to_submit_count"))
+    safe_to_submit_count = _first_int(target.get("safe_to_submit_count"), run_final_target.get("safe_to_submit_count"), run_loop_target.get("safe_to_submit_count"), refill_target.get("safe_to_submit_count"), refill_final_report.get("safe_to_submit_count"), target.get("safe_count"), counts.get("safe_to_submit_count"), refill_loop_report.get("safe_to_submit_count"))
     approval_target = approval_final_report.get("target") if isinstance(approval_final_report.get("target"), dict) else {}
     if approval_target:
         safe_to_submit_count = _first_int(approval_target.get("safe_to_submit_count"), safe_to_submit_count)
     pending_job_count = _first_int(target.get("pending_job_count"), schedule_digest.get("pending_job_count"), counts.get("pending_count"))
-    shortfall_count = _first_int(target.get("shortfall_count"), run_loop_target.get("shortfall_count"), refill_target.get("shortfall_count"), refill_target.get("ready_shortfall_count"), refill_final_report.get("ready_shortfall_count"), schedule_digest.get("shortfall_count"), refill_loop_report.get("ready_shortfall_count"), max(0, target_count - ready_count))
+    shortfall_count = _first_int(target.get("shortfall_count"), run_final_target.get("shortfall_count"), run_loop_target.get("shortfall_count"), refill_target.get("shortfall_count"), refill_target.get("ready_shortfall_count"), refill_final_report.get("ready_shortfall_count"), schedule_digest.get("shortfall_count"), refill_loop_report.get("ready_shortfall_count"), max(0, target_count - ready_count))
     target_met = bool(target.get("target_met") is True or schedule_digest.get("target_met") is True or (target_count > 0 and selected_count >= target_count))
-    ready_target_met = bool(target.get("ready_target_met") is True or run_loop_target.get("ready_target_met") is True or (target_count > 0 and ready_count >= target_count))
+    ready_target_met = bool(target.get("ready_target_met") is True or run_final_target.get("ready_target_met") is True or run_loop_target.get("ready_target_met") is True or (target_count > 0 and ready_count >= target_count))
     delivered = bool(
         delivery_result.get("ok") is True
         or delivery_result.get("status") == "delivered"
         or delivery_audit.get("ready") is True
         or delivery.get("delivered") is True
+        or run_final_delivery.get("delivered") is True
         or run_loop_delivery.get("delivered") is True
     )
     submission_ready = bool(final_report.get("submission_ready") or operational_final.get("submission_ready") or approval_final_report.get("can_submit_after_approval") is True or safe_to_submit_count > 0)
@@ -36719,11 +36840,11 @@ def _goal_progress_daily_candidate_goal_final_report(
         shortfall_count=shortfall_count,
         scheduler_action=str(scheduler_final.get("action") or ""),
         refill_action=str(refill_final_report.get("action") or refill_loop_report.get("action") or ""),
-        run_loop_action=str(run_loop_report.get("action") or ""),
+        run_loop_action=str(run_final_report.get("action") or run_loop_report.get("action") or ""),
         approval_action=str(approval_final_report.get("action") or ""),
     )
     report_allowed = bool(not missing_evidence)
-    recommended_call = _goal_progress_daily_candidate_goal_final_recommended_call(action, goal_handoff, scheduler_final, delivery_final, final_report, refill_final_report, refill_loop_report, run_loop_report)
+    recommended_call = _goal_progress_daily_candidate_goal_final_recommended_call(action, goal_handoff, scheduler_final, delivery_final, final_report, refill_final_report, refill_loop_report, run_final_report, run_loop_report)
     return {
         "kind": "ptcli.daily_candidate_goal_final_report",
         "ready": report_allowed,
@@ -36766,6 +36887,7 @@ def _goal_progress_daily_candidate_goal_final_report(
             "final_report": refill_final_report or None,
             "loop_report": refill_loop_report or None,
             "run_loop_report": run_loop_report or None,
+            "run_final_report": run_final_report or None,
             "automatic_loop": refill_final_report.get("automatic_loop") if isinstance(refill_final_report.get("automatic_loop"), dict) else None,
         },
         "approval_final_report": approval_final_report or None,
@@ -36776,7 +36898,7 @@ def _goal_progress_daily_candidate_goal_final_report(
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_method": recommended_call.get("method"),
         "recommended_request": recommended_call.get("request"),
-        "read_order": ["daily_candidate_goal_final_report", "daily_candidate_run_loop_report", "daily_candidate_refill_final_report", "daily_candidate_target_fulfillment_report", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "goal_handoff"],
+        "read_order": ["daily_candidate_goal_final_report", "daily_candidate_run_final_report", "daily_candidate_run_loop_report", "daily_candidate_refill_final_report", "daily_candidate_target_fulfillment_report", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "goal_handoff"],
         "complete_when": ["ready_target_met=true", "delivery.delivered=true", "pending_job_count=0", "blockers=[]"],
         "stop_when": ["blockers is non-empty", "submission attempted without explicit user approval", "confirm_upload missing from an approved submit request", "duplicate candidate exists=true"],
         "safety": {
@@ -36859,7 +36981,7 @@ def _goal_progress_daily_candidate_goal_final_action(
         return "request_user_approval"
     if approval_action in {"poll_running", "poll_submitted_jobs"}:
         return "poll_jobs"
-    if run_loop_action in {"refill_shortfall", "request_user_approval", "poll_jobs", "publish_digest", "report_complete"}:
+    if run_loop_action in {"auto_refill_next", "ask_user_approval", "refill_shortfall", "request_user_approval", "poll_jobs", "publish_digest", "deliver_digest", "report_complete", "resolve_blockers"}:
         return run_loop_action
     if refill_action in {"auto_refill_next", "continue_refill", "submit_available", "ask_user_approval", "poll_jobs", "deliver_digest", "stop_no_progress", "resolve_blockers"}:
         return refill_action
@@ -36904,8 +37026,12 @@ def _goal_progress_daily_candidate_goal_final_recommended_call(
     final_report: dict[str, Any],
     refill_final_report: dict[str, Any],
     refill_loop_report: dict[str, Any],
+    run_final_report: dict[str, Any],
     run_loop_report: dict[str, Any],
 ) -> dict[str, Any]:
+    run_final_call = _goal_progress_daily_candidate_run_loop_call(run_final_report)
+    if action in {"auto_refill_next", "ask_user_approval", "poll_jobs", "deliver_digest", "report_complete", "resolve_blockers"} and run_final_call:
+        return {**run_final_call, "reason": f"daily_candidate_run_final_report.{action}"}
     run_loop_call = _goal_progress_daily_candidate_run_loop_call(run_loop_report)
     if action in {"refill_shortfall", "request_user_approval", "poll_jobs", "publish_digest", "report_complete"} and run_loop_call:
         return {**run_loop_call, "reason": f"daily_candidate_run_loop_report.{action}"}
@@ -37056,7 +37182,7 @@ def _goal_progress_daily_candidate_run_loop_call(run_loop_report: dict[str, Any]
         "request": request,
         "action": action or None,
         "safe_to_call_now": bool(call.get("safe_to_call_now")),
-        "requires_user_review": bool(call.get("requires_user_review")) or action == "request_user_approval",
+        "requires_user_review": bool(call.get("requires_user_review")) or action in {"request_user_approval", "ask_user_approval"},
     }
 
 
@@ -37687,6 +37813,18 @@ def _goal_progress_site_policy_next_step(site_policies: dict[str, Any] | None) -
 def _goal_progress_daily_candidate_next_step(daily_candidate_plan: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(daily_candidate_plan, dict):
         return None
+    run_final_report = daily_candidate_plan.get("daily_candidate_run_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_run_final_report"), dict) else {}
+    run_final_call = _goal_progress_daily_candidate_run_loop_call(run_final_report)
+    if run_final_report and run_final_report.get("action") in {"auto_refill_next", "ask_user_approval", "poll_jobs", "deliver_digest", "report_complete", "resolve_blockers"} and run_final_call:
+        return {
+            "tool": run_final_call.get("tool"),
+            "endpoint": run_final_call.get("endpoint"),
+            "method": run_final_call.get("method"),
+            "request": run_final_call.get("request"),
+            "reason": f"daily_candidate_run_final_report.{run_final_report.get('action')}",
+            "safe_to_call_now": run_final_call.get("safe_to_call_now"),
+            "requires_user_review": run_final_call.get("requires_user_review"),
+        }
     run_loop_report = daily_candidate_plan.get("daily_candidate_run_loop_report") if isinstance(daily_candidate_plan.get("daily_candidate_run_loop_report"), dict) else {}
     run_loop_call = _goal_progress_daily_candidate_run_loop_call(run_loop_report)
     if run_loop_report and run_loop_report.get("action") in {"refill_shortfall", "request_user_approval", "poll_jobs", "publish_digest", "report_complete"} and run_loop_call:
@@ -38237,14 +38375,15 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Run enabled daily candidate schedules and deliver the resulting digest to local files or webhook in one AI-callable step. This creates candidate scan jobs but never submits candidates or uploads torrents.",
             "input_schema": candidate_run_and_deliver_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "delivery_audit", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_push_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_target_audit", "daily_candidate_run_loop_report", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
+                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "delivery_audit", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_push_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_target_audit", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
                 "run_and_deliver_report_fields": ["ready", "action", "schedule_status", "schedule_job_count", "delivery_requested", "delivery_status", "delivery_ok", "notification_delivered", "file_delivery", "webhook_delivery", "payload_fingerprint", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers"],
                 "daily_candidate_operational_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "approval", "completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_fulfillment_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_audit_fields": ["ready", "status", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "ready_target_met", "delivered", "delivery_succeeded_but_target_shortfall", "recommended_call", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_run_loop_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "reports", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "schedule_job_count"],
+                "daily_candidate_run_final_report_fields": ["ready", "report_allowed", "verdict", "action", "source_action", "target", "delivery", "approval", "automatic_loop", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "reports", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "delivery_result_fields": _daily_candidate_delivery_response_contract()["required_fields"],
-                "handoff_fields": ["daily_candidate_run_loop_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "schedule_result.schedule_digest", "delivery_result.payload_fingerprint"],
+                "handoff_fields": ["daily_candidate_run_final_report", "daily_candidate_run_loop_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "schedule_result.schedule_digest", "delivery_result.payload_fingerprint"],
             },
             "workflow_hints": {"preferred_for": "daily_candidates", "submit_with": "submit_daily_candidate_job only after explicit user approval", "step_by_step_alternative": "daily_candidates_schedule_job then daily_candidate_delivery"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": [], "submits_candidates": False, "uploads_torrents": False},
@@ -38582,11 +38721,12 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_phase_fields": ["id", "name", "priority", "ready", "status", "capability_ids", "capabilities", "remaining_capability_ids", "complete_when", "blockers"],
                 "critical_path_focus_fields": ["phase_id", "phase_name", "recommended_step", "blockers"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
-                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_loop_report", "daily_candidate_approval_final_report", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_refill_final_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "daily_candidate_goal_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
+                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "daily_candidate_approval_final_report", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_refill_final_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "daily_candidate_goal_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "run_loop", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_goal_final_report_fields": ["ready", "report_allowed", "verdict", "status", "action", "configured", "evidence_configured", "summary_file", "target", "delivery", "approval", "refill", "approval_final_report", "completion_evidence", "missing_evidence", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_approval_final_report_fields": ["ready", "report_allowed", "status", "action", "approval_required", "can_submit_after_approval", "target", "candidate", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "after_submit_calls", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_run_loop_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "reports", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "schedule_job_count"],
+                "daily_candidate_run_final_report_fields": ["ready", "report_allowed", "verdict", "action", "source_action", "target", "delivery", "approval", "automatic_loop", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "reports", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "loop_control", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "daily_candidate_refill_final_report_fields": ["ready", "report_allowed", "verdict", "action", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "target_met", "candidate_job_count", "automatic_loop", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
@@ -40390,7 +40530,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
             "tool": "daily_candidate_run_and_deliver",
             "description": "Find up to 10 ranked source/target retorrent candidates, deliver the digest, then submit approved candidates through the inherited-identity handoff.",
             "required_fields": ["source_tracker", "target"],
-            "read_result": ["next_call", "daily_candidate_operational_final_report", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
+            "read_result": ["next_call", "daily_candidate_run_final_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "delivery_result"],
             "runbook": [
                 {
                     "step": "preflight",
@@ -40402,7 +40542,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "run_and_deliver_digest",
                     "tool": "daily_candidate_run_and_deliver",
-                    "read": ["next_call", "daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
+                    "read": ["next_call", "daily_candidate_run_final_report", "daily_candidate_operational_final_report", "run_and_deliver_report", "delivery_result", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report"],
                     "continue_when": "daily_candidate_operational_final_report.delivery.delivered=true and daily_candidate_run_handoff.pending_job_count=0",
                     "repeat_when": "daily_candidate_run_handoff.pending_job_count>0",
                     "stop_when": ["blockers is non-empty"],
@@ -41098,6 +41238,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_target_fulfillment_report": {"type": ["object", "null"]},
             "daily_candidate_target_audit": {"type": ["object", "null"]},
             "daily_candidate_run_loop_report": {"type": "object"},
+            "daily_candidate_run_final_report": {"type": "object"},
             "notification_payload": {"type": ["object", "null"]},
             "next_call": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},

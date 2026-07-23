@@ -19161,6 +19161,19 @@ def test_daily_candidate_run_and_deliver_runs_schedule_and_writes_digest(monkeyp
     assert loop_report["recommended_call"]["safe_to_call_now"] is False
     assert loop_report["safety"]["run_and_deliver_uploads_torrents"] is False
     assert payload["next_call"] == loop_report["recommended_call"]
+    run_final = payload["daily_candidate_run_final_report"]
+    assert run_final["kind"] == "ptcli.daily_candidate_run_final_report"
+    assert run_final["ready"] is True
+    assert run_final["report_allowed"] is False
+    assert run_final["verdict"] == "waiting_user_approval"
+    assert run_final["action"] == "ask_user_approval"
+    assert run_final["source_action"] == "request_user_approval"
+    assert run_final["target"]["safe_to_submit_count"] == 1
+    assert run_final["approval"]["required"] is True
+    assert run_final["approval"]["submit_call"]["tool"] == "submit_daily_candidate_job"
+    assert run_final["automatic_loop"]["should_stop"] is True
+    assert run_final["safety"]["run_and_deliver_uploads_torrents"] is False
+    assert payload["next_call"] == run_final["recommended_call"]
     assert payload["safety"]["uploads_torrents"] is False
     assert "explicit approval" in payload["next_actions"][0]
 
@@ -22759,9 +22772,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "delivery_audit" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "daily_candidate_target_audit" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "daily_candidate_run_loop_report" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
+    assert "daily_candidate_run_final_report" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["run_and_deliver_report_fields"]
     assert "daily_candidate_run_loop_report_fields" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]
+    assert "daily_candidate_run_final_report_fields" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]
     assert "recommended_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_run_loop_report_fields"]
+    assert "automatic_loop" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_run_final_report_fields"]
     assert "schedule_job_count" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_run_loop_report_fields"]
     assert "daily_candidate_target_audit_fields" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]
     assert "delivery_succeeded_but_target_shortfall" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["daily_candidate_target_audit_fields"]
@@ -22968,7 +22984,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_scheduler_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_target_fulfillment_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_run_loop_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_run_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_run_loop_report_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "daily_candidate_run_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "summary_evidence" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "refill_loop_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_refill_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -24041,9 +24059,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_run_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_run_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_final_report_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_run_loop_report_fields" in goal_progress_tool["response_contract"]
+    assert "daily_candidate_run_final_report_fields" in goal_progress_tool["response_contract"]
     assert "refill_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_refill_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_refill_final_report_fields" in goal_progress_tool["response_contract"]
@@ -24145,9 +24165,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_target_fulfillment_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_run_loop_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_run_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_goal_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_goal_final_report_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "daily_candidate_run_loop_report_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "daily_candidate_run_final_report_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "daily_scheduler_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "summary_evidence" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "refill_loop_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -26131,6 +26153,37 @@ services:
                     },
                     "blockers": [],
                 },
+                "daily_candidate_run_final_report": {
+                    "kind": "ptcli.daily_candidate_run_final_report",
+                    "ready": True,
+                    "report_allowed": False,
+                    "verdict": "target_shortfall",
+                    "action": "auto_refill_next",
+                    "source_action": "refill_shortfall",
+                    "target": {"target_count": 10, "ready_count": 2, "safe_to_submit_count": 2, "shortfall_count": 8, "ready_target_met": False},
+                    "delivery": {"requested": True, "performed": True, "delivered": True, "payload_fingerprint": "loop123"},
+                    "approval": {"required": False},
+                    "automatic_loop": {
+                        "safe_to_continue": True,
+                        "repeat_call": {
+                            "tool": "daily_candidate_refill_job",
+                            "endpoint": "/v1/jobs/candidates/daily/refill",
+                            "method": "POST",
+                            "request": {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "excluded_source_ids": ["60635", "60636"]},
+                            "safe_to_call_now": True,
+                            "requires_user_review": False,
+                        },
+                    },
+                    "recommended_call": {
+                        "tool": "daily_candidate_refill_job",
+                        "endpoint": "/v1/jobs/candidates/daily/refill",
+                        "method": "POST",
+                        "request": {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "excluded_source_ids": ["60635", "60636"]},
+                        "safe_to_call_now": True,
+                        "requires_user_review": False,
+                    },
+                    "blockers": [],
+                },
                 "daily_candidate_target_fulfillment_report": {
                     "kind": "ptcli.daily_candidate_target_fulfillment_report",
                     "ready": True,
@@ -26164,10 +26217,12 @@ services:
     )
     run_loop_evidence = run_loop_payload["evidence"]["daily_candidates"]
     assert run_loop_evidence["summary_evidence"]["has_run_loop_report"] is True
+    assert run_loop_evidence["summary_evidence"]["has_run_final_report"] is True
     assert run_loop_evidence["daily_candidate_run_loop_report"]["action"] == "refill_shortfall"
-    assert run_loop_evidence["daily_candidate_goal_final_report"]["action"] == "refill_shortfall"
-    assert run_loop_evidence["daily_candidate_goal_final_report"]["recommended_call"]["reason"] == "daily_candidate_run_loop_report.refill_shortfall"
-    assert run_loop_evidence["next_step"]["reason"] == "daily_candidate_run_loop_report.refill_shortfall"
+    assert run_loop_evidence["daily_candidate_run_final_report"]["action"] == "auto_refill_next"
+    assert run_loop_evidence["daily_candidate_goal_final_report"]["action"] == "auto_refill_next"
+    assert run_loop_evidence["daily_candidate_goal_final_report"]["recommended_call"]["reason"] == "daily_candidate_run_final_report.auto_refill_next"
+    assert run_loop_evidence["next_step"]["reason"] == "daily_candidate_run_final_report.auto_refill_next"
     assert run_loop_evidence["next_step"]["request"]["excluded_source_ids"] == ["60635", "60636"]
     assert run_loop_evidence["goal_handoff"]["run_loop"]["loop_call"]["tool"] == "daily_candidate_refill_job"
     assert run_loop_evidence["goal_handoff"]["run_loop"]["requires_user_approval_before_submit"] is True
