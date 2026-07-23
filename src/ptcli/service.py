@@ -31144,6 +31144,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     }
     mounts = _deployment_mount_summary(checks)
     agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose, env_template)
+    seedbox_qbit_handoff = _deployment_seedbox_qbit_handoff(agent_summary, paths, qbit, docker_compose, blockers, warnings)
     deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     daily_candidate_trigger_handoff = _deployment_daily_candidate_trigger_handoff(agent_summary, paths, daily_candidate_plan, docker_compose, blockers, warnings)
@@ -31181,12 +31182,16 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     deployment_runbook["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
     deployment_runbook["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     deployment_runbook["daily_candidate_config_final_report"] = daily_candidate_config_final_report
+    deployment_runbook["seedbox_qbit_handoff"] = seedbox_qbit_handoff
+    deployment_final_report["seedbox_qbit_handoff"] = seedbox_qbit_handoff
     deployment_handoff["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
     deployment_handoff["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     deployment_handoff["daily_candidate_config_final_report"] = daily_candidate_config_final_report
+    deployment_handoff["seedbox_qbit_handoff"] = seedbox_qbit_handoff
     agent_handoff["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
     agent_handoff["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     agent_handoff["daily_candidate_config_final_report"] = daily_candidate_config_final_report
+    agent_handoff["seedbox_qbit_handoff"] = seedbox_qbit_handoff
     deployment_handoff["seedbox_live_trial"] = seedbox_live_trial_handoff
     agent_handoff["seedbox_live_trial"] = seedbox_live_trial_handoff
     return {
@@ -31211,6 +31216,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "daily_candidate_trigger_handoff": daily_candidate_trigger_handoff,
         "daily_candidate_delivery_handoff": daily_candidate_delivery_handoff,
         "daily_candidate_config_final_report": daily_candidate_config_final_report,
+        "seedbox_qbit_handoff": seedbox_qbit_handoff,
         "seedbox_bootstrap_handoff": seedbox_bootstrap_handoff,
         "seedbox_live_trial_handoff": seedbox_live_trial_handoff,
         "deployment_final_report": deployment_final_report,
@@ -32827,6 +32833,113 @@ def _deployment_agent_handoff(
             "warnings": warnings,
         },
         "next_tools": ["deployment_check", "site_policies", "source_url_retorrent_job", "daily_candidates_schedule_job", "get_job_status", "get_job_summary"],
+    }
+
+
+def _deployment_seedbox_qbit_handoff(
+    agent_summary: dict[str, Any],
+    paths: dict[str, str],
+    qbit: dict[str, Any],
+    docker_compose: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    configured = bool(qbit.get("configured"))
+    compose_ready = bool(docker_compose.get("ptcli_api_service_ready"))
+    qbit_url = qbit.get("qbit_url") or "http://host.docker.internal"
+    ready = bool(agent_summary.get("ready_for_ai") and configured and compose_ready)
+    inspect_request = {"client": qbit.get("client") or "default", "limit": 20}
+    policy_request = {
+        "source_tracker": "U2",
+        "target": "MTEAM",
+        "accept_rules": True,
+        "confirm_upload": True,
+        "save_path": paths.get("downloads_path") or "/downloads",
+    }
+    blocked_by = []
+    if not configured:
+        blocked_by.append("qBittorrent client config is missing")
+    if not compose_ready:
+        blocked_by.append("ptcli-api compose service is incomplete")
+    blocked_by.extend(blockers)
+    status = "ready_for_qbit_probe" if ready else "configure_qbit"
+    next_step = (
+        {
+            "tool": "qbit_inspect",
+            "endpoint": "/v1/qbit/inspect",
+            "method": "POST",
+            "request": inspect_request,
+            "reason": "verify_seedbox_qbittorrent_connectivity_without_contacting_trackers",
+            "read_after_call": ["status", "ok", "agent_summary.ready", "torrents[].hash", "torrents[].save_path", "torrents[].category", "torrents[].tags"],
+        }
+        if ready
+        else {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "request": None, "reason": "configure_qbittorrent_before_live_jobs", "blockers": blocked_by}
+    )
+    return {
+        "kind": "ptcli.seedbox_qbit_handoff",
+        "ready": ready,
+        "status": status,
+        "read_only": True,
+        "configured": configured,
+        "client": qbit.get("client"),
+        "torrent_client": qbit.get("torrent_client"),
+        "url": qbit_url,
+        "port": qbit.get("qbit_port"),
+        "connectivity_checked": bool(qbit.get("connectivity_checked")),
+        "host_gateway_required": str(qbit_url).startswith("http://host.docker.internal"),
+        "compose": {
+            "api_ready": compose_ready,
+            "host_gateway": bool(docker_compose.get("host_gateway")),
+            "downloads_mount": bool(docker_compose.get("downloads_mount")),
+            "config_mount": bool(docker_compose.get("config_mount")),
+        },
+        "config_contract": {
+            "config_path": paths.get("config"),
+            "default_client_ref": "DEFAULT.default_torrent_client",
+            "client_ref": f"TORRENT_CLIENTS.{qbit.get('client') or 'qbittorrent'}",
+            "required_fields": ["torrent_client=qbit", "qbit_url", "qbit_port", "username/password if qBittorrent requires auth"],
+            "recommended_seedbox_url": "http://host.docker.internal",
+        },
+        "probe": {
+            "safe_to_call_now": ready,
+            "tool": "qbit_inspect",
+            "endpoint": "/v1/qbit/inspect",
+            "method": "POST",
+            "request": inspect_request,
+            "continue_when": "ok=true and agent_summary.ready=true",
+            "stop_when": ["qBittorrent login/connectivity fails", "downloads save_path is outside mounted downloads path"],
+        },
+        "policy_limits": {
+            "source_defaults_field": "policy_execution_plan.request_defaults.qbit_download_limit",
+            "uploaded_defaults_field": "policy_execution_plan.request_defaults.uploaded_qbit_upload_limit",
+            "enforcement_fields": ["qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_execution_gate"],
+            "repair_tool": "qbit_apply_limits",
+            "repair_endpoint": "/v1/qbit/limits",
+            "apply_after": ["source qBittorrent injection", "uploaded target torrent injection"],
+        },
+        "manual_retorrent_preflight": {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request": policy_request,
+            "read": ["policy_execution_plan.qbit_runtime_handoff", "policy_application_handoff.request_patch", "live_validation_repair_plan"],
+        },
+        "next_step": next_step,
+        "read_order": ["seedbox_qbit_handoff", "deployment_final_report.qbit", "deployment_handoff.qbit", "site_policies.policy_execution_plan.qbit_runtime_handoff", "qbit_inspect"],
+        "continue_when": "seedbox_qbit_handoff.ready=true and qbit_inspect.ok=true before live qBittorrent injection",
+        "stop_when": ["seedbox_qbit_handoff.ready=false", "qbit_inspect.ok=false", "policy qbit runtime defaults are missing for source or target"],
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "probe_contacts_qbittorrent": True,
+            "probe_mutates_qbittorrent": False,
+            "rate_limit_repair_mutates_qbittorrent": True,
+            "live_upload_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "qbit_enforcement_summary.ready=true"],
+        },
+        "blockers": blocked_by,
+        "warnings": warnings,
+        "next_actions": ["Call qbit_inspect, then read site_policies/readiness_bundle qbit_runtime_handoff before creating live jobs."] if ready else ["Configure TORRENT_CLIENTS.qbittorrent in data/config.py and rerun deployment_check."],
     }
 
 
@@ -35132,20 +35245,21 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "api_token_configured", "api_publicly_exposed", "api_auth_ready", "api_exposure_blocked", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
-                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "env", "qbit", "safety", "blockers", "warnings"],
-                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "qbit", "next_step", "deployment_runbook", "seedbox_live_trial", "warnings"],
+                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "env", "qbit", "safety", "blockers", "warnings"],
+                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "qbit", "next_step", "deployment_runbook", "seedbox_live_trial", "warnings"],
                 "daily_candidate_trigger_handoff_fields": ["ready", "status", "action", "read_only", "configured", "configured_schedule_count", "target_count", "publish_payload_field", "compose", "api", "env", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "daily_candidate_delivery_handoff_fields": ["ready", "status", "action", "read_only", "publish_payload_field", "notification_payload_field", "publish_payload_sources", "digest_evidence_refs", "completion_evidence_refs", "evidence_contract", "channels", "delivery_plan", "delivery_final_report", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "daily_candidate_config_final_report_fields": ["ready", "report_allowed", "verdict", "action", "configured", "configured_schedule_count", "target_count", "env", "compose", "api", "smoke_checks", "read_order", "complete_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
-                "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
-                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
+                "seedbox_qbit_handoff_fields": ["ready", "status", "read_only", "configured", "client", "torrent_client", "url", "port", "connectivity_checked", "host_gateway_required", "compose", "config_contract", "probe", "policy_limits", "manual_retorrent_preflight", "next_step", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
+                "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "seedbox_qbit_handoff", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
+                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_public_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},

@@ -22501,6 +22501,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_config_final_report_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "env" in tool_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
     assert "smoke_checks" in tool_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
+    assert "seedbox_qbit_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "seedbox_qbit_handoff" in tool_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
+    assert "seedbox_qbit_handoff" in tool_by_name["deployment_check"]["response_contract"]["deployment_runbook_fields"]
+    assert "seedbox_qbit_handoff" in tool_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
+    assert "seedbox_qbit_handoff" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+    assert "seedbox_qbit_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "probe" in tool_by_name["deployment_check"]["response_contract"]["seedbox_qbit_handoff_fields"]
+    assert "policy_limits" in tool_by_name["deployment_check"]["response_contract"]["seedbox_qbit_handoff_fields"]
     assert "seedbox_live_trial" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert "daily_candidate_config_final_report" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert "docker_compose_api_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
@@ -23734,6 +23742,14 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_trial_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "readiness" in tools_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
         assert "report_contract" in tools_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+        assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
+        assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_runbook_fields"]
+        assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_final_report_fields"]
+        assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+        assert "seedbox_qbit_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "probe" in tools_by_name["deployment_check"]["response_contract"]["seedbox_qbit_handoff_fields"]
+        assert "policy_limits" in tools_by_name["deployment_check"]["response_contract"]["seedbox_qbit_handoff_fields"]
         assert "seedbox_live_trial" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert "docker_compose_api_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
@@ -25054,6 +25070,28 @@ services:
     assert payload["deployment_handoff"]["daily_candidate_config_final_report"] == config_report
     assert payload["deployment_runbook"]["daily_candidate_config_final_report"] == config_report
     assert payload["agent_handoff"]["daily_candidate_config_final_report"] == config_report
+    qbit_handoff = payload["seedbox_qbit_handoff"]
+    assert qbit_handoff["kind"] == "ptcli.seedbox_qbit_handoff"
+    assert qbit_handoff["ready"] is True
+    assert qbit_handoff["status"] == "ready_for_qbit_probe"
+    assert qbit_handoff["configured"] is True
+    assert qbit_handoff["client"] == "qbittorrent"
+    assert qbit_handoff["url"] == "http://host.docker.internal"
+    assert qbit_handoff["host_gateway_required"] is True
+    assert qbit_handoff["compose"]["host_gateway"] is True
+    assert qbit_handoff["probe"]["tool"] == "qbit_inspect"
+    assert qbit_handoff["probe"]["endpoint"] == "/v1/qbit/inspect"
+    assert qbit_handoff["probe"]["safe_to_call_now"] is True
+    assert qbit_handoff["probe"]["request"] == {"client": "qbittorrent", "limit": 20}
+    assert qbit_handoff["policy_limits"]["repair_tool"] == "qbit_apply_limits"
+    assert qbit_handoff["manual_retorrent_preflight"]["tool"] == "readiness_bundle"
+    assert qbit_handoff["manual_retorrent_preflight"]["request"]["save_path"] == str(downloads_dir)
+    assert qbit_handoff["safety"]["contacts_qbittorrent"] is False
+    assert qbit_handoff["safety"]["probe_contacts_qbittorrent"] is True
+    assert payload["deployment_handoff"]["seedbox_qbit_handoff"] == qbit_handoff
+    assert payload["deployment_runbook"]["seedbox_qbit_handoff"] == qbit_handoff
+    assert payload["deployment_final_report"]["seedbox_qbit_handoff"] == qbit_handoff
+    assert payload["agent_handoff"]["seedbox_qbit_handoff"] == qbit_handoff
     assert payload["deployment_handoff"]["next_step"]["action"] == "run_manual_preflight"
     final_report = payload["deployment_final_report"]
     assert final_report["kind"] == "ptcli.deployment_final_report"
