@@ -14138,6 +14138,22 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["blocked_recovery_report"]["should_resume"] is True
     assert job["blocked_recovery_report"]["resume_preview_required"] is True
     assert job["blocked_recovery_report"]["recommended_tool"] == "resume_job"
+    assert job["blocked_recovery_report"]["recommended_call"]["ready"] is True
+    assert job["blocked_recovery_report"]["recommended_call"]["tool"] == "resume_job"
+    assert job["blocked_recovery_report"]["recommended_call"]["endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["blocked_recovery_report"]["recommended_call"]["method"] == "POST"
+    assert job["blocked_recovery_report"]["recommended_call"]["request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
+    assert job["blocked_recovery_report"]["recommended_call"]["dry_run"] is True
+    assert job["blocked_recovery_report"]["recommended_call"]["mutates_state"] is False
+    assert job["blocked_recovery_report"]["recommended_call"]["uploads"] is False
+    assert job["blocked_recovery_report"]["recommended_call"]["contacts_trackers"] is False
+    assert job["blocked_recovery_report"]["recommended_call"]["contacts_qbittorrent"] is False
+    assert job["blocked_recovery_report"]["recommended_call"]["requires_user_review"] is True
+    assert job["blocked_recovery_report"]["recommended_call"]["approval"]["dry_run_first"] is True
+    assert job["blocked_recovery_report"]["recommended_call"]["approval"]["execute_available"] is True
+    assert job["blocked_recovery_report"]["recommended_call"]["safety"]["must_review_before_execute"] is True
+    assert "resume_execution_handoff" in job["blocked_recovery_report"]["recommended_call"]["read_before_call"]
+    assert "resume_followup_handoff" in job["blocked_recovery_report"]["recommended_call"]["after_call"]["read"]
     assert job["blocked_recovery_report"]["dry_run_request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
     assert job["blocked_recovery_report"]["execute_request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
     assert "materials" in job["blocked_recovery_report"]["blocked_domains"]
@@ -24462,6 +24478,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "blocked_recovery_report_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "recoverable" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
         assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
+        assert "blocked_recovery_recommended_call_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "approval" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_recommended_call_fields"]
+        assert "after_call" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_recommended_call_fields"]
+        assert "contacts_qbittorrent" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_recommended_call_fields"]
         assert "policy_config_apply_handoff" in tools_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
         assert "configure_policy" in tools_by_name["get_job_status"]["response_contract"]["recovery_actions"]
         assert "job_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]

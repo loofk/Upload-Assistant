@@ -17396,7 +17396,7 @@ def _job_blocked_recovery_report(job: dict[str, Any], payload: dict[str, Any] | 
     duplicate_check = _job_duplicate_check(job)
     action = _job_blocked_recovery_action(status, runtime, recovery_handoff, resume_final_report, duplicate_check)
     blockers = _job_blocked_recovery_blockers(job, recovery_handoff, resume_final_report, materials_handoff, target_upload_handoff, closure_handoff, duplicate_check, policy_config_apply_handoff, policy_application_report)
-    recommended_call = _job_blocked_recovery_recommended_call(job_id, action, recovery_handoff, resume_final_report, runtime, blockers)
+    recommended_call = _job_blocked_recovery_recommended_call(job_id, status, action, recovery_handoff, resume_final_report, runtime, blockers)
     recoverable = _job_blocked_recovery_recoverable(action, recommended_call, blockers)
     return {
         "kind": "ptcli.blocked_recovery_report",
@@ -17490,6 +17490,7 @@ def _job_blocked_recovery_action(status: str, runtime: dict[str, Any], recovery_
 
 def _job_blocked_recovery_recommended_call(
     job_id: str,
+    status: str,
     action: str,
     recovery_handoff: dict[str, Any],
     resume_final_report: dict[str, Any],
@@ -17497,51 +17498,149 @@ def _job_blocked_recovery_recommended_call(
     blockers: list[str],
 ) -> dict[str, Any]:
     if action == "poll":
-        return {
-            "tool": "get_job_status",
-            "endpoint": runtime.get("status_endpoint") or (f"/v1/jobs/{job_id}" if job_id else None),
-            "method": "GET",
-            "request": {"job_id": job_id} if job_id else None,
-            "safe_to_call_now": True,
-            "requires_user_review": False,
-        }
+        return _job_blocked_recovery_call_contract(
+            job_id,
+            status,
+            action,
+            tool="get_job_status",
+            endpoint=runtime.get("status_endpoint") or (f"/v1/jobs/{job_id}" if job_id else None),
+            method="GET",
+            request={"job_id": job_id} if job_id else None,
+            safe_to_call_now=True,
+            requires_user_review=False,
+        )
     if action == "read_summary":
-        return {
-            "tool": "get_job_summary",
-            "endpoint": runtime.get("summary_endpoint") or (f"/v1/jobs/{job_id}/summary" if job_id else None),
-            "method": "GET",
-            "request": {"job_id": job_id} if job_id else None,
-            "safe_to_call_now": True,
-            "requires_user_review": False,
-        }
+        return _job_blocked_recovery_call_contract(
+            job_id,
+            status,
+            action,
+            tool="get_job_summary",
+            endpoint=runtime.get("summary_endpoint") or (f"/v1/jobs/{job_id}/summary" if job_id else None),
+            method="GET",
+            request={"job_id": job_id} if job_id else None,
+            safe_to_call_now=True,
+            requires_user_review=False,
+        )
     resume_call = resume_final_report.get("recommended_call") if isinstance(resume_final_report.get("recommended_call"), dict) else {}
     if resume_call.get("tool") and action in {"preview_resume", "execute_resume"}:
-        return dict(resume_call)
+        return _job_blocked_recovery_call_contract(
+            job_id,
+            status,
+            action,
+            tool=resume_call.get("tool"),
+            endpoint=resume_call.get("endpoint"),
+            method=resume_call.get("method"),
+            request=resume_call.get("request"),
+            dry_run_request=resume_call.get("dry_run_request") or resume_final_report.get("dry_run_request"),
+            execute_request=resume_call.get("execute_request") or resume_final_report.get("execute_request"),
+            safe_to_call_now=bool(resume_call.get("safe_to_call_now")),
+            requires_user_review=bool(resume_call.get("requires_user_review", True)),
+            reason=resume_call.get("reason") or f"resume_final_report.{action}",
+            extra=resume_call,
+        )
     if action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "repair_policy_application", "prepare_target_package", "target_upload_closure", "configure_policy"} and recovery_handoff.get("recommended_tool"):
-        return {
-            "tool": recovery_handoff.get("recommended_tool"),
-            "endpoint": recovery_handoff.get("recommended_endpoint"),
-            "method": recovery_handoff.get("recommended_method"),
-            "request": recovery_handoff.get("recommended_request"),
-            "dry_run_request": recovery_handoff.get("dry_run_request"),
-            "execute_request": recovery_handoff.get("execute_request"),
-            "safe_to_call_now": (action == "configure_policy" and recovery_handoff.get("recommended_tool") in {"site_policies", "site_policy_rule_review"})
-            or action == "poll"
-            or (action in {"prepare_target_package", "target_upload_closure"} and not blockers),
-            "requires_user_review": action not in {"poll", "read_summary", "configure_policy"},
-            "reason": f"recovery_handoff.{action}",
-        }
-    return {
-        "tool": None,
-        "endpoint": recovery_handoff.get("recommended_endpoint") or resume_call.get("endpoint"),
-        "method": recovery_handoff.get("recommended_method") or resume_call.get("method"),
-        "request": None,
-        "dry_run_request": recovery_handoff.get("dry_run_request") or resume_final_report.get("dry_run_request"),
-        "execute_request": recovery_handoff.get("execute_request") or resume_final_report.get("execute_request"),
-        "safe_to_call_now": False,
-        "requires_user_review": True,
-        "reason": "blocked_recovery_report.no_safe_call",
+        safe_to_call_now = (action == "configure_policy" and recovery_handoff.get("recommended_tool") in {"site_policies", "site_policy_rule_review"}) or action == "poll" or (action in {"prepare_target_package", "target_upload_closure"} and not blockers)
+        return _job_blocked_recovery_call_contract(
+            job_id,
+            status,
+            action,
+            tool=recovery_handoff.get("recommended_tool"),
+            endpoint=recovery_handoff.get("recommended_endpoint"),
+            method=recovery_handoff.get("recommended_method"),
+            request=recovery_handoff.get("recommended_request"),
+            dry_run_request=recovery_handoff.get("dry_run_request"),
+            execute_request=recovery_handoff.get("execute_request"),
+            safe_to_call_now=safe_to_call_now,
+            requires_user_review=action not in {"poll", "read_summary", "configure_policy"},
+            reason=f"recovery_handoff.{action}",
+        )
+    return _job_blocked_recovery_call_contract(
+        job_id,
+        status,
+        action,
+        tool=None,
+        endpoint=recovery_handoff.get("recommended_endpoint") or resume_call.get("endpoint"),
+        method=recovery_handoff.get("recommended_method") or resume_call.get("method"),
+        request=None,
+        dry_run_request=recovery_handoff.get("dry_run_request") or resume_final_report.get("dry_run_request"),
+        execute_request=recovery_handoff.get("execute_request") or resume_final_report.get("execute_request"),
+        safe_to_call_now=False,
+        requires_user_review=True,
+        reason="blocked_recovery_report.no_safe_call",
+    )
+
+
+def _job_blocked_recovery_call_contract(
+    job_id: str,
+    status: str,
+    action: str,
+    *,
+    tool: Any,
+    endpoint: Any,
+    method: Any,
+    request: Any,
+    dry_run_request: Any = None,
+    execute_request: Any = None,
+    safe_to_call_now: bool,
+    requires_user_review: bool,
+    reason: Any = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    request_value = request if isinstance(request, dict) else None
+    method_value = str(method or ("GET" if action in {"poll", "read_summary"} else "POST")).upper()
+    dry_run_request_value = dry_run_request if isinstance(dry_run_request, dict) else None
+    execute_request_value = execute_request if isinstance(execute_request, dict) else None
+    side_effects = _job_recommended_call_side_effects(tool, method_value, request_value, action)
+    ready = bool(tool and endpoint)
+    approval = {
+        "required": requires_user_review,
+        "dry_run_first": bool(dry_run_request_value),
+        "execute_available": bool(execute_request_value),
+        "requires_accept_rules": _job_next_call_flag_required("accept_rules", action, execute_request_value),
+        "requires_confirm_upload": _job_next_call_flag_required("confirm_upload", action, execute_request_value),
     }
+    contract = {
+        "ready": ready,
+        "safe_to_call_now": bool(safe_to_call_now and ready),
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method_value,
+        "request": request_value,
+        "action": action,
+        "status": status,
+        **side_effects,
+        "dry_run_request": dry_run_request_value,
+        "execute_request": execute_request_value,
+        "requires_user_review": requires_user_review,
+        "reason": reason or _job_next_call_reason(action, status, bool(safe_to_call_now and ready), requires_user_review),
+        "read_before_call": _job_next_call_read_before(action),
+        "after_call": _job_next_call_after_call(action, job_id),
+        "approval": approval,
+        "safety": {
+            "safe_to_call_now": bool(safe_to_call_now and ready),
+            "read_only": side_effects["read_only"],
+            "dry_run_preview": side_effects["dry_run"],
+            "does_not_upload_when_dry_run": side_effects["dry_run"],
+            "live_upload_requires_confirm_upload": True,
+            "rules_must_be_accepted": True,
+            "must_review_before_execute": requires_user_review or bool(execute_request_value),
+        },
+        "stop_when": _job_blocked_recovery_call_stop_when(action),
+    }
+    if extra:
+        for key in ("gates", "progress", "source"):
+            if key in extra and key not in contract:
+                contract[key] = extra[key]
+    return contract
+
+
+def _job_blocked_recovery_call_stop_when(action: str) -> list[str]:
+    return [
+        *_job_next_call_after_call(action, "").get("stop_when", []),
+        "blocked_recovery_report.recommended_call.safe_to_call_now=false",
+        "blocked_recovery_report.recommended_call.uploads=true and confirm_upload is missing",
+        "blocked_recovery_report.recommended_call.contacts_trackers=true and accept_rules is missing",
+    ]
 
 
 def _job_blocked_recovery_recoverable(action: str, recommended_call: dict[str, Any], blockers: list[str]) -> bool:
@@ -36319,6 +36418,7 @@ def _job_response_contract() -> dict[str, Any]:
         "recovery_actions": ["poll", "preview_resume", "execute_resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_target_payload", "repair_qbit", "repair_policy_application", "configure_policy", "read_summary", "stop_duplicate", "stop_cancelled", "failed", "resolve_blockers", "inspect"],
         "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "policy_application_report", "policy_config_apply_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
         "blocked_recovery_report_fields": ["ready", "recoverable", "action", "status", "job_id", "job_kind", "terminal", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "policy_application_report", "policy_config_apply_handoff", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "qbit_execution_gate", "blocked_domains", "read_order", "complete_when", "stop_when", "sources", "blockers", "next_actions"],
+        "blocked_recovery_recommended_call_fields": ["ready", "safe_to_call_now", "tool", "endpoint", "method", "request", "action", "status", "read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "dry_run_request", "execute_request", "requires_user_review", "reason", "read_before_call", "after_call", "approval", "safety", "stop_when"],
         "site_policy_profile_handoff_fields": ["ready", "status", "accepted_rules", "source_tracker", "target_trackers", "source", "targets", "site_policy_profiles", "site_policy_execution_profiles", "next_step", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
         "request_fields": ["policy_coverage", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
