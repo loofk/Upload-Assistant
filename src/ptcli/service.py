@@ -10932,6 +10932,8 @@ def _daily_candidate_run_next_call(action: str, next_step: dict[str, Any], block
     method = next_step.get("method") or "GET"
     request = next_step.get("request")
     requires_user_review = action == "submit_candidate" or tool == "submit_daily_candidate_job"
+    method_value = str(method or "").upper()
+    is_dry_run = isinstance(request, dict) and request.get("dry_run") is True
     mutates_state = method == "POST" and tool not in {"daily_candidate_delivery", "get_job_status", "get_job_summary"}
     uploads = tool in {"submit_daily_candidate_job", "target_upload", "target_upload_job"} or (tool == "resume_job" and isinstance(request, dict) and request.get("confirm_upload") is True)
     safe_to_call_now = bool(tool) and not blockers and not requires_user_review and tool != "inspect_blockers"
@@ -10945,6 +10947,8 @@ def _daily_candidate_run_next_call(action: str, next_step: dict[str, Any], block
         "request": request,
         "safe_to_call_now": safe_to_call_now,
         "requires_user_review": requires_user_review,
+        "read_only": method_value == "GET",
+        "dry_run": is_dry_run,
         "mutates_state": mutates_state,
         "uploads": uploads,
         "contacts_trackers": tool not in {None, "daily_candidate_delivery", "get_job_status", "get_job_summary", "inspect_blockers"},
@@ -21404,6 +21408,8 @@ def _daily_candidate_batch_next_call(
     method = next_step.get("method") or "GET"
     request = next_step.get("request")
     requires_user_review = action == "ask_user_approval" or _daily_candidate_batch_next_call_requires_review(tool, request)
+    method_value = str(method or "").upper()
+    is_dry_run = isinstance(request, dict) and request.get("dry_run") is True
     mutates_state = method == "POST" and tool not in {"daily_candidate_batch_status", "get_job_status", "get_job_summary"}
     uploads = tool in {"submit_daily_candidate_job", "target_upload", "target_upload_job"} or (tool == "resume_job" and isinstance(request, dict) and request.get("confirm_upload") is True)
     safe_to_call_now = bool(tool) and not blockers and not requires_user_review
@@ -21423,6 +21429,8 @@ def _daily_candidate_batch_next_call(
         "request": request,
         "safe_to_call_now": safe_to_call_now,
         "requires_user_review": requires_user_review,
+        "read_only": method_value == "GET",
+        "dry_run": is_dry_run,
         "mutates_state": mutates_state,
         "uploads": uploads,
         "contacts_trackers": tool not in {None, "daily_candidate_batch_status", "get_job_status", "get_job_summary"},
@@ -21484,6 +21492,8 @@ def _daily_candidate_batch_candidate_next_calls(approval_sequence: dict[str, Any
                 "request": request,
                 "safe_to_call_now": False,
                 "requires_user_review": True,
+                "read_only": False,
+                "dry_run": False,
                 "mutates_state": True,
                 "uploads": True,
                 "contacts_trackers": True,
@@ -33877,7 +33887,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_delivery_plan_fields": ["ready", "action", "status", "publish_ready", "submission_ready", "notification_ready", "target_met", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "recommended_tool", "recommended_endpoint", "recommended_request", "delivery_tool", "delivery_endpoint", "delivery_method", "delivery_request", "publish_request", "first_submit_request", "candidate_executability_matrix", "safe_to_publish", "recommended_action_safety", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_schedule_execution_context_fields": ["ready", "action", "schedule_job_count", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "target_met", "approval_queue_ready", "publish_ready", "submission_ready", "notification_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_candidate_execution_context", "candidate_executability_matrix", "approval_queue", "submission_handoff_ref", "notification_payload_ref", "publish_request", "shortfall_recovery", "required_user_inputs", "missing_user_inputs", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_run_handoff_fields": ["ready", "status", "action", "verdict", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "publish", "submit", "poll", "shortfall_recovery", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-                "daily_candidate_run_next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
+                "daily_candidate_run_next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
                 "daily_candidate_operational_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "approval", "completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_fulfillment_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "notification", "approval", "submission", "shortfall_recovery", "audit", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
@@ -35356,8 +35366,8 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_refill_request_contract_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "scan_exhausted", "pagination_supported", "excluded_source_ids", "submitted_source_ids", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "ready_shortfall_count", "remaining_submit_count", "running_count", "blocked_count", "should_submit", "should_poll", "should_refill", "should_report", "refill_request_contract", "next_step", "after_step", "repeat_until", "read_order", "blockers", "next_actions"],
         "daily_candidate_batch_publish_payload_fields": ["ready", "status", "format", "title", "summary", "message", "counts", "items", "top_item", "candidate_field_completeness", "candidate_executability_matrix", "completion_items", "top_completion", "approval_queue", "tracking", "completion_gate", "target_report", "completion_report", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_target_report", "publish_contract", "read_order", "blockers", "next_actions"],
-        "daily_candidate_batch_next_call_fields": ["ready", "action", "source", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "candidate_next_calls", "selected_candidate_next_call", "approval", "progress", "safety", "blockers", "next_actions"],
-        "daily_candidate_candidate_next_call_fields": ["ready", "candidate_job_id", "rank", "source_tracker", "target", "source_id", "title", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval_text", "required_user_inputs", "safety", "blockers", "next_actions"],
+        "daily_candidate_batch_next_call_fields": ["ready", "action", "source", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "candidate_next_calls", "selected_candidate_next_call", "approval", "progress", "safety", "blockers", "next_actions"],
+        "daily_candidate_candidate_next_call_fields": ["ready", "candidate_job_id", "rank", "source_tracker", "target", "source_id", "title", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval_text", "required_user_inputs", "safety", "blockers", "next_actions"],
         "daily_candidate_batch_target_report_fields": ["ready", "status", "action", "target", "loop", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "refill_handoff", "submission", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "daily_candidate_batch_target_counts_fields": ["target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "ready_target_met", "completion_target_met"],
         "daily_candidate_batch_target_loop_fields": ["should_submit", "should_poll", "should_refill", "should_report", "loop_control", "after_step", "repeat_until"],
