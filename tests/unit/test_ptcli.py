@@ -13988,6 +13988,20 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["live_validation_completion_audit"]["recommended_tool"] == "resume_job"
     assert job["live_validation_completion_audit"]["safety"]["does_not_upload"] is True
     assert job["live_validation_completion_audit"]["read_order"][0] == "live_validation_completion_audit"
+    assert job["live_recovery_final_report"]["kind"] == "ptcli.live_recovery_final_report"
+    assert job["live_recovery_final_report"]["ready"] is True
+    assert job["live_recovery_final_report"]["report_allowed"] is False
+    assert job["live_recovery_final_report"]["verdict"] == "preview_resume"
+    assert job["live_recovery_final_report"]["action"] == "preview_resume"
+    assert job["live_recovery_final_report"]["should_resume"] is True
+    assert job["live_recovery_final_report"]["resume_preview_required"] is True
+    assert job["live_recovery_final_report"]["recommended_tool"] == "resume_job"
+    assert job["live_recovery_final_report"]["recommended_request"] == job["material_evidence_summary"]["dry_run_request"]
+    assert job["live_recovery_final_report"]["execute_request"] == job["material_evidence_summary"]["execute_request"]
+    assert job["live_recovery_final_report"]["live_evidence"]["closure_complete"] is False
+    assert "uploaded_seeding_ready" in job["live_recovery_final_report"]["live_evidence"]["missing_evidence"]
+    assert "live_recovery_final_report" in job["live_recovery_final_report"]["read_order"]
+    assert "live_validation_completion_audit.report_allowed=true" in job["live_recovery_final_report"]["complete_when"]
     evidence_handoff = job["live_evidence_collection_handoff"]
     assert evidence_handoff["kind"] == "ptcli.live_evidence_collection_handoff"
     assert evidence_handoff["ready"] is False
@@ -14250,6 +14264,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["live_user_report"] == job["live_user_report"]
     assert summary["live_validation_final_report"] == job["live_validation_final_report"]
     assert summary["live_validation_completion_audit"] == job["live_validation_completion_audit"]
+    assert summary["live_recovery_final_report"] == job["live_recovery_final_report"]
     assert summary["live_action_sequence"] == job["live_action_sequence"]
     assert summary["closure_handoff"]["next_step"] == job["target_upload_handoff"]["next_step"]
     assert summary["resume_plan"] == job["resume_plan"]
@@ -14293,6 +14308,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert listed["next_call"]["action"] == "preview_resume"
     assert listed["resume_final_report"]["recommended_call"]["request"] == {"job_id": job["job_id"], "dry_run": True}
     assert listed["blocked_recovery_report"] == job["blocked_recovery_report"]
+    assert listed["live_recovery_final_report"] == job["live_recovery_final_report"]
 
 
 def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
@@ -21855,6 +21871,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_completion_audit" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_validation_completion_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "live_validation_completion_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "live_recovery_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "live_recovery_final_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "live_recovery_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "live_recovery_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "live_evidence_collection_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_evidence_collection_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_evidence_collection_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -21918,6 +21938,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_completion_audit_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "failed_checks" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_validation_completion_audit_fields"]
     assert "missing_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_validation_completion_audit_fields"]
+    assert "live_recovery_final_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "action" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_recovery_final_report_fields"]
+    assert "live_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_recovery_final_report_fields"]
+    assert "execute_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_recovery_final_report_fields"]
     assert "live_action_sequence_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "final_report_field" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_action_sequence_fields"]
     assert "live_action_sequence_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
@@ -23186,6 +23210,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_user_report" in summary_schema["properties"]
     assert "live_validation_final_report" in summary_schema["properties"]
     assert "live_validation_completion_audit" in summary_schema["properties"]
+    assert "live_recovery_final_report" in summary_schema["properties"]
     assert "live_action_sequence" in summary_schema["properties"]
     assert "live_evidence_collection_handoff" in summary_schema["properties"]
     assert "live_validation_submission" in summary_schema["properties"]
@@ -23259,6 +23284,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_user_report" in job_schema["properties"]
     assert "live_validation_final_report" in job_schema["properties"]
     assert "live_validation_completion_audit" in job_schema["properties"]
+    assert "live_recovery_final_report" in job_schema["properties"]
     assert "live_action_sequence" in job_schema["properties"]
     assert "live_validation_submission" in job_schema["properties"]
     assert "live_validation_followup" in job_schema["properties"]
@@ -23286,6 +23312,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     job_list_schema = openapi["paths"]["/v1/jobs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "job_summary_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "job_lifecycle_control" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "live_recovery_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "next_call" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
@@ -26910,7 +26937,7 @@ services:
     assert validation_steps["check_and_submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert validation_steps["check_and_submit"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
     assert validation_steps["poll_job"]["read"] == ["status", "recovery_handoff", "job_handoff", "blockers", "next_actions"]
-    assert validation_steps["recover_or_finish"]["read"] == ["live_validation_completion_audit", "live_validation_final_report", "live_user_report", "live_completion_gate", "seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"]
+    assert validation_steps["recover_or_finish"]["read"] == ["live_recovery_final_report", "live_validation_completion_audit", "live_validation_final_report", "live_user_report", "live_completion_gate", "seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"]
     assert validation_steps["recover_or_finish"]["continue_when"] == "live_validation_completion_audit.report_allowed=true"
     assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["kind"] == "ptcli.seedbox_post_submit_handoff"
     assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["submit_tool"] == "source_url_check_and_submit"
