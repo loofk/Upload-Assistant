@@ -23093,6 +23093,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "top_safe_candidates" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "execution_plan" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "daily_candidate_push_final_report" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
+    assert "daily_candidate_push_final_report" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "candidate_control_summary" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
     assert "candidate_control_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "target_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
@@ -23107,8 +23109,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "top_safe_candidates" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "execution_plan" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "daily_candidate_push_final_report" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "candidate_control_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "daily_candidate_batch_report_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "daily_candidate_push_final_report_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "recommended_call" in tool_by_name["daily_candidates"]["response_contract"]["daily_candidate_push_final_report_fields"]
     assert "candidate_control_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "read_order" in tool_by_name["daily_candidates"]["response_contract"]["candidate_control_summary_fields"]
     assert "shortfall_recovery" in tool_by_name["daily_candidates"]["response_contract"]["daily_candidate_report_fields"]
@@ -23533,6 +23538,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "next_call" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
+    assert "daily_candidate_push_final_report" in candidates_schema["properties"]
     candidate_submit_schema = openapi["paths"]["/v1/jobs/candidates/{job_id}/submit"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "job_id" in candidate_submit_schema["properties"]
     check_submit_schema = openapi["paths"]["/v1/jobs/retorrent/check/{job_id}/submit"]["post"]["requestBody"]["content"]["application/json"]["schema"]
@@ -27990,6 +27996,26 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert batch_report["safe_to_submit_ids"] == ["60635"]
     assert batch_report["blockers"] == []
     assert result["digest"]["push_payload"]["daily_candidate_batch_report"] == batch_report
+    push_final_report = result["digest"]["daily_candidate_push_final_report"]
+    assert push_final_report["kind"] == "ptcli.daily_candidate_push_final_report"
+    assert push_final_report["ready"] is True
+    assert push_final_report["report_allowed"] is True
+    assert push_final_report["verdict"] == "ready_for_approval"
+    assert push_final_report["action"] == "ask_user_approval"
+    assert push_final_report["target_count"] == 1
+    assert push_final_report["selected_count"] == 1
+    assert push_final_report["ready_count"] == 1
+    assert push_final_report["safe_to_submit_count"] == 1
+    assert push_final_report["ready_shortfall_count"] == 0
+    assert push_final_report["submission_ready"] is True
+    assert push_final_report["approval_required"] is True
+    assert push_final_report["first_submit_request"]["source_id"] == "60635"
+    assert push_final_report["recommended_call"]["tool"] == "submit_daily_candidate_job"
+    assert push_final_report["recommended_call"]["safe_to_call_now"] is False
+    assert push_final_report["recommended_call"]["requires_user_review"] is True
+    assert push_final_report["safety"]["live_upload_requires_confirm_upload"] is True
+    assert result["daily_candidate_push_final_report"] == push_final_report
+    assert result["digest"]["push_payload"]["daily_candidate_push_final_report"] == push_final_report
     control_summary = result["digest"]["candidate_control_summary"]
     assert control_summary["kind"] == "ptcli.candidate_control_summary"
     assert control_summary["scope"] == "daily_candidates"

@@ -185,6 +185,8 @@ async def build_daily_candidates(
             "selected_count": len(candidates),
         },
         "digest": digest,
+        "candidate_control_summary": digest.get("candidate_control_summary"),
+        "daily_candidate_push_final_report": digest.get("daily_candidate_push_final_report"),
         "candidates": candidates,
         "blockers": payload_blockers,
         "next_actions": next_actions,
@@ -1019,6 +1021,18 @@ def _candidate_digest(
     daily_candidate_batch_report = _candidate_batch_report(push_items, approval_queue, execution_plan, daily_candidate_report, target_summary, blockers)
     candidate_control_summary = _candidate_control_summary(daily_candidate_report, daily_candidate_batch_report, approval_queue, execution_plan, blockers, scope="daily_candidates")
     candidate_executability_matrix = _candidate_executability_matrix(push_items, blockers)
+    daily_candidate_push_final_report = _candidate_push_final_report(
+        push_items,
+        approval_queue,
+        execution_plan,
+        daily_candidate_report,
+        daily_candidate_batch_report,
+        candidate_control_summary,
+        candidate_executability_matrix,
+        target_summary,
+        blockers,
+        request_context=request_context,
+    )
     push_payload = _candidate_push_payload(
         push_summary,
         push_items,
@@ -1033,6 +1047,7 @@ def _candidate_digest(
         candidate_control_summary=candidate_control_summary,
         candidate_executability_matrix=candidate_executability_matrix,
         candidate_discovery_handoff=discovery_handoff,
+        daily_candidate_push_final_report=daily_candidate_push_final_report,
     )
     return {
         "kind": "ptcli.daily_candidates_digest",
@@ -1058,6 +1073,7 @@ def _candidate_digest(
         "execution_plan": execution_plan,
         "daily_candidate_report": daily_candidate_report,
         "daily_candidate_batch_report": daily_candidate_batch_report,
+        "daily_candidate_push_final_report": daily_candidate_push_final_report,
         "candidate_control_summary": candidate_control_summary,
         "candidate_executability_matrix": candidate_executability_matrix,
         "push_count": len(push_items),
@@ -1088,6 +1104,7 @@ def _candidate_push_payload(
     candidate_control_summary: dict[str, Any],
     candidate_executability_matrix: dict[str, Any],
     candidate_discovery_handoff: dict[str, Any],
+    daily_candidate_push_final_report: dict[str, Any],
 ) -> dict[str, Any]:
     items = [item for item in push_items if isinstance(item, dict)]
     ready_items = [item for item in items if item.get("can_submit") is True]
@@ -1124,6 +1141,7 @@ def _candidate_push_payload(
         "execution_plan": execution_plan,
         "daily_candidate_report": daily_candidate_report,
         "daily_candidate_batch_report": daily_candidate_batch_report,
+        "daily_candidate_push_final_report": daily_candidate_push_final_report,
         "candidate_control_summary": candidate_control_summary,
         "candidate_executability_matrix": candidate_executability_matrix,
         "candidate_discovery_handoff": candidate_discovery_handoff,
@@ -1132,6 +1150,136 @@ def _candidate_push_payload(
         "blockers": blockers,
         "next_actions": next_actions,
     }
+
+
+def _candidate_push_final_report(
+    push_items: list[dict[str, Any] | None],
+    approval_queue: dict[str, Any],
+    execution_plan: dict[str, Any],
+    daily_candidate_report: dict[str, Any],
+    daily_candidate_batch_report: dict[str, Any],
+    candidate_control_summary: dict[str, Any],
+    candidate_executability_matrix: dict[str, Any],
+    target_summary: dict[str, Any],
+    blockers: list[str],
+    *,
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    items = [item for item in push_items if isinstance(item, dict)]
+    safe_items = [item for item in items if item.get("can_submit") is True]
+    report_blockers = list(
+        dict.fromkeys(
+            _string_list(blockers)
+            + _string_list(daily_candidate_report.get("blockers"))
+            + _string_list(daily_candidate_batch_report.get("blockers"))
+            + _string_list(candidate_control_summary.get("blockers"))
+            + _string_list(candidate_executability_matrix.get("blockers"))
+        )
+    )
+    target_count = int(target_summary.get("target_count") or DEFAULT_CANDIDATE_LIMIT)
+    selected_count = int(target_summary.get("selected_count") or len(items))
+    ready_count = int(target_summary.get("ready_count") or 0)
+    safe_count = len(safe_items)
+    selected_shortfall_count = max(0, target_count - selected_count)
+    ready_shortfall_count = max(0, target_count - ready_count)
+    submit_ready = bool(safe_count and not report_blockers)
+    push_ready = bool(items) and not report_blockers
+    if submit_ready:
+        verdict = "ready_for_approval"
+        action = "ask_user_approval"
+    elif ready_shortfall_count:
+        verdict = "shortfall"
+        action = "refill_candidates"
+    elif report_blockers:
+        verdict = "blocked"
+        action = "resolve_blockers"
+    else:
+        verdict = "empty"
+        action = "discover_candidates"
+    recommended_call = _candidate_push_final_recommended_call(action, execution_plan, candidate_control_summary, request_context)
+    return {
+        "kind": "ptcli.daily_candidate_push_final_report",
+        "ready": push_ready,
+        "report_allowed": push_ready,
+        "verdict": verdict,
+        "status": "ready" if push_ready else "blocked",
+        "action": action,
+        "target_count": target_count,
+        "scan_count": int(target_summary.get("scan_count") or 0),
+        "scan_limit": request_context.get("scan_limit"),
+        "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
+        "selected_count": selected_count,
+        "ready_count": ready_count,
+        "safe_to_submit_count": safe_count,
+        "guarded_count": int(approval_queue.get("guarded_count") or 0),
+        "blocked_count": int(approval_queue.get("blocked_count") or 0),
+        "selected_shortfall_count": selected_shortfall_count,
+        "ready_shortfall_count": ready_shortfall_count,
+        "target_met": bool(target_summary.get("target_met")),
+        "ready_target_met": bool(target_summary.get("ready_target_met")),
+        "submission_ready": submit_ready,
+        "approval_required": bool(safe_count),
+        "approval_ready": bool(approval_queue.get("ready")),
+        "first_approval_prompt": approval_queue.get("first_approval_prompt"),
+        "first_submit_request": daily_candidate_batch_report.get("first_submit_request"),
+        "safe_to_submit_ids": [item.get("source_id") for item in safe_items if item.get("source_id")],
+        "blocked_source_ids": approval_queue.get("blocked_source_ids") if isinstance(approval_queue.get("blocked_source_ids"), list) else [],
+        "shortfall_recovery": execution_plan.get("shortfall_recovery") if isinstance(execution_plan.get("shortfall_recovery"), dict) else {},
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": ["daily_candidate_push_final_report", "candidate_control_summary", "daily_candidate_batch_report", "approval_queue", "execution_plan", "candidate_executability_matrix"],
+        "complete_when": ["daily_candidate_push_final_report.ready=true", "daily_candidate_push_final_report.safe_to_submit_count>=1 or ready_shortfall_count=0"],
+        "stop_when": ["daily_candidate_push_final_report.blockers is non-empty", "daily_candidate_push_final_report.verdict in ['blocked', 'shortfall', 'empty']"],
+        "safety": {"mutates_state": False, "contacts_trackers": False, "contacts_qbittorrent": False, "uploads": False, "submission_requires_user_approval": True, "live_upload_requires_confirm_upload": True},
+        "blockers": report_blockers,
+        "next_actions": _candidate_push_final_next_actions(action, report_blockers, ready_shortfall_count),
+    }
+
+
+def _candidate_push_final_recommended_call(action: str, execution_plan: dict[str, Any], candidate_control_summary: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    if action == "ask_user_approval":
+        return {
+            "tool": "submit_daily_candidate_job",
+            "endpoint": "/v1/jobs/candidates/{candidate_job_id}/submit",
+            "method": "POST",
+            "request": candidate_control_summary.get("recommended_request") or execution_plan.get("recommended_request"),
+            "safe_to_call_now": False,
+            "requires_user_review": True,
+            "reason": "daily_candidate_push_final_report.await_user_approval",
+        }
+    shortfall_recovery = execution_plan.get("shortfall_recovery") if isinstance(execution_plan.get("shortfall_recovery"), dict) else {}
+    if action == "refill_candidates" and shortfall_recovery:
+        return {
+            "tool": shortfall_recovery.get("recommended_tool") or "daily_candidates_job",
+            "endpoint": shortfall_recovery.get("recommended_endpoint") or "/v1/jobs/candidates/daily",
+            "method": shortfall_recovery.get("recommended_method") or "POST",
+            "request": shortfall_recovery.get("recommended_request") or request_context,
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "reason": "daily_candidate_push_final_report.shortfall",
+        }
+    return {
+        "tool": "daily_candidates_job",
+        "endpoint": "/v1/jobs/candidates/daily",
+        "method": "POST",
+        "request": request_context,
+        "safe_to_call_now": action in {"discover_candidates", "refill_candidates"},
+        "requires_user_review": False,
+        "reason": f"daily_candidate_push_final_report.{action}",
+    }
+
+
+def _candidate_push_final_next_actions(action: str, blockers: list[str], ready_shortfall_count: int) -> list[str]:
+    if action == "ask_user_approval":
+        return ["Ask the user to approve daily_candidate_push_final_report.first_submit_request, then call submit_daily_candidate_job with confirm_upload=true."]
+    if action == "refill_candidates":
+        return [f"Call daily_candidate_push_final_report.recommended_call to fill {ready_shortfall_count} missing ready candidate(s)."]
+    if blockers:
+        return ["Resolve daily_candidate_push_final_report.blockers before pushing or submitting candidates."]
+    return ["Run daily candidate discovery again after source cookies, site policies, and duplicate checks are ready."]
 
 
 def _candidate_executability_matrix(items: list[dict[str, Any] | None], blockers: list[str]) -> dict[str, Any]:

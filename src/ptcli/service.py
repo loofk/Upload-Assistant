@@ -4347,6 +4347,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "ranking": result.get("ranking"),
         "digest": result.get("digest"),
         "candidate_control_summary": _candidate_control_summary_from_payload(result),
+        "daily_candidate_push_final_report": result.get("daily_candidate_push_final_report") or ((result.get("digest") or {}).get("daily_candidate_push_final_report") if isinstance(result.get("digest"), dict) else None),
         "candidates": result.get("candidates", []),
         "count": result.get("count", 0),
         "target_count": result.get("target_count"),
@@ -39523,7 +39524,7 @@ def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
 
 def _candidate_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "target_count", "scan_count", "scan_limit", "max_scan_limit", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "source_capability", "candidate_discovery_handoff", "pagination_plan", "site_policy", "ranking", "digest", "candidate_control_summary", "candidates", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "target_count", "scan_count", "scan_limit", "max_scan_limit", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "source_capability", "candidate_discovery_handoff", "pagination_plan", "site_policy", "ranking", "digest", "candidate_control_summary", "daily_candidate_push_final_report", "candidates", "blockers", "next_actions"],
         "digest_fields": [
             "recommendation",
             "recommended_action",
@@ -39551,6 +39552,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "execution_plan",
             "daily_candidate_report",
             "daily_candidate_batch_report",
+            "daily_candidate_push_final_report",
             "candidate_control_summary",
             "candidate_executability_matrix",
             "push_count",
@@ -39593,6 +39595,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "execution_plan",
             "daily_candidate_report",
             "daily_candidate_batch_report",
+            "daily_candidate_push_final_report",
             "candidate_control_summary",
             "candidate_executability_matrix",
             "candidate_discovery_handoff",
@@ -39685,6 +39688,7 @@ def _candidate_response_contract() -> dict[str, Any]:
         "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "site_policy_profile_handoff", "site_policy_summary", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
         "execution_plan_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "request_context", "recommended_submit_requests", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_control_summary_fields": ["ready", "action", "decision", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "ready_shortfall_count", "target_met", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "shortfall_recovery", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+        "daily_candidate_push_final_report_fields": ["ready", "report_allowed", "verdict", "status", "action", "target_count", "scan_count", "scan_limit", "max_scan_limit", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "approval_required", "approval_ready", "first_approval_prompt", "first_submit_request", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "pagination_supported", "shortfall_items", "refill_requests", "fallback_schedule_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
@@ -40588,6 +40592,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ranking": {"type": "object"},
             "digest": {"type": "object"},
             "candidate_control_summary": {"type": ["object", "null"]},
+            "daily_candidate_push_final_report": {"type": ["object", "null"]},
             "candidates": {"type": "array", "items": {"type": "object"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
