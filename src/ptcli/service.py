@@ -5561,12 +5561,13 @@ async def qbit_limits_payload(request: dict[str, Any] | None = None) -> dict[str
     config = load_config(context.get("config"))
     policy_limits = qbit_limits_for_tracker(config, context["tracker"], role=context["policy_role"]) if context.get("tracker") else {"upload_limit": None, "download_limit": None}
     qbit_limits = merge_qbit_limits(policy_limits, upload_limit=context.get("upload_limit"), download_limit=context.get("download_limit"))
+    policy_resolution = _qbit_limits_policy_resolution(context, qbit_limits)
     requested_limits = {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}
-    blockers = _qbit_limits_request_blockers(requested_limits)
+    blockers = _qbit_limits_request_blockers(requested_limits, policy_resolution)
     if blockers:
-        return _qbit_limits_blocked_payload(context, qbit_limits, blockers)
+        return _qbit_limits_blocked_payload(context, qbit_limits, policy_resolution, blockers)
     if context["dry_run"]:
-        return _qbit_limits_dry_run_payload(context, qbit_limits, requested_limits)
+        return _qbit_limits_dry_run_payload(context, qbit_limits, policy_resolution, requested_limits)
 
     client_name, client_config = resolve_client_config(config, context["client"])
     service = QbitReadOnlyService(client_config)
@@ -5594,13 +5595,14 @@ async def qbit_limits_payload(request: dict[str, Any] | None = None) -> dict[str
         "role": context.get("role"),
         "site_policy": qbit_limits.get("policy"),
         "qbit_limits": qbit_limits,
+        "policy_resolution": policy_resolution,
         "rate_limits": result["rate_limits"],
         "visible_before": result["visible_before"],
         "visible_after": result["visible_after"],
         "before": result["before"],
         "after": result["after"],
-        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, result["rate_limits"], execution_blockers, dry_run=False),
-        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, result["rate_limits"], execution_blockers, dry_run=False),
+        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, policy_resolution, result["rate_limits"], execution_blockers, dry_run=False),
+        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, policy_resolution, result["rate_limits"], execution_blockers, dry_run=False),
         "blockers": execution_blockers,
         "next_actions": _qbit_limits_next_actions(execution_blockers, dry_run=False),
     }
@@ -10462,10 +10464,51 @@ def _qbit_inject_next_actions(blockers: list[str]) -> list[str]:
     return ["Use hash with qbit_wait_complete, qbit_inspect, or a retorrent resume step that needs qBittorrent evidence."]
 
 
-def _qbit_limits_request_blockers(requested_limits: dict[str, Any]) -> list[str]:
+def _qbit_limits_policy_resolution(context: dict[str, Any], qbit_limits: dict[str, Any]) -> dict[str, Any]:
+    upload_source = qbit_limits.get("upload_limit_source")
+    download_source = qbit_limits.get("download_limit_source")
+    explicit_fields = [field for field, source in (("upload_limit", upload_source), ("download_limit", download_source)) if source == "request"]
+    policy_fields = [field for field, source in (("upload_limit", upload_source), ("download_limit", download_source)) if source == "site_policy"]
+    missing_policy_fields: list[str] = []
+    if context.get("tracker") and context.get("role") in {"target", "uploaded"} and qbit_limits.get("upload_limit") is None:
+        missing_policy_fields.append("upload_limit")
+    if context.get("tracker") and context.get("role") == "source" and qbit_limits.get("download_limit") is None:
+        missing_policy_fields.append("download_limit")
+    blockers = []
+    if not context.get("tracker") and not explicit_fields:
+        blockers.append("tracker is required when upload_limit/download_limit are not explicit.")
+    blockers.extend(f"site_policy.{field}_missing" for field in missing_policy_fields)
+    return {
+        "kind": "ptcli.qbit_limit_policy_resolution",
+        "ready": not blockers,
+        "tracker": context.get("tracker"),
+        "role": context.get("role"),
+        "policy_role": context.get("policy_role"),
+        "explicit_fields": explicit_fields,
+        "policy_fields": policy_fields,
+        "missing_policy_fields": missing_policy_fields,
+        "resolved_limits": {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")},
+        "resolved_human": {"upload_limit": qbit_limits.get("upload_limit_human"), "download_limit": qbit_limits.get("download_limit_human")},
+        "sources": {"upload_limit": upload_source, "download_limit": download_source},
+        "site_policy": qbit_limits.get("policy"),
+        "safe_to_apply_after_dry_run": not blockers and any(value is not None for value in (qbit_limits.get("upload_limit"), qbit_limits.get("download_limit"))),
+        "requires_user_review": True,
+        "blockers": blockers,
+        "next_actions": _qbit_limits_policy_resolution_next_actions(blockers),
+    }
+
+
+def _qbit_limits_policy_resolution_next_actions(blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Provide explicit upload_limit/download_limit or configure PTCLI.SITE_POLICIES for the tracker role before applying qBittorrent limits."]
+    return ["Review dry-run rate_limits.calls, then set dry_run=false only after approval to apply qBittorrent limits."]
+
+
+def _qbit_limits_request_blockers(requested_limits: dict[str, Any], policy_resolution: dict[str, Any]) -> list[str]:
+    blockers = _string_list(policy_resolution.get("blockers"))
     if requested_limits.get("upload_limit") is None and requested_limits.get("download_limit") is None:
-        return ["No qBittorrent upload_limit or download_limit was supplied or resolved from site policy."]
-    return []
+        blockers.append("No qBittorrent upload_limit or download_limit was supplied or resolved from site policy.")
+    return list(dict.fromkeys(blockers))
 
 
 def _qbit_limits_execution_blockers(result: dict[str, Any]) -> list[str]:
@@ -10481,7 +10524,7 @@ def _qbit_limits_execution_blockers(result: dict[str, Any]) -> list[str]:
     return blockers
 
 
-def _qbit_limits_blocked_payload(context: dict[str, Any], qbit_limits: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+def _qbit_limits_blocked_payload(context: dict[str, Any], qbit_limits: dict[str, Any], policy_resolution: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
     return {
         "kind": "ptcli.qbit_limits",
         "status": "blocked",
@@ -10496,19 +10539,20 @@ def _qbit_limits_blocked_payload(context: dict[str, Any], qbit_limits: dict[str,
         "role": context.get("role"),
         "site_policy": qbit_limits.get("policy"),
         "qbit_limits": qbit_limits,
+        "policy_resolution": policy_resolution,
         "rate_limits": {"requested": {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}, "applied": False, "skipped": True, "calls": []},
         "visible_before": None,
         "visible_after": None,
         "before": [],
         "after": [],
-        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, {}, blockers, dry_run=context["dry_run"]),
-        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, {}, blockers, dry_run=context["dry_run"]),
+        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, policy_resolution, {}, blockers, dry_run=context["dry_run"]),
+        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, policy_resolution, {}, blockers, dry_run=context["dry_run"]),
         "blockers": blockers,
         "next_actions": _qbit_limits_next_actions(blockers, dry_run=context["dry_run"]),
     }
 
 
-def _qbit_limits_dry_run_payload(context: dict[str, Any], qbit_limits: dict[str, Any], requested_limits: dict[str, Any]) -> dict[str, Any]:
+def _qbit_limits_dry_run_payload(context: dict[str, Any], qbit_limits: dict[str, Any], policy_resolution: dict[str, Any], requested_limits: dict[str, Any]) -> dict[str, Any]:
     calls = []
     if requested_limits.get("upload_limit") is not None:
         calls.append({"method": "torrents_set_upload_limit", "torrent_hashes": context["hash"], "limit": requested_limits["upload_limit"]})
@@ -10529,19 +10573,20 @@ def _qbit_limits_dry_run_payload(context: dict[str, Any], qbit_limits: dict[str,
         "role": context.get("role"),
         "site_policy": qbit_limits.get("policy"),
         "qbit_limits": qbit_limits,
+        "policy_resolution": policy_resolution,
         "rate_limits": rate_limits,
         "visible_before": None,
         "visible_after": None,
         "before": [],
         "after": [],
-        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, rate_limits, [], dry_run=True),
-        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, rate_limits, [], dry_run=True),
+        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, policy_resolution, rate_limits, [], dry_run=True),
+        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, policy_resolution, rate_limits, [], dry_run=True),
         "blockers": [],
         "next_actions": _qbit_limits_next_actions([], dry_run=True),
     }
 
 
-def _qbit_limits_agent_summary(context: dict[str, Any], qbit_limits: dict[str, Any], rate_limits: dict[str, Any], blockers: list[str], *, dry_run: bool) -> dict[str, Any]:
+def _qbit_limits_agent_summary(context: dict[str, Any], qbit_limits: dict[str, Any], policy_resolution: dict[str, Any], rate_limits: dict[str, Any], blockers: list[str], *, dry_run: bool) -> dict[str, Any]:
     requested = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}
     return {
         "ready": not blockers,
@@ -10557,13 +10602,16 @@ def _qbit_limits_agent_summary(context: dict[str, Any], qbit_limits: dict[str, A
         "download_limit_human": qbit_limits.get("download_limit_human"),
         "upload_limit_source": qbit_limits.get("upload_limit_source"),
         "download_limit_source": qbit_limits.get("download_limit_source"),
+        "policy_resolution_ready": policy_resolution.get("ready"),
+        "policy_fields": policy_resolution.get("policy_fields"),
+        "explicit_fields": policy_resolution.get("explicit_fields"),
         "rate_limits_applied": bool(rate_limits.get("applied")),
         "call_count": len(rate_limits.get("calls") or []) if isinstance(rate_limits.get("calls"), list) else 0,
         "blocker_count": len(blockers),
     }
 
 
-def _qbit_limits_repair_report(context: dict[str, Any], qbit_limits: dict[str, Any], rate_limits: dict[str, Any], blockers: list[str], *, dry_run: bool) -> dict[str, Any]:
+def _qbit_limits_repair_report(context: dict[str, Any], qbit_limits: dict[str, Any], policy_resolution: dict[str, Any], rate_limits: dict[str, Any], blockers: list[str], *, dry_run: bool) -> dict[str, Any]:
     job_id = context.get("job_id")
     requested = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}
     applied = bool(rate_limits.get("applied"))
@@ -10606,6 +10654,7 @@ def _qbit_limits_repair_report(context: dict[str, Any], qbit_limits: dict[str, A
         "hash": context.get("hash"),
         "tracker": context.get("tracker"),
         "requested_limits": requested,
+        "policy_resolution": policy_resolution,
         "applied": applied,
         "dry_run": dry_run,
         "verification_call": verification_call,
@@ -41255,11 +41304,12 @@ def _qbit_inject_response_contract() -> dict[str, Any]:
 
 def _qbit_limits_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "dry_run", "mutates_qbittorrent", "live_upload", "client", "request", "hash", "tracker", "role", "site_policy", "qbit_limits", "rate_limits", "visible_before", "visible_after", "before", "after", "agent_summary", "qbit_rate_limit_repair_report", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "dry_run", "mutates_qbittorrent", "live_upload", "client", "request", "hash", "tracker", "role", "site_policy", "qbit_limits", "policy_resolution", "rate_limits", "visible_before", "visible_after", "before", "after", "agent_summary", "qbit_rate_limit_repair_report", "blockers", "next_actions"],
         "qbit_limit_fields": ["download_limit", "upload_limit", "download_limit_human", "upload_limit_human", "download_limit_source", "upload_limit_source", "role", "tracker", "policy"],
+        "policy_resolution_fields": ["ready", "tracker", "role", "policy_role", "explicit_fields", "policy_fields", "missing_policy_fields", "resolved_limits", "resolved_human", "sources", "site_policy", "safe_to_apply_after_dry_run", "requires_user_review", "blockers", "next_actions"],
         "rate_limit_fields": ["requested", "applied", "skipped", "dry_run", "calls"],
-        "agent_summary_fields": ["ready", "dry_run", "mutates_qbittorrent", "client", "hash", "tracker", "role", "upload_limit", "download_limit", "upload_limit_human", "download_limit_human", "upload_limit_source", "download_limit_source", "rate_limits_applied", "call_count", "blocker_count"],
-        "qbit_rate_limit_repair_report_fields": ["ready", "status", "job_id", "role", "hash", "tracker", "requested_limits", "applied", "dry_run", "verification_call", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "agent_summary_fields": ["ready", "dry_run", "mutates_qbittorrent", "client", "hash", "tracker", "role", "upload_limit", "download_limit", "upload_limit_human", "download_limit_human", "upload_limit_source", "download_limit_source", "policy_resolution_ready", "policy_fields", "explicit_fields", "rate_limits_applied", "call_count", "blocker_count"],
+        "qbit_rate_limit_repair_report_fields": ["ready", "status", "job_id", "role", "hash", "tracker", "requested_limits", "policy_resolution", "applied", "dry_run", "verification_call", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "safety": ["dry_run_by_default", "may_change_qbittorrent_rate_limits", "does_not_add_torrents", "does_not_upload"],
     }
 
@@ -42968,6 +43018,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "role": {"type": "string"},
             "site_policy": {"type": ["object", "null"]},
             "qbit_limits": {"type": "object"},
+            "policy_resolution": {"type": "object"},
             "rate_limits": {"type": "object"},
             "visible_before": {"type": ["boolean", "null"]},
             "visible_after": {"type": ["boolean", "null"]},

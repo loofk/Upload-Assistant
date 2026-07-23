@@ -20682,19 +20682,50 @@ async def test_service_qbit_limits_payload_dry_runs_policy_limits(monkeypatch) -
     assert payload["request"]["job_id"] == "job-retorrent-1"
     assert payload["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
     assert payload["qbit_limits"]["upload_limit_source"] == "site_policy"
+    assert payload["policy_resolution"]["kind"] == "ptcli.qbit_limit_policy_resolution"
+    assert payload["policy_resolution"]["ready"] is True
+    assert payload["policy_resolution"]["policy_fields"] == ["upload_limit"]
+    assert payload["policy_resolution"]["explicit_fields"] == []
+    assert payload["policy_resolution"]["resolved_limits"] == {"upload_limit": 2 * 1024 * 1024, "download_limit": None}
+    assert payload["policy_resolution"]["safe_to_apply_after_dry_run"] is True
+    assert payload["policy_resolution"]["requires_user_review"] is True
     assert payload["rate_limits"]["requested"] == {"upload_limit": 2 * 1024 * 1024, "download_limit": None}
     assert payload["rate_limits"]["calls"] == [{"method": "torrents_set_upload_limit", "torrent_hashes": "d" * 40, "limit": 2 * 1024 * 1024}]
     assert payload["agent_summary"]["ready"] is True
     assert payload["agent_summary"]["upload_limit_source"] == "site_policy"
+    assert payload["agent_summary"]["policy_resolution_ready"] is True
+    assert payload["agent_summary"]["policy_fields"] == ["upload_limit"]
     repair_report = payload["qbit_rate_limit_repair_report"]
     assert repair_report["kind"] == "ptcli.qbit_rate_limit_repair_report"
     assert repair_report["status"] == "dry_run"
     assert repair_report["ready"] is False
     assert repair_report["job_id"] == "job-retorrent-1"
+    assert repair_report["policy_resolution"] == payload["policy_resolution"]
     assert repair_report["recommended_call"]["request"]["job_id"] == "job-retorrent-1"
     assert repair_report["recommended_call"]["request"]["dry_run"] is False
     assert payload["blockers"] == []
     assert "dry_run=false" in payload["next_actions"][0]
+
+
+async def test_service_qbit_limits_payload_blocks_without_explicit_or_policy_limits(monkeypatch) -> None:
+    class FailIfInstantiated:
+        def __init__(self, _client_config):
+            raise AssertionError("blocked qbit limits must not contact qBittorrent")
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {})
+    monkeypatch.setattr(ptcli_service, "QbitReadOnlyService", FailIfInstantiated)
+
+    payload = await ptcli_service.qbit_limits_payload({"hash": "f" * 40})
+
+    assert payload["status"] == "blocked"
+    assert payload["ok"] is False
+    assert payload["mutates_qbittorrent"] is False
+    assert payload["policy_resolution"]["ready"] is False
+    assert payload["policy_resolution"]["blockers"] == ["tracker is required when upload_limit/download_limit are not explicit."]
+    assert payload["policy_resolution"]["safe_to_apply_after_dry_run"] is False
+    assert payload["agent_summary"]["policy_resolution_ready"] is False
+    assert "No qBittorrent upload_limit or download_limit was supplied or resolved from site policy." in payload["blockers"]
+    assert payload["qbit_rate_limit_repair_report"]["policy_resolution"] == payload["policy_resolution"]
 
 
 async def test_service_qbit_limits_payload_applies_explicit_limits(monkeypatch) -> None:
@@ -20735,6 +20766,9 @@ async def test_service_qbit_limits_payload_applies_explicit_limits(monkeypatch) 
     assert payload["dry_run"] is False
     assert payload["mutates_qbittorrent"] is True
     assert payload["client"] == "qbit"
+    assert payload["policy_resolution"]["ready"] is True
+    assert payload["policy_resolution"]["explicit_fields"] == ["upload_limit", "download_limit"]
+    assert payload["policy_resolution"]["policy_fields"] == []
     assert payload["rate_limits"]["applied"] is True
     assert payload["visible_before"] is True
     assert payload["visible_after"] is True
@@ -23286,6 +23320,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["qbit_apply_limits"]["safety"]["live_upload"] is False
     assert "dry_run_by_default" in tool_by_name["qbit_apply_limits"]["response_contract"]["safety"]
     assert "qbit_limit_fields" in tool_by_name["qbit_apply_limits"]["response_contract"]
+    assert "policy_resolution" in tool_by_name["qbit_apply_limits"]["response_contract"]["required_fields"]
+    assert "policy_resolution_fields" in tool_by_name["qbit_apply_limits"]["response_contract"]
+    assert "safe_to_apply_after_dry_run" in tool_by_name["qbit_apply_limits"]["response_contract"]["policy_resolution_fields"]
+    assert "policy_resolution_ready" in tool_by_name["qbit_apply_limits"]["response_contract"]["agent_summary_fields"]
     assert "qbit_rate_limit_repair_report" in tool_by_name["qbit_apply_limits"]["response_contract"]["required_fields"]
     assert "qbit_rate_limit_repair_report_fields" in tool_by_name["qbit_apply_limits"]["response_contract"]
     assert tool_by_name["qbit_wait_complete"]["path"] == "/v1/qbit/wait"
