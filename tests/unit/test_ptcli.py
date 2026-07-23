@@ -22805,8 +22805,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_approval_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "report_allowed" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_final_report_fields"]
+    assert "approval_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_final_report_fields"]
+    assert "daily_candidate_approval_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "can_submit_after_approval" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_approval_final_report_fields"]
     assert "goal_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "delivery" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
@@ -26127,6 +26131,27 @@ services:
                     "delivery": {"delivered": True, "channel_attempted": True, "payload_fingerprint": "complete123"},
                     "blockers": [],
                 },
+                "daily_candidate_approval_final_report": {
+                    "kind": "ptcli.daily_candidate_approval_final_report",
+                    "ready": True,
+                    "report_allowed": False,
+                    "status": "ready_for_user_approval",
+                    "action": "ask_user_approval",
+                    "approval_required": True,
+                    "can_submit_after_approval": True,
+                    "target": {"target_count": 10, "ready_count": 10, "safe_to_submit_count": 10, "ready_shortfall_count": 0, "ready_target_met": True},
+                    "candidate": {"source_tracker": "U2", "target": "MTEAM", "source_id": "60635", "title": "Candidate 1", "rank": 1},
+                    "approval": {"approval_count": 10, "first_source_id": "60635", "first_rank": 1, "required_user_inputs": ["approve rank/source_id"]},
+                    "recommended_call": {
+                        "tool": "submit_daily_candidate_job",
+                        "endpoint": "/v1/jobs/candidates/daily/batch",
+                        "method": "POST",
+                        "request": {"source_tracker": "U2", "target": "MTEAM", "rank": 1, "source_id": "60635", "confirm_upload": True},
+                        "safe_to_call_now": False,
+                        "requires_user_review": True,
+                    },
+                    "blockers": [],
+                },
                 "delivery_result": {"status": "delivered", "ok": True, "channel_attempted": True, "payload_fingerprint": "complete123"},
                 "delivery_audit": {"ready": True, "status": "delivered", "payload_fingerprint": "complete123", "channels": {"file": {"ok": True}}, "blockers": []},
                 "blockers": [],
@@ -26145,11 +26170,18 @@ services:
             "target": "MTEAM",
         }
     )
-    complete_goal_report = complete_daily_payload["evidence"]["daily_candidates"]["daily_candidate_goal_final_report"]
+    complete_evidence = complete_daily_payload["evidence"]["daily_candidates"]
+    assert complete_evidence["summary_evidence"]["has_approval_final_report"] is True
+    assert complete_evidence["daily_candidate_approval_final_report"]["action"] == "ask_user_approval"
+    assert complete_evidence["daily_candidate_approval_final_report"]["can_submit_after_approval"] is True
+    complete_goal_report = complete_evidence["daily_candidate_goal_final_report"]
     assert complete_goal_report["report_allowed"] is True
     assert complete_goal_report["verdict"] == "daily_digest_target_ready"
+    assert complete_goal_report["action"] == "request_user_approval"
     assert complete_goal_report["target"]["ready_target_met"] is True
     assert complete_goal_report["delivery"]["delivered"] is True
+    assert complete_goal_report["approval"]["can_submit_after_approval"] is True
+    assert complete_goal_report["approval_final_report"]["candidate"]["source_id"] == "60635"
     assert complete_goal_report["missing_evidence"] == []
     assert [item["name"] for item in complete_goal_report["completion_evidence"]] == [
         "schedule_or_summary_evidence",
