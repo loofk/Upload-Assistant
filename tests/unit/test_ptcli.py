@@ -22144,6 +22144,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["goal_progress"]["path"] == "/v1/goal/progress"
     assert tool_by_name["goal_progress"]["method"] == "GET"
     assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "goal_distance_report" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "remaining_percent" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
+    assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
     assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_plan" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
@@ -22501,6 +22504,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert openapi["paths"]["/v1/goal/progress"]["get"]["operationId"] == "getPtcliGoalProgress"
     goal_progress_schema = openapi["paths"]["/v1/goal/progress"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_estimate" in goal_progress_schema["properties"]
+    assert "goal_distance_report" in goal_progress_schema["properties"]
     assert "critical_path_remaining" in goal_progress_schema["properties"]
     assert "critical_path_plan" in goal_progress_schema["properties"]
     assert "evidence" in goal_progress_schema["properties"]
@@ -24945,6 +24949,15 @@ services:
     assert payload["status"] == "blocked"
     assert payload["completion_estimate"]["estimated_percent"] > 50
     assert payload["completion_estimate"]["critical_path_ready"] is False
+    distance = payload["goal_distance_report"]
+    assert distance["kind"] == "ptcli.goal_distance_report"
+    assert distance["estimated_percent"] == payload["completion_estimate"]["estimated_percent"]
+    assert distance["remaining_percent"] == 100 - payload["completion_estimate"]["estimated_percent"]
+    assert distance["current_phase_id"] == "manual_live_retorrent_closure"
+    assert "site_policy_config" in distance["remaining_capability_ids"]
+    assert distance["next_work"]["primary_capability_id"] == "site_policy_config"
+    assert distance["recommended_call"]["tool"] == "site_policy_rule_review"
+    assert "critical_path_ready=true" in distance["completion_gate"]["must_not_mark_complete_until"]
     plan = payload["critical_path_plan"]
     assert plan["kind"] == "ptcli.goal_critical_path_plan"
     assert plan["critical_path_ready"] is False
@@ -25133,7 +25146,7 @@ services:
     assert payload["next_step"]["endpoint"] == "/v1/site-policies/rule-review"
     assert payload["next_step"]["request"] == payload["evidence"]["site_policies"]["rule_review_request"]
     assert any("evidence.site_policies.policy_repair_gate.next_step" in action for action in payload["next_actions"])
-    assert payload["read_order"][0] == "completion_estimate"
+    assert payload["read_order"][0] == "goal_distance_report"
     assert "evidence.site_policies" in payload["read_order"]
     assert "evidence.live_validation" in payload["read_order"]
     assert "evidence.live_validation_preflight" in payload["read_order"]

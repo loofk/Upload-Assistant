@@ -43377,6 +43377,7 @@
           "ok",
           "objective",
           "completion_estimate",
+          "goal_distance_report",
           "capabilities",
           "critical_path_remaining",
           "critical_path_plan",
@@ -43394,6 +43395,37 @@
           "critical_path_ready",
           "confidence",
           "note"
+        ],
+        "goal_distance_report_fields": [
+          "status",
+          "estimated_percent",
+          "remaining_percent",
+          "plain_answer",
+          "confidence",
+          "current_phase_id",
+          "current_phase_name",
+          "current_phase_status",
+          "completed_capability_count",
+          "remaining_capability_count",
+          "completed_capability_ids",
+          "remaining_capability_ids",
+          "critical_remaining_capabilities",
+          "next_work",
+          "recommended_call",
+          "completion_gate",
+          "read_order",
+          "blockers",
+          "next_actions"
+        ],
+        "goal_distance_next_work_fields": [
+          "action",
+          "primary_capability_id",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "expected_result",
+          "next_actions"
         ],
         "capability_fields": [
           "id",
@@ -43663,9 +43695,9 @@
         ]
       },
       "workflow_hints": {
-        "read_first": "completion_estimate",
-        "then": "critical_path_remaining",
-        "repair_with": "next_step"
+        "read_first": "goal_distance_report",
+        "then": "critical_path_plan",
+        "repair_with": "goal_distance_report.recommended_call"
       },
       "safety": {
         "mutates_state": false,

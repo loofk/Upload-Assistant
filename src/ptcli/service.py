@@ -31841,12 +31841,14 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     daily_candidate_config_final_report = deployment.get("daily_candidate_config_final_report") if isinstance(deployment.get("daily_candidate_config_final_report"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
     critical_path_plan = _goal_progress_critical_path_plan(progress_items, estimate, next_step, blockers)
+    goal_distance_report = _goal_progress_distance_report(progress_items, estimate, critical_path_plan, next_step, blockers)
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
         "ok": estimate["critical_path_ready"],
         "objective": "Chinese PT-focused Docker Compose deployed AI-callable retorrent/upload/upload-farming automation service.",
         "completion_estimate": estimate,
+        "goal_distance_report": goal_distance_report,
         "capabilities": progress_items,
         "critical_path_remaining": _goal_progress_remaining(progress_items),
         "critical_path_plan": critical_path_plan,
@@ -31939,7 +31941,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             "live_validation_preflight": live_validation_preflight,
             "tool_count": len(tools),
         },
-        "read_order": ["completion_estimate", "critical_path_plan", "critical_path_remaining", "capabilities", "evidence.site_policies", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
+        "read_order": ["goal_distance_report", "completion_estimate", "critical_path_plan", "critical_path_remaining", "capabilities", "evidence.site_policies", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
         "next_actions": _goal_progress_next_actions(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight),
     }
 
@@ -33058,6 +33060,103 @@ def _goal_progress_critical_path_plan(items: list[dict[str, Any]], estimate: dic
     }
 
 
+def _goal_progress_distance_report(
+    items: list[dict[str, Any]],
+    estimate: dict[str, Any],
+    critical_path_plan: dict[str, Any],
+    next_step: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    complete_items = [item for item in items if item.get("status") == "complete"]
+    remaining_items = [item for item in items if item.get("status") != "complete"]
+    current_phase = critical_path_plan.get("current_phase") if isinstance(critical_path_plan.get("current_phase"), dict) else {}
+    focus_now = critical_path_plan.get("focus_now") if isinstance(critical_path_plan.get("focus_now"), dict) else {}
+    estimated_percent = int(estimate.get("estimated_percent") or 0)
+    remaining_percent = max(0, 100 - estimated_percent)
+    current_remaining_ids = _string_list(current_phase.get("remaining_capability_ids"))
+    remaining_by_id = {str(item.get("id")): item for item in remaining_items}
+    critical_remaining = [remaining_by_id[item_id] for item_id in current_remaining_ids if item_id in remaining_by_id]
+    if not critical_remaining:
+        critical_remaining = remaining_items[:3]
+    next_work = _goal_progress_distance_next_work(critical_remaining, next_step, blockers)
+    return {
+        "kind": "ptcli.goal_distance_report",
+        "status": "complete" if estimate.get("critical_path_ready") else "in_progress",
+        "estimated_percent": estimated_percent,
+        "remaining_percent": remaining_percent,
+        "plain_answer": f"Current evidence puts the goal at about {estimated_percent}% complete; about {remaining_percent}% remains, mostly in {current_phase.get('name') or 'the current critical phase'}.",
+        "confidence": estimate.get("confidence"),
+        "current_phase_id": current_phase.get("id"),
+        "current_phase_name": current_phase.get("name"),
+        "current_phase_status": current_phase.get("status"),
+        "completed_capability_count": len(complete_items),
+        "remaining_capability_count": len(remaining_items),
+        "completed_capability_ids": [str(item.get("id")) for item in complete_items],
+        "remaining_capability_ids": [str(item.get("id")) for item in remaining_items],
+        "critical_remaining_capabilities": [
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "weight": item.get("weight"),
+                "blockers": _string_list(item.get("blockers")),
+                "evidence_to_collect": item.get("evidence") if isinstance(item.get("evidence"), list) else [],
+            }
+            for item in critical_remaining
+        ],
+        "next_work": next_work,
+        "recommended_call": {
+            "tool": next_step.get("tool"),
+            "endpoint": next_step.get("endpoint"),
+            "method": next_step.get("method"),
+            "request": next_step.get("request") if "request" in next_step else None,
+            "reason": next_step.get("reason") or focus_now.get("phase_id"),
+            "safe_to_call_now": not bool(blockers) or str(next_step.get("tool") or "") in {"site_policy_rule_review", "deployment_check", "readiness_bundle", "goal_progress"},
+        },
+        "completion_gate": {
+            "critical_path_ready": estimate.get("critical_path_ready"),
+            "must_not_mark_complete_until": critical_path_plan.get("must_not_mark_complete_until") if isinstance(critical_path_plan.get("must_not_mark_complete_until"), list) else [],
+        },
+        "read_order": ["goal_distance_report.plain_answer", "goal_distance_report.current_phase_name", "goal_distance_report.critical_remaining_capabilities", "goal_distance_report.next_work", "goal_distance_report.recommended_call"],
+        "blockers": blockers,
+        "next_actions": next_work.get("next_actions") if isinstance(next_work.get("next_actions"), list) else [],
+    }
+
+
+def _goal_progress_distance_next_work(critical_remaining: list[dict[str, Any]], next_step: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    first = critical_remaining[0] if critical_remaining else {}
+    first_id = str(first.get("id") or "")
+    if first_id == "site_policy_config":
+        action = "finish_site_policy_rule_review"
+        next_actions = ["Complete rule review fingerprints and qBittorrent limit defaults for the requested source/target, then rerun goal_progress."]
+    elif first_id == "seedbox_live_validation":
+        action = "run_or_resume_seedbox_live_validation"
+        next_actions = ["Run readiness_bundle and one real U2/CHD -> MTEAM validation, then poll/resume until live_validation_completion_audit.report_allowed=true."]
+    elif first_id == "daily_candidates":
+        action = "exercise_daily_candidate_target"
+        next_actions = ["Configure PTCLI_DAILY_CANDIDATE_SCHEDULES, run the daily candidate batch, refill until 10 ready candidates, then submit only user-approved items."]
+    elif first_id == "tracker_adapters":
+        action = "extend_tracker_adapter_coverage"
+        next_actions = ["Use the U2/CHD -> MTEAM reference flow to add the next allowlisted Chinese PT adapter/profile with tests."]
+    elif first_id == "legacy_cleanup":
+        action = "defer_cleanup"
+        next_actions = ["Keep legacy cleanup deferred until live manual and daily candidate workflows are proven."]
+    else:
+        action = "follow_recommended_call"
+        next_actions = [f"Call {next_step.get('tool')} and inspect blockers/next_actions."]
+    if blockers:
+        next_actions.append("Resolve goal_distance_report.blockers before treating the current phase as complete.")
+    return {
+        "action": action,
+        "primary_capability_id": first_id or None,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_method": next_step.get("method"),
+        "recommended_request": next_step.get("request") if "request" in next_step else None,
+        "expected_result": "The first critical remaining capability moves to complete or exposes a narrower blocker with recovery instructions.",
+        "next_actions": list(dict.fromkeys(next_actions)),
+    }
+
+
 def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, Any], site_policies: dict[str, Any], live_validation_evidence: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     blockers.extend(_string_list(deployment.get("blockers")))
@@ -33982,8 +34081,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return a no-network progress audit against the final Chinese PT AI-service objective, including completed, partial, unverified, and remaining critical-path capabilities.",
             "input_schema": readiness_bundle_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "objective", "completion_estimate", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
+                "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "read_order", "blockers", "next_actions"],
+                "goal_distance_next_work_fields": ["action", "primary_capability_id", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "expected_result", "next_actions"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "critical_path_plan_fields": ["strategy", "estimated_percent", "critical_path_ready", "current_phase", "priority_order", "focus_now", "defer_until_after_current_phase", "must_not_mark_complete_until", "read_order"],
@@ -34000,7 +34101,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "seedbox_live_runbook_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },
-            "workflow_hints": {"read_first": "completion_estimate", "then": "critical_path_remaining", "repair_with": "next_step"},
+            "workflow_hints": {"read_first": "goal_distance_report", "then": "critical_path_plan", "repair_with": "goal_distance_report.recommended_call"},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
         },
         {
@@ -36822,6 +36923,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ok": {"type": "boolean"},
             "objective": {"type": "string"},
             "completion_estimate": {"type": "object"},
+            "goal_distance_report": {"type": "object"},
             "capabilities": {"type": "array", "items": {"type": "object"}},
             "critical_path_remaining": {"type": "array", "items": {"type": "object"}},
             "critical_path_plan": {"type": "object"},
