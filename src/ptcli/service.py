@@ -28170,6 +28170,9 @@ def _job_live_recovery_final_report(job: dict[str, Any], summary_payload: dict[s
     missing_evidence = list(dict.fromkeys(_string_list(audit.get("missing_evidence")) + _string_list(completion.get("missing_evidence"))))
     report_allowed = audit.get("report_allowed") is True and not failed_checks and not missing_evidence and not blockers
     ready = report_allowed or (bool(recommended_call.get("tool")) and action in {"poll", "read_summary", "preview_resume", "execute_resume_after_review", "stop_duplicate", "resolve_blockers"})
+    dry_run_request = recommended_call.get("dry_run_request") or lifecycle.get("dry_run_request") or resume_report.get("dry_run_request") or blocked_report.get("dry_run_request")
+    execute_request = recommended_call.get("execute_request") or lifecycle.get("execute_request") or resume_report.get("execute_request") or blocked_report.get("execute_request")
+    recommended_call = _job_live_recovery_complete_recommended_call(recommended_call, action, job_id, dry_run_request, execute_request)
     return {
         "kind": "ptcli.live_recovery_final_report",
         "ready": ready,
@@ -28192,8 +28195,8 @@ def _job_live_recovery_final_report(job: dict[str, Any], summary_payload: dict[s
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_method": recommended_call.get("method"),
         "recommended_request": recommended_call.get("request"),
-        "dry_run_request": recommended_call.get("dry_run_request") or lifecycle.get("dry_run_request") or resume_report.get("dry_run_request") or blocked_report.get("dry_run_request"),
-        "execute_request": recommended_call.get("execute_request") or lifecycle.get("execute_request") or resume_report.get("execute_request") or blocked_report.get("execute_request"),
+        "dry_run_request": dry_run_request,
+        "execute_request": execute_request,
         "live_evidence": {
             "live_validation_completion_audit_allowed": audit.get("report_allowed") is True,
             "live_user_report_allowed": live_user_report.get("report_allowed") is True,
@@ -28269,6 +28272,25 @@ def _job_live_recovery_recommended_call(
         if isinstance(source, dict) and source.get("tool"):
             return source
     return {"ready": False, "safe_to_call_now": False, "tool": None, "endpoint": None, "method": None, "request": None, "requires_user_review": True}
+
+
+def _job_live_recovery_complete_recommended_call(recommended_call: dict[str, Any], action: str, job_id: str, dry_run_request: Any, execute_request: Any) -> dict[str, Any]:
+    call = dict(recommended_call) if isinstance(recommended_call, dict) else {}
+    if not call.get("tool"):
+        return call
+    request = call.get("request") if isinstance(call.get("request"), dict) and call.get("request") else None
+    if request is None and action in {"poll", "read_summary", "stop_duplicate"} and job_id:
+        request = {"job_id": job_id}
+    elif request is None and action == "preview_resume" and isinstance(dry_run_request, dict) and dry_run_request:
+        request = dry_run_request
+    elif request is None and action == "execute_resume_after_review" and isinstance(execute_request, dict) and execute_request:
+        request = execute_request
+    call["request"] = request
+    if "dry_run_request" not in call and isinstance(dry_run_request, dict) and dry_run_request:
+        call["dry_run_request"] = dry_run_request
+    if "execute_request" not in call and isinstance(execute_request, dict) and execute_request:
+        call["execute_request"] = execute_request
+    return call
 
 
 def _job_live_recovery_action(
@@ -34274,6 +34296,7 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
         "live_submission_final_report": best.get("live_submission_final_report") if isinstance(best, dict) and isinstance(best.get("live_submission_final_report"), dict) else None,
         "live_validation_submission": best.get("live_validation_submission") if isinstance(best, dict) and isinstance(best.get("live_validation_submission"), dict) else None,
         "live_validation_followup": best.get("live_validation_followup") if isinstance(best, dict) and isinstance(best.get("live_validation_followup"), dict) else None,
+        "live_recovery_final_report": best.get("live_recovery_final_report") if isinstance(best, dict) and isinstance(best.get("live_recovery_final_report"), dict) else None,
         "resume_final_report": best.get("resume_final_report") if isinstance(best, dict) and isinstance(best.get("resume_final_report"), dict) else None,
         "job_lifecycle_final_report": best.get("job_lifecycle_final_report") if isinstance(best, dict) and isinstance(best.get("job_lifecycle_final_report"), dict) else None,
         "next_step": best.get("next_step") if isinstance(best, dict) and isinstance(best.get("next_step"), dict) else None,
@@ -34297,6 +34320,7 @@ def _goal_progress_seedbox_live_validation_final_report(evidence: dict[str, Any]
     next_step = evidence.get("next_step") if isinstance(evidence.get("next_step"), dict) else {}
     completion_audit = evidence.get("live_validation_completion_audit") if isinstance(evidence.get("live_validation_completion_audit"), dict) else {}
     submission_final = evidence.get("live_submission_final_report") if isinstance(evidence.get("live_submission_final_report"), dict) else {}
+    live_recovery = evidence.get("live_recovery_final_report") if isinstance(evidence.get("live_recovery_final_report"), dict) else {}
     lifecycle = evidence.get("job_lifecycle_final_report") if isinstance(evidence.get("job_lifecycle_final_report"), dict) else {}
     blockers = _string_list(evidence.get("blockers"))
     missing_evidence = _string_list(completion_audit.get("missing_evidence"))
@@ -34305,7 +34329,7 @@ def _goal_progress_seedbox_live_validation_final_report(evidence: dict[str, Any]
     summary_file = evidence.get("requested_summary_file") or best.get("summary_file")
     verdict = _goal_progress_seedbox_live_validation_verdict(status, ready, submission_ready, blockers, missing_evidence, failed_checks)
     report_allowed = ready and completion_audit.get("report_allowed") is True and not failed_checks and not missing_evidence and not blockers
-    recommended_call = _goal_progress_seedbox_live_validation_recommended_call(verdict, next_step, submission_final, lifecycle, evidence)
+    recommended_call = _goal_progress_seedbox_live_validation_recommended_call(verdict, next_step, submission_final, live_recovery or lifecycle, evidence)
     return {
         "kind": "ptcli.seedbox_live_validation_final_report",
         "ready": ready,
@@ -34330,6 +34354,7 @@ def _goal_progress_seedbox_live_validation_final_report(evidence: dict[str, Any]
         },
         "submitted_job": {
             "live_validation_followup": evidence.get("live_validation_followup"),
+            "live_recovery_final_report": live_recovery or None,
             "resume_final_report": evidence.get("resume_final_report"),
             "job_lifecycle_final_report": lifecycle or None,
         },
@@ -34338,7 +34363,7 @@ def _goal_progress_seedbox_live_validation_final_report(evidence: dict[str, Any]
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_method": recommended_call.get("method"),
         "recommended_request": recommended_call.get("request"),
-        "read_order": ["seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_final_report", "job_lifecycle_final_report", "live_validation_followup", "best"],
+        "read_order": ["seedbox_live_validation_final_report", "live_recovery_final_report", "live_validation_completion_audit", "live_submission_final_report", "job_lifecycle_final_report", "live_validation_followup", "best"],
         "complete_when": ["seedbox_live_validation_final_report.report_allowed=true", "live_validation_completion_audit.report_allowed=true", "live_validation_completion_audit.failed_checks=[]", "live_validation_completion_audit.missing_evidence=[]", "live_validation_completion_audit.blockers=[]"],
         "stop_when": ["seedbox_live_validation_final_report.blockers is non-empty", "verdict=duplicate_stopped", "verdict=blocked_no_recovery", "live_submission_final_report.ready=false before submit"],
         "blockers": blockers,
@@ -34541,6 +34566,7 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
     qbit = _job_qbit_enforcement_summary(job, summary_payload)
     live_validation_submission = _job_live_validation_submission(job)
     live_validation_followup = _job_live_validation_followup(job, summary_payload)
+    live_recovery_final_report = _job_live_recovery_final_report(job, summary_payload)
     resume_final_report = _job_resume_final_report(job, summary_payload)
     job_lifecycle_final_report = _job_lifecycle_final_report(job, summary_payload)
     missing_evidence = _string_list(completion_audit.get("missing_evidence"))
@@ -34549,9 +34575,13 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
     submitted_status = _goal_progress_submitted_live_validation_status(job, live_validation_followup)
     status = "complete" if ready else submitted_status or "incomplete"
     followup_next_step = _goal_progress_submitted_live_validation_next_step(live_validation_followup)
+    live_recovery_next_step = _goal_progress_live_recovery_final_report_next_step(live_recovery_final_report)
     resume_next_step = _goal_progress_resume_final_report_next_step(resume_final_report)
     lifecycle_next_step = _goal_progress_job_lifecycle_final_report_next_step(job_lifecycle_final_report)
-    next_step = lifecycle_next_step or resume_next_step if status == "submitted_needs_resume" and resume_next_step else lifecycle_next_step or followup_next_step
+    if status == "submitted_needs_resume" and resume_next_step:
+        next_step = live_recovery_next_step or lifecycle_next_step or resume_next_step
+    else:
+        next_step = live_recovery_next_step or lifecycle_next_step or followup_next_step
     return {
         "valid": True,
         "ready": ready,
@@ -34563,6 +34593,7 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
         "summary_file": live_user_report.get("summary_file") or _job_summary_file(job),
         "live_validation_submission": live_validation_submission,
         "live_validation_followup": live_validation_followup,
+        "live_recovery_final_report": live_recovery_final_report,
         "resume_final_report": resume_final_report,
         "job_lifecycle_final_report": job_lifecycle_final_report,
         "live_user_report": {
@@ -34640,6 +34671,25 @@ def _goal_progress_submitted_live_validation_next_step(followup: dict[str, Any] 
     }
 
 
+def _goal_progress_live_recovery_final_report_next_step(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(report, dict):
+        return None
+    call = report.get("recommended_call") if isinstance(report.get("recommended_call"), dict) else {}
+    tool = call.get("tool") or report.get("recommended_tool")
+    endpoint = call.get("endpoint") or report.get("recommended_endpoint")
+    method = call.get("method") or report.get("recommended_method")
+    request = call.get("request") if "request" in call else report.get("recommended_request")
+    if not tool or not endpoint:
+        return None
+    return {
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method or ("GET" if tool in {"get_job_status", "get_job_summary"} else "POST"),
+        "request": request,
+        "reason": f"live_recovery_final_report.{report.get('verdict') or report.get('action') or 'inspect'}",
+    }
+
+
 def _goal_progress_resume_final_report_next_step(report: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(report, dict):
         return None
@@ -34683,9 +34733,9 @@ def _goal_progress_live_validation_evidence_next_actions(status: str, ready: boo
     if ready:
         return ["Treat seedbox_live_validation as proven for this goal audit and continue with the next incomplete capability."]
     if status == "submitted_needs_resume":
-        return ["Read evidence.live_validation.job_lifecycle_final_report, dry-run or execute its recommended_call when safe, then rerun /v1/goal/progress with the same job_id."]
+        return ["Read evidence.live_validation.live_recovery_final_report, dry-run or execute its recommended_call when safe, then rerun /v1/goal/progress with the same job_id."]
     if status.startswith("submitted_"):
-        return ["Follow evidence.live_validation.job_lifecycle_final_report until live_validation_completion_audit.report_allowed=true, then rerun /v1/goal/progress with the same job_id."]
+        return ["Follow evidence.live_validation.live_recovery_final_report until live_validation_completion_audit.report_allowed=true, then rerun /v1/goal/progress with the same job_id."]
     if has_candidates:
         return ["Open evidence.live_validation.best, resolve its blockers or missing_evidence, then rerun /v1/goal/progress with the same job_dir/job_id."]
     return ["Run readiness_bundle.live_execution_package on a real U2/CHD -> MTEAM seedbox job, then rerun /v1/goal/progress with job_id or job_dir."]
@@ -35863,9 +35913,9 @@ def _goal_progress_next_actions(
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
         actions.append("Submit evidence.live_validation.live_submission_final_report.submission.request, then poll the returned job until live_validation_completion_audit.report_allowed=true.")
     elif any(item.get("id") == "seedbox_live_validation" and item.get("status") == "submitted_needs_resume" for item in items):
-        actions.append("Read evidence.live_validation.job_lifecycle_final_report and call its recommended_call only when safe or after review before reporting live validation complete.")
+        actions.append("Read evidence.live_validation.live_recovery_final_report and call its recommended_call only when safe or after review before reporting live validation complete.")
     elif any(item.get("id") == "seedbox_live_validation" and str(item.get("status") or "").startswith("submitted_") for item in items):
-        actions.append("Follow evidence.live_validation.job_lifecycle_final_report, then rerun goal_progress with the same live job id after the job state changes.")
+        actions.append("Follow evidence.live_validation.live_recovery_final_report, then rerun goal_progress with the same live job id after the job state changes.")
     elif any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
         actions.append("Use readiness_bundle.live_execution_package to run one real U2/CHD -> MTEAM seedbox validation until live_validation_completion_audit.report_allowed=true.")
     if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
@@ -36768,7 +36818,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "seedbox_live_runbook_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
