@@ -16078,6 +16078,8 @@ def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp
     assert preview["next_call"]["request"] == {"job_id": parent["job_id"], "confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
     assert preview["next_call"]["safe_to_call_now"] is False
     assert preview["next_call"]["requires_user_review"] is True
+    assert preview["next_call"]["read_only"] is False
+    assert preview["next_call"]["dry_run"] is False
     assert preview["next_call"]["mutates_state"] is True
     assert preview["next_call"]["uploads"] is True
     assert preview["next_call"]["contacts_trackers"] is True
@@ -21800,6 +21802,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_preview_next_call_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "safe_to_call_now" in tool_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
     assert "requires_user_review" in tool_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
+    assert "read_only" in tool_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
+    assert "dry_run" in tool_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
     assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -24214,6 +24218,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_preview_next_call_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "safe_to_call_now" in tools_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
         assert "requires_user_review" in tools_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
+        assert "read_only" in tools_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
+        assert "dry_run" in tools_by_name["resume_job"]["response_contract"]["resume_preview_next_call_fields"]
         assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
