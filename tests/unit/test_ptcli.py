@@ -15586,6 +15586,13 @@ def test_manual_retorrent_job_exposes_qbit_rate_limit_mismatch_repair_handoff(mo
     assert repair_plan["recommended_endpoint"] == "/v1/qbit/limits"
     assert repair_plan["recommended_request"] == repair_plan["qbit_apply_limits_calls"][0]["dry_run_request"]
     assert repair_plan["verification_call"]["endpoint"].endswith(f"/v1/jobs/{job['job_id']}/summary")
+    assert job["qbit_final_report"]["verdict"] == "rate_limit_mismatch"
+    assert job["qbit_final_report"]["recommended_call"]["tool"] == "qbit_apply_limits"
+    assert job["qbit_final_report"]["recommended_call"]["request"] == repair_plan["qbit_apply_limits_calls"][0]["dry_run_request"]
+    assert job["qbit_final_report"]["repair"]["action"] == "repair_rate_limits"
+    assert job["qbit_final_report"]["repair"]["qbit_apply_limits_calls"] == repair_plan["qbit_apply_limits_calls"]
+    assert job["qbit_final_report"]["repair"]["verification_call"] == repair_plan["verification_call"]
+    assert job["qbit_final_report"]["read_order"][1] == "qbit_final_report.repair"
     assert store.summary(job["job_id"])["qbit_rate_limit_repair_plan"] == repair_plan
 
 
@@ -21824,6 +21831,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_execution_gate_fields"]
     assert "qbit_final_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "report_allowed" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
+    assert "repair" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
+    assert "qbit_final_report_repair_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "qbit_apply_limits_calls" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_repair_fields"]
     assert "uploaded" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_final_report_fields"]
     assert "materials_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_evidence_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]

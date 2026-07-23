@@ -3983,6 +3983,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -3994,6 +3995,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -6679,6 +6695,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -6690,6 +6707,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -9242,6 +9274,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -9253,6 +9286,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -11805,6 +11853,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -11816,6 +11865,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -14372,6 +14436,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -14383,6 +14448,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -17964,6 +18044,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -17975,6 +18056,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -21389,6 +21485,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -21400,6 +21497,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -28650,6 +28762,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -28661,6 +28774,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -31175,6 +31303,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -31186,6 +31315,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -33709,6 +33853,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -33720,6 +33865,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -36212,6 +36372,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -36223,6 +36384,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -39941,6 +40117,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -39952,6 +40129,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -41181,6 +41373,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -43186,6 +43379,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -43197,6 +43391,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -45586,6 +45795,7 @@
           "status",
           "client",
           "rate_limits",
+          "repair",
           "source",
           "uploaded",
           "recommended_call",
@@ -45597,6 +45807,21 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "qbit_final_report_repair_fields": [
+          "ready",
+          "action",
+          "repair_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "request_patch",
+          "dry_run_request",
+          "execute_request",
+          "qbit_apply_limits_calls",
+          "verification_call",
+          "recommended_call",
+          "complete_when",
+          "blockers"
         ],
         "target_upload_handoff_fields": [
           "action",

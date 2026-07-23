@@ -24800,6 +24800,7 @@ def _job_qbit_final_report(job: dict[str, Any], summary_payload: dict[str, Any] 
             "mismatch_roles": _string_list(qbit_enforcement.get("mismatch_roles")) if isinstance(qbit_enforcement, dict) else [],
             "audit": qbit_limit_audit,
         },
+        "repair": _qbit_final_report_repair_summary(repair_plan),
         "source": {
             "ready": source_ready,
             "status": source_gate.get("status"),
@@ -24831,11 +24832,31 @@ def _job_qbit_final_report(job: dict[str, Any], summary_payload: dict[str, Any] 
         "recommended_tool": recommended_call.get("tool"),
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_request": recommended_call.get("request"),
-        "read_order": ["qbit_final_report", "qbit_execution_gate", "qbit_enforcement_summary", "qbit_limit_audit", "target_upload_handoff.uploaded_seeding_evidence", "closure_summary"],
+        "read_order": ["qbit_final_report", "qbit_final_report.repair", "qbit_execution_gate", "qbit_enforcement_summary", "qbit_limit_audit", "target_upload_handoff.uploaded_seeding_evidence", "closure_summary"],
         "complete_when": ["qbit_final_report.ready=true", "qbit_final_report.uploaded.seeding_ready=true", "qbit_final_report.rate_limits.ready=true"],
         "stop_when": ["qbit_final_report.blockers is non-empty", "qbit_execution_gate.mismatch_roles is non-empty", "uploaded seeding evidence is missing after target upload"],
         "blockers": blockers,
         "next_actions": _qbit_final_report_next_actions(verdict, blockers, recommended_call),
+    }
+
+
+def _qbit_final_report_repair_summary(repair_plan: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(repair_plan, dict) or not repair_plan:
+        return {"ready": None, "action": None, "repair_roles": [], "pending_roles": [], "mismatch_roles": [], "qbit_apply_limits_calls": [], "verification_call": None, "recommended_call": None}
+    return {
+        "ready": repair_plan.get("ready"),
+        "action": repair_plan.get("action"),
+        "repair_roles": _string_list(repair_plan.get("repair_roles")),
+        "pending_roles": _string_list(repair_plan.get("pending_roles")),
+        "mismatch_roles": _string_list(repair_plan.get("mismatch_roles")),
+        "request_patch": repair_plan.get("request_patch") if isinstance(repair_plan.get("request_patch"), dict) else {},
+        "dry_run_request": repair_plan.get("dry_run_request") if isinstance(repair_plan.get("dry_run_request"), dict) else None,
+        "execute_request": repair_plan.get("execute_request") if isinstance(repair_plan.get("execute_request"), dict) else None,
+        "qbit_apply_limits_calls": repair_plan.get("qbit_apply_limits_calls") if isinstance(repair_plan.get("qbit_apply_limits_calls"), list) else [],
+        "verification_call": repair_plan.get("verification_call") if isinstance(repair_plan.get("verification_call"), dict) else None,
+        "recommended_call": repair_plan.get("recommended_call") if isinstance(repair_plan.get("recommended_call"), dict) else None,
+        "complete_when": repair_plan.get("complete_when") if isinstance(repair_plan.get("complete_when"), list) else [],
+        "blockers": _string_list(repair_plan.get("blockers")),
     }
 
 
@@ -38471,7 +38492,8 @@ def _job_response_contract() -> dict[str, Any]:
         "policy_execution_report_fields": ["ready", "status", "source", "targets", "site_policy_ready", "accepted_rules", "seeding_requirements", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "request_overrides", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_ready", "expected_qbit_roles", "applied_qbit_roles", "pending_qbit_roles", "mismatch_qbit_roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_execution_final_report_fields": ["ready", "ready_for_live", "verdict", "status", "site_policy", "rate_limits", "seeding", "runtime_contract", "policy_gate", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "qbit_execution_gate_fields": ["ready", "status", "action", "client", "expected_role_count", "applied_role_count", "pending_role_count", "mismatch_role_count", "expected_roles", "applied_roles", "pending_roles", "mismatch_roles", "source", "uploaded", "rate_limit_status", "seeding_status", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
-        "qbit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "client", "rate_limits", "source", "uploaded", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "qbit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "client", "rate_limits", "repair", "source", "uploaded", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "qbit_final_report_repair_fields": ["ready", "action", "repair_roles", "pending_roles", "mismatch_roles", "request_patch", "dry_run_request", "execute_request", "qbit_apply_limits_calls", "verification_call", "recommended_call", "complete_when", "blockers"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "uploaded_seeding_evidence", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "policy_runtime_ready", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
