@@ -35710,6 +35710,15 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         blockers=blockers,
         warnings=warnings,
     )
+    seedbox_deployment_final_decision = _deployment_seedbox_final_decision(
+        deployment_final_report,
+        seedbox_bootstrap_handoff,
+        seedbox_qbit_handoff,
+        seedbox_live_trial_handoff,
+        agent_handoff,
+        blockers,
+        warnings,
+    )
     deployment_runbook["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
     deployment_runbook["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     deployment_runbook["daily_candidate_config_final_report"] = daily_candidate_config_final_report
@@ -35750,6 +35759,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "seedbox_qbit_handoff": seedbox_qbit_handoff,
         "seedbox_bootstrap_handoff": seedbox_bootstrap_handoff,
         "seedbox_live_trial_handoff": seedbox_live_trial_handoff,
+        "seedbox_deployment_final_decision": seedbox_deployment_final_decision,
         "deployment_final_report": deployment_final_report,
         "agent_summary": agent_summary,
         "agent_handoff": agent_handoff,
@@ -36923,6 +36933,142 @@ def _deployment_final_report_next_actions(compose_ready: bool, blockers: list[st
     if warnings:
         return ["Review deployment_final_report.warnings, then run readiness_bundle before any live retorrent job."]
     return ["Rerun deployment_check and inspect deployment_final_report.recommended_call."]
+
+
+def _deployment_seedbox_final_decision(
+    deployment_final_report: dict[str, Any],
+    seedbox_bootstrap_handoff: dict[str, Any],
+    seedbox_qbit_handoff: dict[str, Any],
+    seedbox_live_trial_handoff: dict[str, Any],
+    agent_handoff: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    """Single-field deployment decision for local seedbox AI agents."""
+    deployment_ready = deployment_final_report.get("ready") is True
+    bootstrap_ready = seedbox_bootstrap_handoff.get("ready") is True
+    qbit_ready = seedbox_qbit_handoff.get("ready") is True
+    live_trial_ready = seedbox_live_trial_handoff.get("ready") is True
+    effective_blockers = list(
+        dict.fromkeys(
+            _string_list(blockers)
+            + _string_list(deployment_final_report.get("blockers"))
+            + _string_list(seedbox_bootstrap_handoff.get("blockers"))
+            + _string_list(seedbox_qbit_handoff.get("blockers"))
+            + _string_list(seedbox_live_trial_handoff.get("blockers"))
+        )
+    )
+    action = _deployment_seedbox_final_decision_action(deployment_ready, bootstrap_ready, qbit_ready, live_trial_ready, effective_blockers)
+    recommended_call = _deployment_seedbox_final_decision_call(action, deployment_final_report, seedbox_bootstrap_handoff, seedbox_qbit_handoff, seedbox_live_trial_handoff, agent_handoff)
+    safe_to_call_now = bool(recommended_call.get("safe_to_call_now")) and not _deployment_seedbox_final_decision_requires_review(action)
+    return {
+        "kind": "ptcli.seedbox_deployment_final_decision",
+        "ready": deployment_ready and bootstrap_ready and qbit_ready and live_trial_ready and not effective_blockers,
+        "status": "ready" if deployment_ready and bootstrap_ready and qbit_ready and live_trial_ready and not effective_blockers else "blocked",
+        "action": action,
+        "verdict": "ready_for_first_live_validation" if action == "run_readiness_bundle" else action,
+        "deployment_ready": deployment_ready,
+        "bootstrap_ready": bootstrap_ready,
+        "qbit_ready": qbit_ready,
+        "live_trial_ready": live_trial_ready,
+        "api": (deployment_final_report.get("api") if isinstance(deployment_final_report.get("api"), dict) else {}),
+        "docker": (deployment_final_report.get("docker") if isinstance(deployment_final_report.get("docker"), dict) else {}),
+        "mounts": (deployment_final_report.get("mounts") if isinstance(deployment_final_report.get("mounts"), dict) else {}),
+        "qbit": (seedbox_qbit_handoff.get("probe") if isinstance(seedbox_qbit_handoff.get("probe"), dict) else seedbox_live_trial_handoff.get("qbit") if isinstance(seedbox_live_trial_handoff.get("qbit"), dict) else {}),
+        "live_trial": {
+            "ready": live_trial_ready,
+            "readiness": seedbox_live_trial_handoff.get("readiness") if isinstance(seedbox_live_trial_handoff.get("readiness"), dict) else {},
+            "live_order": seedbox_live_trial_handoff.get("live_order") if isinstance(seedbox_live_trial_handoff.get("live_order"), list) else [],
+            "report_contract": seedbox_live_trial_handoff.get("report_contract") if isinstance(seedbox_live_trial_handoff.get("report_contract"), dict) else {},
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": _deployment_seedbox_final_decision_requires_review(action),
+        "read_order": ["seedbox_deployment_final_decision", "deployment_final_report", "seedbox_bootstrap_handoff", "seedbox_qbit_handoff", "seedbox_live_trial_handoff"],
+        "complete_when": [
+            "seedbox_deployment_final_decision.ready=true",
+            "deployment_final_report.ready=true",
+            "seedbox_bootstrap_handoff.ready=true",
+            "seedbox_qbit_handoff.ready=true",
+            "seedbox_live_trial_handoff.ready=true",
+        ],
+        "stop_when": [
+            "seedbox_deployment_final_decision.blockers is non-empty",
+            "api.exposure_blocked=true",
+            "qbit_ready=false",
+            "mounts.ready=false",
+            "docker.ptcli_api_service_ready=false",
+        ],
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "does_not_upload": True,
+            "live_upload_requires_later_confirmations": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "doctor_result_handoff.live_safe_to_attempt=true"],
+        },
+        "blockers": effective_blockers,
+        "warnings": list(dict.fromkeys(_string_list(warnings) + _string_list(deployment_final_report.get("warnings")))),
+        "next_actions": _deployment_seedbox_final_decision_next_actions(action, effective_blockers),
+    }
+
+
+def _deployment_seedbox_final_decision_action(deployment_ready: bool, bootstrap_ready: bool, qbit_ready: bool, live_trial_ready: bool, blockers: list[str]) -> str:
+    if blockers:
+        return "resolve_deployment_blockers"
+    if not deployment_ready:
+        return "rerun_deployment_check"
+    if not bootstrap_ready:
+        return "bootstrap_seedbox"
+    if not qbit_ready:
+        return "configure_qbittorrent"
+    if live_trial_ready:
+        return "run_readiness_bundle"
+    return "inspect_live_trial_handoff"
+
+
+def _deployment_seedbox_final_decision_call(
+    action: str,
+    deployment_final_report: dict[str, Any],
+    seedbox_bootstrap_handoff: dict[str, Any],
+    seedbox_qbit_handoff: dict[str, Any],
+    seedbox_live_trial_handoff: dict[str, Any],
+    agent_handoff: dict[str, Any],
+) -> dict[str, Any]:
+    if action == "run_readiness_bundle":
+        next_step = seedbox_live_trial_handoff.get("next_step") if isinstance(seedbox_live_trial_handoff.get("next_step"), dict) else {}
+        return {**next_step, "safe_to_call_now": True, "requires_user_review": True, "reason": "seedbox_deployment_ready_start_first_live_validation"}
+    if action == "bootstrap_seedbox":
+        next_step = seedbox_bootstrap_handoff.get("next_step") if isinstance(seedbox_bootstrap_handoff.get("next_step"), dict) else {}
+        return {**next_step, "safe_to_call_now": next_step.get("tool") != "shell", "requires_user_review": next_step.get("tool") == "shell", "reason": "seedbox_paths_or_env_need_bootstrap"}
+    if action == "configure_qbittorrent":
+        next_step = seedbox_qbit_handoff.get("next_step") if isinstance(seedbox_qbit_handoff.get("next_step"), dict) else {}
+        return {**next_step, "safe_to_call_now": next_step.get("tool") != "edit_config", "requires_user_review": True, "reason": "qbittorrent_config_or_probe_missing"}
+    if action == "resolve_deployment_blockers":
+        call = deployment_final_report.get("recommended_call") if isinstance(deployment_final_report.get("recommended_call"), dict) else {}
+        return {**call, "safe_to_call_now": True, "requires_user_review": False, "reason": "deployment_blockers_present"}
+    next_step = agent_handoff.get("next_step") if isinstance(agent_handoff.get("next_step"), dict) else {}
+    return {**next_step, "tool": next_step.get("tool") or "deployment_check", "endpoint": next_step.get("endpoint") or "/v1/deployment/check", "method": next_step.get("method") or "GET", "safe_to_call_now": True, "requires_user_review": False, "reason": "inspect_deployment_state"}
+
+
+def _deployment_seedbox_final_decision_requires_review(action: str) -> bool:
+    return action in {"run_readiness_bundle", "bootstrap_seedbox", "configure_qbittorrent"}
+
+
+def _deployment_seedbox_final_decision_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve seedbox_deployment_final_decision.blockers, then rerun deployment_check before OpenClaw/Hermes live actions."]
+    if action == "run_readiness_bundle":
+        return ["After user approval, call seedbox_deployment_final_decision.recommended_call, then follow seedbox_live_trial_handoff.live_order."]
+    if action == "bootstrap_seedbox":
+        return ["Follow seedbox_bootstrap_handoff.next_step, then rerun deployment_check."]
+    if action == "configure_qbittorrent":
+        return ["Repair qBittorrent config/probe evidence, then rerun deployment_check."]
+    return ["Inspect seedbox_deployment_final_decision.read_order before continuing."]
 
 
 def _deployment_seedbox_live_trial_handoff(
@@ -40440,7 +40586,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "seedbox_deployment_final_decision", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "api_token_configured", "api_publicly_exposed", "api_auth_ready", "api_exposure_blocked", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
@@ -40453,6 +40599,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "seedbox_qbit_handoff_fields": ["ready", "status", "read_only", "configured", "client", "torrent_client", "url", "port", "connectivity_checked", "host_gateway_required", "compose", "config_contract", "probe", "policy_limits", "manual_retorrent_preflight", "next_step", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
+                "seedbox_deployment_final_decision_fields": ["ready", "status", "action", "verdict", "deployment_ready", "bootstrap_ready", "qbit_ready", "live_trial_ready", "api", "docker", "mounts", "qbit", "live_trial", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_order", "complete_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "seedbox_qbit_handoff", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_public_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
@@ -43526,6 +43673,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_delivery_handoff": {"type": "object"},
             "seedbox_bootstrap_handoff": {"type": "object"},
             "seedbox_live_trial_handoff": {"type": "object"},
+            "seedbox_deployment_final_decision": {"type": "object"},
             "deployment_final_report": {"type": "object"},
             "agent_summary": {"type": "object"},
             "agent_handoff": {"type": "object"},

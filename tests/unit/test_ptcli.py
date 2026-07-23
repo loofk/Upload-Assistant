@@ -23166,6 +23166,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "deployment_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "seedbox_bootstrap_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "seedbox_live_trial_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "seedbox_deployment_final_decision" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_final_report" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -23190,6 +23191,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_trial_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "readiness" in tool_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
     assert "report_contract" in tool_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+    assert "seedbox_deployment_final_decision_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["deployment_check"]["response_contract"]["seedbox_deployment_final_decision_fields"]
+    assert "requires_user_review" in tool_by_name["deployment_check"]["response_contract"]["seedbox_deployment_final_decision_fields"]
+    assert "recommended_call" in tool_by_name["deployment_check"]["response_contract"]["seedbox_deployment_final_decision_fields"]
     assert "daily_candidate_config_final_report" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidate_config_final_report_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "env" in tool_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
@@ -24048,6 +24053,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "deployment_handoff" in deployment_schema["properties"]
     assert "seedbox_bootstrap_handoff" in deployment_schema["properties"]
     assert "seedbox_live_trial_handoff" in deployment_schema["properties"]
+    assert "seedbox_deployment_final_decision" in deployment_schema["properties"]
     assert "deployment_final_report" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
     assert "agent_handoff" in deployment_schema["properties"]
@@ -24598,6 +24604,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "deployment_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "seedbox_bootstrap_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "seedbox_live_trial_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "seedbox_deployment_final_decision" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "deployment_final_report" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -24622,6 +24629,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_trial_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "readiness" in tools_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
         assert "report_contract" in tools_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+        assert "seedbox_deployment_final_decision_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["deployment_check"]["response_contract"]["seedbox_deployment_final_decision_fields"]
+        assert "requires_user_review" in tools_by_name["deployment_check"]["response_contract"]["seedbox_deployment_final_decision_fields"]
+        assert "recommended_call" in tools_by_name["deployment_check"]["response_contract"]["seedbox_deployment_final_decision_fields"]
         assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
         assert "seedbox_qbit_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_runbook_fields"]
@@ -26143,6 +26154,25 @@ services:
     assert live_trial["next_step"]["tool"] == "readiness_bundle"
     assert live_trial["next_step"]["request"]["target"] == "MTEAM"
     assert payload["deployment_handoff"]["seedbox_live_trial"] == live_trial
+    decision = payload["seedbox_deployment_final_decision"]
+    assert decision["kind"] == "ptcli.seedbox_deployment_final_decision"
+    assert decision["ready"] is True
+    assert decision["status"] == "ready"
+    assert decision["action"] == "run_readiness_bundle"
+    assert decision["verdict"] == "ready_for_first_live_validation"
+    assert decision["deployment_ready"] is True
+    assert decision["bootstrap_ready"] is True
+    assert decision["qbit_ready"] is True
+    assert decision["live_trial_ready"] is True
+    assert decision["recommended_tool"] == "readiness_bundle"
+    assert decision["recommended_endpoint"] == "/v1/readiness/bundle"
+    assert decision["recommended_method"] == "POST"
+    assert decision["recommended_request"]["target"] == "MTEAM"
+    assert decision["requires_user_review"] is True
+    assert decision["safe_to_call_now"] is False
+    assert decision["safety"]["does_not_upload"] is True
+    assert decision["live_trial"]["report_contract"]["final_report_field"] == "live_validation_completion_audit"
+    assert decision["blockers"] == []
     assert payload["agent_handoff"]["ready"] is True
     assert payload["agent_handoff"]["recommended_first_step"] == "site_policies"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is True
@@ -26232,6 +26262,18 @@ services:
     assert final_report["safety"]["api_exposure_gate"] == "blocked"
     assert final_report["recommended_call"]["tool"] == "deployment_check"
     assert final_report["recommended_call"]["safe_to_call_now"] is True
+    decision = payload["seedbox_deployment_final_decision"]
+    assert decision["ready"] is False
+    assert decision["status"] == "blocked"
+    assert decision["action"] == "resolve_deployment_blockers"
+    assert decision["deployment_ready"] is False
+    assert decision["recommended_tool"] == "deployment_check"
+    assert decision["recommended_endpoint"] == "/v1/deployment/check"
+    assert decision["safe_to_call_now"] is True
+    assert decision["requires_user_review"] is False
+    assert decision["api"]["publicly_exposed"] is True
+    assert decision["api"]["exposure_blocked"] is True
+    assert "ptcli-api is exposed beyond localhost without PTCLI_API_TOKEN; set a token or bind ports to 127.0.0.1." in decision["blockers"]
 
 
 def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
@@ -26327,6 +26369,21 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert live_trial["safety"]["live_upload"] is False
     assert live_trial["blockers"]
     assert payload["deployment_handoff"]["seedbox_live_trial"] == live_trial
+    decision = payload["seedbox_deployment_final_decision"]
+    assert decision["kind"] == "ptcli.seedbox_deployment_final_decision"
+    assert decision["ready"] is False
+    assert decision["status"] == "blocked"
+    assert decision["action"] == "resolve_deployment_blockers"
+    assert decision["deployment_ready"] is False
+    assert decision["bootstrap_ready"] is False
+    assert decision["qbit_ready"] is False
+    assert decision["live_trial_ready"] is False
+    assert decision["recommended_tool"] == "deployment_check"
+    assert decision["recommended_endpoint"] == "/v1/deployment/check"
+    assert decision["safe_to_call_now"] is True
+    assert decision["requires_user_review"] is False
+    assert decision["blockers"]
+    assert any("config file is missing" in blocker for blocker in decision["blockers"])
     assert payload["agent_handoff"]["ready"] is False
     assert payload["agent_handoff"]["recommended_first_step"] == "fix_deployment"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is False
