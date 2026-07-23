@@ -5956,6 +5956,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         live_validation_sequence,
         seedbox_live_runbook_final_report,
     )
+    seedbox_live_post_submit_report = seedbox_live_validation_handoff.get("post_submit_report") if isinstance(seedbox_live_validation_handoff.get("post_submit_report"), dict) else _seedbox_live_post_submit_report({}, ready=False)
     next_call = _readiness_bundle_next_call(
         live_readiness,
         live_test_handoff,
@@ -5984,6 +5985,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "first_live_validation_handoff": first_live_validation_handoff,
         "seedbox_live_runbook_final_report": seedbox_live_runbook_final_report,
         "seedbox_live_validation_start_report": seedbox_live_validation_start_report,
+        "seedbox_live_post_submit_report": seedbox_live_post_submit_report,
         "next_step": live_test_handoff.get("next_step"),
         "recommended_tool": live_test_handoff.get("recommended_tool"),
         "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
@@ -6562,6 +6564,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
     manual_request = manual_job_template.get("request") if isinstance(manual_job_template, dict) else None
     validation_plan = _seedbox_live_validation_plan(ready, next_step, doctor_request, manual_request, live_test_handoff)
     post_submit_handoff = _seedbox_post_submit_handoff(manual_request)
+    post_submit_report = _seedbox_live_post_submit_report(post_submit_handoff, ready=ready)
     validation_report = _seedbox_live_validation_report(
         ready=ready,
         phase=phase,
@@ -6653,6 +6656,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
         },
         "validation_plan": validation_plan,
         "post_submit_handoff": post_submit_handoff,
+        "post_submit_report": post_submit_report,
         "evidence_contract": _seedbox_live_evidence_contract(),
         "recommended_tool": "ptcli_doctor" if ready else next_step.get("tool"),
         "recommended_endpoint": None if ready else next_step.get("endpoint"),
@@ -7767,6 +7771,105 @@ def _seedbox_post_submit_handoff(manual_request: dict[str, Any] | None) -> dict[
         "audit_report_field": "seedbox_live_validation_completion_report",
         "stop_when": ["duplicate_check.exists=true", "live_validation_completion_audit.report_allowed=false and live_user_report.report_blocked_reason=target_duplicate_exists", "live_completion_gate.action=stop_duplicate", "seedbox_live_validation_completion_report.status=duplicate_stopped", "recovery_handoff.action=stop", "live_validation_completion_audit.blockers is non-empty"],
     }
+
+
+def _seedbox_live_post_submit_report(post_submit_handoff: dict[str, Any], *, ready: bool) -> dict[str, Any]:
+    """Compress the post check-and-submit job loop into one AI-readable report."""
+    submit_request = post_submit_handoff.get("submit_request") if isinstance(post_submit_handoff.get("submit_request"), dict) else None
+    report_ready = bool(ready and post_submit_handoff.get("ready") and submit_request)
+    action = "submit_then_poll" if report_ready else "repair_pre_submit_readiness"
+    recommended_call = _seedbox_live_post_submit_recommended_call(action, post_submit_handoff, submit_request)
+    return {
+        "kind": "ptcli.seedbox_live_post_submit_report",
+        "ready": report_ready,
+        "report_allowed": False,
+        "status": "ready_after_doctor" if report_ready else "blocked",
+        "action": action,
+        "submit": {
+            "tool": post_submit_handoff.get("submit_tool") or "source_url_check_and_submit",
+            "endpoint": post_submit_handoff.get("submit_endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": post_submit_handoff.get("submit_method") or "POST",
+            "request": submit_request,
+            "read": _string_list(post_submit_handoff.get("after_submit_read")) or ["duplicate_check", "job_id", "status_endpoint", "summary_endpoint"],
+            "continue_when": "duplicate_check.exists=false and job_id is returned",
+            "stop_when": "duplicate_check.exists=true or submit_if_clear_handoff.ready=false",
+        },
+        "poll": {
+            "tool": post_submit_handoff.get("poll_tool") or "get_job_status",
+            "endpoint_template": post_submit_handoff.get("poll_endpoint_template") or "/v1/jobs/{job_id}",
+            "request_template": {"job_id": "<job_id from source_url_check_and_submit>"},
+            "read": ["status", "next_call", "job_handoff", "recovery_handoff", "live_recovery_final_report", "manual_retorrent_final_report", "blockers", "next_actions"],
+            "repeat_when": post_submit_handoff.get("poll_until") or "recovery_handoff.should_poll=true",
+            "continue_when": "job status is blocked, failed, complete, or live_recovery_final_report.recommended_call changes",
+        },
+        "resume": {
+            "tool": post_submit_handoff.get("resume_tool") or "resume_job",
+            "endpoint_template": post_submit_handoff.get("resume_endpoint_template") or "/v1/jobs/{job_id}/resume",
+            "when": post_submit_handoff.get("resume_when") or "live_recovery_final_report.action in resume_preview,resume_execute",
+            "order": _string_list(post_submit_handoff.get("resume_order")) or ["call dry_run_request", "review command_argv and ignored_overrides", "call execute_request only after user approval", "poll child job"],
+            "dry_run_request_source": "live_recovery_final_report.dry_run_request or recovery_handoff.dry_run_request",
+            "execute_request_source": "live_recovery_final_report.execute_request or recovery_handoff.execute_request",
+        },
+        "finish": {
+            "tool": post_submit_handoff.get("finish_tool") or "get_job_summary",
+            "endpoint_template": post_submit_handoff.get("finish_endpoint_template") or "/v1/jobs/{job_id}/summary",
+            "final_report_field": post_submit_handoff.get("final_report_field") or LIVE_VALIDATION_FINAL_REPORT_FIELD,
+            "audit_report_field": post_submit_handoff.get("audit_report_field") or "seedbox_live_validation_completion_report",
+            "read": ["live_validation_completion_audit", "live_validation_final_report", "live_user_report", "seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "qbit_enforcement_summary", "target_upload_handoff"],
+            "report_ready_when": post_submit_handoff.get("final_report_ready_when") or "live_validation_completion_audit.report_allowed=true",
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": ["seedbox_live_post_submit_report", "source_url_check_and_submit.check_and_submit_final_report", "source_url_check_and_submit.check_and_submit_job_tracking_report", "get_job_status.live_recovery_final_report", "get_job_summary.live_validation_completion_audit"],
+        "complete_when": [post_submit_handoff.get("complete_when") or "live_validation_completion_audit.report_allowed=true", "seedbox_live_validation_completion_report.ready_for_user_report=true", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true"],
+        "stop_when": _string_list(post_submit_handoff.get("stop_when")) or ["duplicate_check.exists=true", "live_validation_completion_audit.blockers is non-empty"],
+        "safety": {
+            "read_only": False,
+            "submits_job_after_doctor_only": True,
+            "does_not_bypass_duplicate_check": True,
+            "live_upload_still_requires_confirm_upload": True,
+            "requires_doctor_live_safe_to_attempt": True,
+        },
+        "blockers": [] if report_ready else ["Run readiness_bundle until seedbox_live_runbook_final_report.ready=true, then run doctor and require doctor_result_handoff.live_safe_to_attempt=true before source_url_check_and_submit."],
+        "next_actions": _seedbox_live_post_submit_next_actions(report_ready, recommended_call),
+    }
+
+
+def _seedbox_live_post_submit_recommended_call(action: str, post_submit_handoff: dict[str, Any], submit_request: dict[str, Any] | None) -> dict[str, Any]:
+    if action == "submit_then_poll":
+        return {
+            "tool": post_submit_handoff.get("submit_tool") or "source_url_check_and_submit",
+            "endpoint": post_submit_handoff.get("submit_endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": post_submit_handoff.get("submit_method") or "POST",
+            "request": submit_request,
+            "safe_to_call_now": False,
+            "requires_user_review": True,
+            "reason": "call_only_after_doctor_result_handoff_live_safe_to_attempt_true",
+            "after_call": {
+                "read": ["check_and_submit_final_report", "check_and_submit_job_tracking_report", "job_id", "status_endpoint", "summary_endpoint"],
+                "then": {"tool": "get_job_status", "endpoint": "/v1/jobs/{job_id}", "method": "GET"},
+            },
+        }
+    return {
+        "tool": "readiness_bundle",
+        "endpoint": "/v1/readiness/bundle",
+        "method": "POST",
+        "request": None,
+        "safe_to_call_now": True,
+        "requires_user_review": False,
+        "reason": "repair_seedbox_live_readiness_before_post_submit_loop",
+    }
+
+
+def _seedbox_live_post_submit_next_actions(ready: bool, recommended_call: dict[str, Any]) -> list[str]:
+    if ready:
+        return ["After summary_check proves doctor_result_handoff.live_safe_to_attempt=true, call seedbox_live_post_submit_report.recommended_call, then poll/resume/read summary until live_validation_completion_audit.report_allowed=true."]
+    if recommended_call.get("tool"):
+        return ["Follow seedbox_live_post_submit_report.recommended_call to repair readiness before submitting a live job."]
+    return ["Inspect seedbox_live_post_submit_report.blockers before attempting live check-and-submit."]
 
 
 def _seedbox_live_evidence_contract() -> dict[str, Any]:
@@ -38390,7 +38493,7 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "seedbox_live_validation_start_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_call", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "seedbox_live_validation_start_report", "seedbox_live_post_submit_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_call", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
@@ -38407,6 +38510,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "first_live_validation_handoff_fields": ["ready", "status", "action", "phase", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "doctor", "submit", "after_submit", "run_order", "read_first", "complete_when", "stop_when", "blockers", "next_actions"],
         "seedbox_live_runbook_final_report_fields": ["ready", "report_allowed", "status", "verdict", "current_action", "first_blocker", "recommended_call", "doctor", "submit", "after_submit", "run_order", "steps", "read_order", "complete_when", "stop_when", "must_not_report_complete_until", "final_report_field", "audit_report_fields", "evidence_required", "evidence_matrix", "evidence_required_by_phase", "blockers", "next_actions"],
         "seedbox_live_validation_start_report_fields": ["ready", "start_allowed", "report_allowed", "status", "verdict", "current_action", "first_blocker", "recommended_call", "doctor_call", "summary_check_call", "submit_call_template", "post_submit_calls", "final_audit_contract", "run_order", "read_order", "continue_when", "stop_when", "must_not_submit_until", "blockers", "next_actions", "safety"],
+        "seedbox_live_post_submit_report_fields": ["ready", "report_allowed", "status", "action", "submit", "poll", "resume", "finish", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "progress", "approval", "safety", "blockers", "next_actions"],
         "seedbox_live_evidence_matrix_fields": ["name", "phase", "produced_by", "required_fields", "description", "read_from", "required_for_completion", "stop_when_missing"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
@@ -40561,6 +40665,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "first_live_validation_handoff": {"type": "object"},
             "seedbox_live_runbook_final_report": {"type": "object"},
             "seedbox_live_validation_start_report": {"type": "object"},
+            "seedbox_live_post_submit_report": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},

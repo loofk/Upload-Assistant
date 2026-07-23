@@ -21409,6 +21409,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "closure_contract" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
     assert "steps" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["agent_run_preview"]["response_contract"]["workflows"]
+    assert "seedbox_live_post_submit_report" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "seedbox_live_post_submit_report_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "recommended_call" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_post_submit_report_fields"]
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
     assert tool_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
@@ -23953,6 +23956,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_config_final_report" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidate_config_final_report_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "smoke_checks" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
+        assert "seedbox_live_post_submit_report" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "seedbox_live_post_submit_report_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "recommended_call" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_post_submit_report_fields"]
+        assert "finish" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_post_submit_report_fields"]
         assert "qbittorrent" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "qbittorrent_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "qbit_enforcement_summary" in tools_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
@@ -27016,6 +27023,21 @@ services:
     assert payload["seedbox_live_validation_handoff"]["kind"] == "ptcli.seedbox_live_validation_handoff"
     assert payload["seedbox_live_validation_handoff"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["phase"] == "run_doctor"
+    post_submit_report = payload["seedbox_live_post_submit_report"]
+    assert post_submit_report == payload["seedbox_live_validation_handoff"]["post_submit_report"]
+    assert post_submit_report["kind"] == "ptcli.seedbox_live_post_submit_report"
+    assert post_submit_report["ready"] is True
+    assert post_submit_report["report_allowed"] is False
+    assert post_submit_report["action"] == "submit_then_poll"
+    assert post_submit_report["submit"]["tool"] == "source_url_check_and_submit"
+    assert post_submit_report["submit"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert post_submit_report["poll"]["tool"] == "get_job_status"
+    assert post_submit_report["resume"]["tool"] == "resume_job"
+    assert post_submit_report["finish"]["final_report_field"] == "live_validation_completion_audit"
+    assert post_submit_report["recommended_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert post_submit_report["recommended_call"]["safe_to_call_now"] is False
+    assert post_submit_report["safety"]["requires_doctor_live_safe_to_attempt"] is True
+    assert "get_job_summary.live_validation_completion_audit" in post_submit_report["read_order"]
     assert payload["live_validation_summary"]["kind"] == "ptcli.seedbox_live_validation_summary"
     assert payload["live_validation_summary"]["ready"] is True
     assert payload["live_validation_summary"]["status"] == "ready_for_doctor"
