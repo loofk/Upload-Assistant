@@ -2343,6 +2343,7 @@ def _source_url_check_and_submit_response(
     manual_sequence = _source_url_check_and_submit_manual_sequence(gate_summary, duplicate_check, handoff, submitted_job, blockers)
     policy_report = _source_url_check_and_submit_policy_report(submitted_job, handoff, blockers)
     final_report = _source_url_check_and_submit_final_report(gate_summary, duplicate_check, handoff, submitted_job, manual_sequence, policy_report, blockers)
+    tracking_report = _source_url_check_and_submit_job_tracking_report(gate_summary, submitted_job, final_report, manual_sequence, blockers)
     followup_handoff = _source_url_check_and_submit_followup_handoff(gate_summary, policy_report, final_report, blockers)
     next_call = _source_url_check_and_submit_next_call(gate_summary, manual_sequence, policy_report, final_report, followup_handoff, blockers)
     return {
@@ -2362,12 +2363,154 @@ def _source_url_check_and_submit_response(
         "manual_retorrent_sequence": manual_sequence,
         "check_and_submit_policy_report": policy_report,
         "check_and_submit_final_report": final_report,
+        "check_and_submit_job_tracking_report": tracking_report,
         "check_and_submit_followup_handoff": followup_handoff,
         "next_call": next_call,
         "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers, manual_sequence),
         "blockers": blockers,
         "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
     }
+
+
+def _source_url_check_and_submit_job_tracking_report(
+    gate_summary: dict[str, Any],
+    submitted_job: dict[str, Any] | None,
+    final_report: dict[str, Any],
+    manual_sequence: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    job = submitted_job if isinstance(submitted_job, dict) else {}
+    job_id = job.get("job_id")
+    manual_report = job.get("manual_retorrent_final_report") if isinstance(job.get("manual_retorrent_final_report"), dict) else None
+    live_recovery = job.get("live_recovery_final_report") if isinstance(job.get("live_recovery_final_report"), dict) else None
+    if live_recovery is None and isinstance(manual_report, dict) and isinstance(manual_report.get("live_recovery_final_report"), dict):
+        live_recovery = manual_report["live_recovery_final_report"]
+    remaining_sequence = job.get("manual_retorrent_remaining_sequence") if isinstance(job.get("manual_retorrent_remaining_sequence"), dict) else manual_sequence if isinstance(manual_sequence, dict) else {}
+    lifecycle = job.get("job_lifecycle_final_report") if isinstance(job.get("job_lifecycle_final_report"), dict) else {}
+    recommended_call = _source_url_check_and_submit_tracking_call(live_recovery, manual_report, lifecycle, final_report, gate_summary, job_id)
+    submitted = bool(job_id and not blockers)
+    action = _source_url_check_and_submit_tracking_action(submitted, gate_summary, live_recovery, manual_report, lifecycle, recommended_call)
+    return {
+        "kind": "ptcli.check_and_submit_job_tracking_report",
+        "ready": submitted,
+        "report_allowed": final_report.get("report_allowed") is True,
+        "status": "submitted" if submitted else final_report.get("status"),
+        "action": action,
+        "job_id": job_id,
+        "job_status": job.get("status"),
+        "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
+        "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
+        "duplicate": final_report.get("duplicate_check") if isinstance(final_report.get("duplicate_check"), dict) else {},
+        "manual_retorrent": {
+            "available": isinstance(manual_report, dict),
+            "verdict": manual_report.get("verdict") if isinstance(manual_report, dict) else None,
+            "report_allowed": manual_report.get("report_allowed") if isinstance(manual_report, dict) else None,
+            "recommended_call": manual_report.get("recommended_call") if isinstance(manual_report, dict) else None,
+        },
+        "live_recovery": {
+            "available": isinstance(live_recovery, dict),
+            "action": live_recovery.get("action") if isinstance(live_recovery, dict) else None,
+            "verdict": live_recovery.get("verdict") if isinstance(live_recovery, dict) else None,
+            "report_allowed": live_recovery.get("report_allowed") if isinstance(live_recovery, dict) else None,
+            "recommended_call": live_recovery.get("recommended_call") if isinstance(live_recovery, dict) else None,
+        },
+        "remaining_sequence": {
+            "available": isinstance(remaining_sequence, dict),
+            "action": remaining_sequence.get("action") or remaining_sequence.get("phase") if isinstance(remaining_sequence, dict) else None,
+            "recommended_tool": remaining_sequence.get("recommended_tool") if isinstance(remaining_sequence, dict) else None,
+            "recommended_request": remaining_sequence.get("recommended_request") if isinstance(remaining_sequence, dict) else None,
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": [
+            "check_and_submit_job_tracking_report",
+            "submitted_job.live_recovery_final_report",
+            "submitted_job.manual_retorrent_final_report",
+            "submitted_job.live_validation_completion_audit",
+            "submitted_job.manual_retorrent_remaining_sequence",
+            "check_and_submit_followup_handoff",
+            "check_and_submit_final_report",
+        ],
+        "complete_when": [
+            "check_and_submit_job_tracking_report.action=report_complete",
+            "submitted_job.live_validation_completion_audit.report_allowed=true",
+            "submitted_job.live_recovery_final_report.report_allowed=true",
+            "submitted_job.manual_retorrent_final_report.report_allowed=true",
+        ],
+        "stop_when": [
+            "check_and_submit_final_report.verdict=duplicate_stopped",
+            "check_and_submit_job_tracking_report.action=stop_duplicate",
+            "check_and_submit_job_tracking_report.blockers is non-empty and recommended_call.tool is null",
+        ],
+        "blockers": blockers,
+        "next_actions": _source_url_check_and_submit_tracking_next_actions(action, recommended_call, job_id),
+    }
+
+
+def _source_url_check_and_submit_tracking_call(
+    live_recovery: dict[str, Any] | None,
+    manual_report: dict[str, Any] | None,
+    lifecycle: dict[str, Any],
+    final_report: dict[str, Any],
+    gate_summary: dict[str, Any],
+    job_id: str | None,
+) -> dict[str, Any]:
+    for source in (
+        live_recovery.get("recommended_call") if isinstance(live_recovery, dict) else None,
+        manual_report.get("recommended_call") if isinstance(manual_report, dict) else None,
+        lifecycle.get("recommended_call") if isinstance(lifecycle, dict) else None,
+        final_report.get("recommended_call") if isinstance(final_report, dict) else None,
+        gate_summary.get("recommended_call") if isinstance(gate_summary.get("recommended_call"), dict) else None,
+    ):
+        if isinstance(source, dict) and source.get("tool"):
+            call = dict(source)
+            if not call.get("request") and job_id and call.get("tool") in {"get_job_status", "get_job_summary"}:
+                call["request"] = {"job_id": job_id}
+            return call
+    if job_id:
+        return {"tool": "get_job_status", "endpoint": f"/v1/jobs/{job_id}", "method": "GET", "request": {"job_id": job_id}, "safe_to_call_now": True, "requires_user_review": False}
+    return {"tool": None, "endpoint": None, "method": None, "request": None, "safe_to_call_now": False, "requires_user_review": True}
+
+
+def _source_url_check_and_submit_tracking_action(
+    submitted: bool,
+    gate_summary: dict[str, Any],
+    live_recovery: dict[str, Any] | None,
+    manual_report: dict[str, Any] | None,
+    lifecycle: dict[str, Any],
+    recommended_call: dict[str, Any],
+) -> str:
+    if gate_summary.get("action") == "stop_duplicate":
+        return "stop_duplicate"
+    if isinstance(live_recovery, dict) and live_recovery.get("report_allowed") is True:
+        return "report_complete"
+    if isinstance(live_recovery, dict) and live_recovery.get("action"):
+        return str(live_recovery["action"])
+    if isinstance(manual_report, dict) and manual_report.get("verdict"):
+        return str(manual_report["verdict"])
+    if isinstance(lifecycle, dict) and lifecycle.get("action"):
+        return str(lifecycle["action"])
+    if submitted and recommended_call.get("tool") == "get_job_status":
+        return "poll_job"
+    return "blocked"
+
+
+def _source_url_check_and_submit_tracking_next_actions(action: str, recommended_call: dict[str, Any], job_id: str | None) -> list[str]:
+    if action in {"poll", "poll_job"} and job_id:
+        return [f"Poll /v1/jobs/{job_id}, then read check_and_submit_job_tracking_report or live_recovery_final_report."]
+    if action in {"preview_resume", "execute_resume_after_review"}:
+        return ["Follow check_and_submit_job_tracking_report.recommended_call; dry-run first and execute only after review."]
+    if action == "report_complete" and job_id:
+        return [f"Read /v1/jobs/{job_id}/summary and report only after live_validation_completion_audit.report_allowed=true."]
+    if action == "stop_duplicate":
+        return ["Stop. Do not create or upload a target torrent; report duplicate evidence."]
+    if recommended_call.get("tool"):
+        return ["Follow check_and_submit_job_tracking_report.recommended_call, then reread the submitted job reports."]
+    return ["Resolve check_and_submit_job_tracking_report.blockers before continuing."]
 
 
 def _source_url_check_and_submit_gate_summary(
@@ -37764,7 +37907,7 @@ def _source_url_preflight_response_contract() -> dict[str, Any]:
 
 def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "check_and_submit_policy_report", "check_and_submit_final_report", "check_and_submit_followup_handoff", "next_call", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "check_and_submit_policy_report", "check_and_submit_final_report", "check_and_submit_job_tracking_report", "check_and_submit_followup_handoff", "next_call", "agent_summary", "blockers", "next_actions"],
         "status_values": ["ok", "blocked"],
         "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
@@ -37774,6 +37917,7 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
         "manual_retorrent_step_fields": ["step", "tool", "endpoint", "request", "request_from", "read", "continue_when", "repeat_when", "stop_when", "complete_when"],
         "check_and_submit_policy_report_fields": ["ready", "status", "job_id", "policy_application_ready", "policy_runtime_ready", "policy_qbit_defaults", "applied_qbit_defaults", "qbit_plan", "qbit_enforcement_summary", "qbit_execution_gate", "policy_application_handoff", "policy_application_report", "missing_request_fields", "pending_qbit_roles", "mismatch_qbit_roles", "request_fields", "next_step", "complete_when", "stop_when", "blockers", "next_actions"],
         "check_and_submit_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "submission", "confirmations", "control", "policy", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "check_and_submit_job_tracking_report_fields": ["ready", "report_allowed", "status", "action", "job_id", "job_status", "status_endpoint", "summary_endpoint", "resume_endpoint", "duplicate", "manual_retorrent", "live_recovery", "remaining_sequence", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "check_and_submit_followup_handoff_fields": ["ready", "status", "action", "job_id", "status_endpoint", "summary_endpoint", "resume_endpoint", "duplicate", "policy", "recommended_call", "next_step", "read_after_call", "complete_when", "stop_when", "blockers", "next_actions"],
         "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "job_id", "status_endpoint", "summary_endpoint", "reason", "read_before_call", "after_call", "progress", "approval", "safety", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "sequence_phase", "sequence_next_tool", "blocker_count"],
@@ -38985,6 +39129,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "manual_retorrent_sequence": {"type": "object"},
             "check_and_submit_policy_report": {"type": "object"},
             "check_and_submit_final_report": {"type": "object"},
+            "check_and_submit_job_tracking_report": {"type": "object"},
             "check_and_submit_followup_handoff": {"type": "object"},
             "next_call": {"type": "object"},
             "agent_summary": {"type": "object"},

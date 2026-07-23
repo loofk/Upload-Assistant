@@ -20638,6 +20638,23 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
     assert final_report["recommended_call"]["tool"] == "get_job_status"
     assert final_report["recommended_call"]["request"] == {"job_id": "abc123"}
     assert final_report["blockers"] == []
+    tracking_report = payload["check_and_submit_job_tracking_report"]
+    assert tracking_report["kind"] == "ptcli.check_and_submit_job_tracking_report"
+    assert tracking_report["ready"] is True
+    assert tracking_report["status"] == "submitted"
+    assert tracking_report["action"] == "poll_job"
+    assert tracking_report["job_id"] == "abc123"
+    assert tracking_report["status_endpoint"] == "/v1/jobs/abc123"
+    assert tracking_report["summary_endpoint"] == "/v1/jobs/abc123/summary"
+    assert tracking_report["manual_retorrent"]["available"] is False
+    assert tracking_report["live_recovery"]["available"] is False
+    assert tracking_report["remaining_sequence"]["available"] is True
+    assert tracking_report["remaining_sequence"]["recommended_tool"] == "get_job_status"
+    assert tracking_report["recommended_call"]["tool"] == "get_job_status"
+    assert tracking_report["recommended_call"]["request"] == {"job_id": "abc123"}
+    assert tracking_report["read_order"][0] == "check_and_submit_job_tracking_report"
+    assert "submitted_job.live_recovery_final_report" in tracking_report["read_order"]
+    assert "submitted_job.live_validation_completion_audit.report_allowed=true" in tracking_report["complete_when"]
     followup = payload["check_and_submit_followup_handoff"]
     assert followup["kind"] == "ptcli.check_and_submit_followup_handoff"
     assert followup["ready"] is True
@@ -20754,6 +20771,14 @@ async def test_source_url_check_and_submit_stops_on_duplicate(monkeypatch) -> No
     assert final_report["submission"]["job_created"] is False
     assert final_report["recommended_call"]["tool"] is None
     assert final_report["recommended_call"]["reason"] == "target_duplicate_exists"
+    tracking_report = payload["check_and_submit_job_tracking_report"]
+    assert tracking_report["kind"] == "ptcli.check_and_submit_job_tracking_report"
+    assert tracking_report["ready"] is False
+    assert tracking_report["action"] == "stop_duplicate"
+    assert tracking_report["job_id"] is None
+    assert tracking_report["duplicate"]["exists"] is True
+    assert tracking_report["recommended_call"]["tool"] is None
+    assert "Do not create or upload" in tracking_report["next_actions"][0]
     followup = payload["check_and_submit_followup_handoff"]
     assert followup["ready"] is True
     assert followup["status"] == "duplicate"
@@ -21333,6 +21358,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_sequence" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_policy_report" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_final_report" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
+    assert "check_and_submit_job_tracking_report" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_followup_handoff" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "next_call" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_gate_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
@@ -21340,6 +21366,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_material_chain_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_policy_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_final_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
+    assert "check_and_submit_job_tracking_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "check_and_submit_followup_handoff_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_step_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "action" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
@@ -21347,6 +21374,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "next_call" in tool_by_name["source_url_check_and_submit"]["response_contract"]["manual_retorrent_material_chain_fields"]
     assert "applied_qbit_defaults" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_policy_report_fields"]
     assert "verdict" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
+    assert "live_recovery" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_job_tracking_report_fields"]
+    assert "recommended_call" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_job_tracking_report_fields"]
     assert "recommended_call" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_followup_handoff_fields"]
     assert "complete_when" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_followup_handoff_fields"]
     assert "next_call_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
@@ -24185,16 +24214,20 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_retorrent_sequence" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_policy_report" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_final_report" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
+        assert "check_and_submit_job_tracking_report" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_followup_handoff" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "next_call" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_gate_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "manual_retorrent_sequence_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "check_and_submit_policy_report_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "check_and_submit_final_report_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
+        assert "check_and_submit_job_tracking_report_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "check_and_submit_followup_handoff_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "action" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
         assert "applied_qbit_defaults" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_policy_report_fields"]
         assert "verdict" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
+        assert "live_recovery" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_job_tracking_report_fields"]
+        assert "recommended_call" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_job_tracking_report_fields"]
         assert "recommended_call" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_followup_handoff_fields"]
         assert "complete_when" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_followup_handoff_fields"]
         assert "next_call_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
