@@ -53579,6 +53579,7 @@
           "rule_review_package",
           "config_patch",
           "merged_config_patch",
+          "verification_bundle",
           "rule_review_final_report",
           "config_apply_final_report",
           "next_step",
@@ -53623,6 +53624,16 @@
           "mutates_state",
           "apply_order"
         ],
+        "verification_bundle_fields": [
+          "ready",
+          "requested_trackers",
+          "expected_fingerprints",
+          "verification_call",
+          "read",
+          "continue_when",
+          "stop_when",
+          "safety"
+        ],
         "rule_review_final_report_fields": [
           "ready",
           "report_allowed",
@@ -53634,6 +53645,7 @@
           "rule_review_package",
           "config_patch",
           "merged_config_patch",
+          "verification_bundle",
           "merge_plan",
           "after_edit",
           "next_step",
@@ -53660,6 +53672,7 @@
           "apply_order",
           "manual_steps",
           "verification",
+          "verification_bundle",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
