@@ -15540,6 +15540,7 @@ def test_manual_retorrent_job_exposes_qbit_rate_limit_mismatch_repair_handoff(mo
     assert repair_plan["roles"][0]["qbit_apply_limits_dry_run_request"] == {
         "hash": source_hash,
         "client": "default",
+        "job_id": job["job_id"],
         "role": "source",
         "dry_run": True,
         "tracker": "U2",
@@ -15550,6 +15551,7 @@ def test_manual_retorrent_job_exposes_qbit_rate_limit_mismatch_repair_handoff(mo
         "dry_run": True,
         "hash": source_hash,
         "client": "default",
+        "job_id": job["job_id"],
         "role": "source",
         "tracker": "U2",
         "download_limit": 20 * 1024 * 1024,
@@ -15559,6 +15561,7 @@ def test_manual_retorrent_job_exposes_qbit_rate_limit_mismatch_repair_handoff(mo
         "dry_run": False,
         "hash": uploaded_hash,
         "client": "default",
+        "job_id": job["job_id"],
         "role": "uploaded",
         "tracker": "MTEAM",
         "upload_limit": 2 * 1024 * 1024,
@@ -20375,7 +20378,7 @@ async def test_service_qbit_limits_payload_dry_runs_policy_limits(monkeypatch) -
     monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: READY_REFERENCE_POLICY_CONFIG)
     monkeypatch.setattr(ptcli_service, "QbitReadOnlyService", FailIfInstantiated)
 
-    payload = await ptcli_service.qbit_limits_payload({"hash": "d" * 40, "tracker": "MTEAM", "role": "uploaded"})
+    payload = await ptcli_service.qbit_limits_payload({"hash": "d" * 40, "tracker": "MTEAM", "role": "uploaded", "job_id": "job-retorrent-1"})
 
     assert payload["kind"] == "ptcli.qbit_limits"
     assert payload["status"] == "dry_run"
@@ -20384,12 +20387,20 @@ async def test_service_qbit_limits_payload_dry_runs_policy_limits(monkeypatch) -
     assert payload["mutates_qbittorrent"] is False
     assert payload["tracker"] == "MTEAM"
     assert payload["role"] == "uploaded"
+    assert payload["request"]["job_id"] == "job-retorrent-1"
     assert payload["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
     assert payload["qbit_limits"]["upload_limit_source"] == "site_policy"
     assert payload["rate_limits"]["requested"] == {"upload_limit": 2 * 1024 * 1024, "download_limit": None}
     assert payload["rate_limits"]["calls"] == [{"method": "torrents_set_upload_limit", "torrent_hashes": "d" * 40, "limit": 2 * 1024 * 1024}]
     assert payload["agent_summary"]["ready"] is True
     assert payload["agent_summary"]["upload_limit_source"] == "site_policy"
+    repair_report = payload["qbit_rate_limit_repair_report"]
+    assert repair_report["kind"] == "ptcli.qbit_rate_limit_repair_report"
+    assert repair_report["status"] == "dry_run"
+    assert repair_report["ready"] is False
+    assert repair_report["job_id"] == "job-retorrent-1"
+    assert repair_report["recommended_call"]["request"]["job_id"] == "job-retorrent-1"
+    assert repair_report["recommended_call"]["request"]["dry_run"] is False
     assert payload["blockers"] == []
     assert "dry_run=false" in payload["next_actions"][0]
 
@@ -20425,7 +20436,7 @@ async def test_service_qbit_limits_payload_applies_explicit_limits(monkeypatch) 
     monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"DEFAULT": {"default_torrent_client": "qbit"}, "TORRENT_CLIENTS": {"qbit": {"torrent_client": "qbit", "qbit_url": "http://127.0.0.1", "qbit_port": 8080}}})
     monkeypatch.setattr(ptcli_service, "QbitReadOnlyService", FakeQbitReadOnlyService)
 
-    payload = await ptcli_service.qbit_limits_payload({"hash": "e" * 40, "upload_limit": "1MiB/s", "download_limit": "20MiB/s", "dry_run": False})
+    payload = await ptcli_service.qbit_limits_payload({"hash": "e" * 40, "upload_limit": "1MiB/s", "download_limit": "20MiB/s", "dry_run": False, "job_id": "job-retorrent-2"})
 
     assert payload["status"] == "ok"
     assert payload["ok"] is True
@@ -20437,6 +20448,12 @@ async def test_service_qbit_limits_payload_applies_explicit_limits(monkeypatch) 
     assert payload["visible_after"] is True
     assert payload["agent_summary"]["rate_limits_applied"] is True
     assert payload["agent_summary"]["call_count"] == 2
+    repair_report = payload["qbit_rate_limit_repair_report"]
+    assert repair_report["ready"] is True
+    assert repair_report["status"] == "applied"
+    assert repair_report["job_id"] == "job-retorrent-2"
+    assert repair_report["verification_call"]["endpoint"] == "/v1/jobs/job-retorrent-2/summary"
+    assert repair_report["recommended_call"] == repair_report["verification_call"]
     assert payload["blockers"] == []
     assert "qbit_inspect" in payload["next_actions"][0]
 
@@ -22820,11 +22837,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "client_verification_fields" in tool_by_name["qbit_inject_torrent"]["response_contract"]
     assert tool_by_name["qbit_apply_limits"]["path"] == "/v1/qbit/limits"
     assert tool_by_name["qbit_apply_limits"]["input_schema"]["required"] == ["hash"]
+    assert "job_id" in tool_by_name["qbit_apply_limits"]["input_schema"]["properties"]
     assert tool_by_name["qbit_apply_limits"]["input_schema"]["properties"]["dry_run"]["default"] is True
     assert tool_by_name["qbit_apply_limits"]["safety"]["mutates_qbittorrent"] is True
     assert tool_by_name["qbit_apply_limits"]["safety"]["live_upload"] is False
     assert "dry_run_by_default" in tool_by_name["qbit_apply_limits"]["response_contract"]["safety"]
     assert "qbit_limit_fields" in tool_by_name["qbit_apply_limits"]["response_contract"]
+    assert "qbit_rate_limit_repair_report" in tool_by_name["qbit_apply_limits"]["response_contract"]["required_fields"]
+    assert "qbit_rate_limit_repair_report_fields" in tool_by_name["qbit_apply_limits"]["response_contract"]
     assert tool_by_name["qbit_wait_complete"]["path"] == "/v1/qbit/wait"
     assert tool_by_name["qbit_wait_complete"]["input_schema"]["required"] == []
     assert tool_by_name["qbit_wait_complete"]["safety"]["mutates_qbittorrent"] is False

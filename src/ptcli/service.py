@@ -5059,6 +5059,7 @@ async def qbit_limits_payload(request: dict[str, Any] | None = None) -> dict[str
         "before": result["before"],
         "after": result["after"],
         "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, result["rate_limits"], execution_blockers, dry_run=False),
+        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, result["rate_limits"], execution_blockers, dry_run=False),
         "blockers": execution_blockers,
         "next_actions": _qbit_limits_next_actions(execution_blockers, dry_run=False),
     }
@@ -9613,6 +9614,7 @@ def _qbit_limits_request_context(request: dict[str, Any]) -> dict[str, Any]:
     return {
         "config": request.get("config"),
         "client": str(request.get("client") or "default"),
+        "job_id": _optional_nonempty_string(request.get("job_id") or request.get("parent_job_id") or request.get("retorrent_job_id")),
         "hash": str(torrent_hash).strip().lower(),
         "tracker": normalize_tracker(str(tracker)) if tracker else None,
         "role": role,
@@ -9854,6 +9856,7 @@ def _qbit_limits_blocked_payload(context: dict[str, Any], qbit_limits: dict[str,
         "before": [],
         "after": [],
         "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, {}, blockers, dry_run=context["dry_run"]),
+        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, {}, blockers, dry_run=context["dry_run"]),
         "blockers": blockers,
         "next_actions": _qbit_limits_next_actions(blockers, dry_run=context["dry_run"]),
     }
@@ -9886,6 +9889,7 @@ def _qbit_limits_dry_run_payload(context: dict[str, Any], qbit_limits: dict[str,
         "before": [],
         "after": [],
         "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, rate_limits, [], dry_run=True),
+        "qbit_rate_limit_repair_report": _qbit_limits_repair_report(context, qbit_limits, rate_limits, [], dry_run=True),
         "blockers": [],
         "next_actions": _qbit_limits_next_actions([], dry_run=True),
     }
@@ -9911,6 +9915,73 @@ def _qbit_limits_agent_summary(context: dict[str, Any], qbit_limits: dict[str, A
         "call_count": len(rate_limits.get("calls") or []) if isinstance(rate_limits.get("calls"), list) else 0,
         "blocker_count": len(blockers),
     }
+
+
+def _qbit_limits_repair_report(context: dict[str, Any], qbit_limits: dict[str, Any], rate_limits: dict[str, Any], blockers: list[str], *, dry_run: bool) -> dict[str, Any]:
+    job_id = context.get("job_id")
+    requested = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}
+    applied = bool(rate_limits.get("applied"))
+    ready = bool(not blockers and not dry_run and applied)
+    verification_call = _qbit_rate_limit_repair_verification_call(job_id) if job_id else None
+    execute_request = {
+        key: value
+        for key, value in {
+            "job_id": job_id,
+            "hash": context.get("hash"),
+            "client": context.get("client"),
+            "tracker": context.get("tracker"),
+            "role": context.get("role"),
+            "upload_limit": requested.get("upload_limit"),
+            "download_limit": requested.get("download_limit"),
+            "dry_run": False,
+        }.items()
+        if value is not None
+    }
+    recommended_call = (
+        verification_call
+        if ready and verification_call
+        else {
+            "tool": "qbit_apply_limits",
+            "endpoint": "/v1/qbit/limits",
+            "method": "POST",
+            "request": execute_request,
+            "safe_to_call_now": not blockers,
+            "requires_user_review": True,
+            "mutates_qbittorrent": True,
+            "reason": "execute_qbit_rate_limit_repair" if dry_run else "retry_qbit_rate_limit_repair",
+        }
+    )
+    return {
+        "kind": "ptcli.qbit_rate_limit_repair_report",
+        "ready": ready,
+        "status": "blocked" if blockers else "dry_run" if dry_run else "applied" if applied else "not_applied",
+        "job_id": job_id,
+        "role": context.get("role"),
+        "hash": context.get("hash"),
+        "tracker": context.get("tracker"),
+        "requested_limits": requested,
+        "applied": applied,
+        "dry_run": dry_run,
+        "verification_call": verification_call,
+        "recommended_call": recommended_call,
+        "read_order": ["qbit_rate_limit_repair_report", "rate_limits", "agent_summary", "qbit_rate_limit_repair_plan", "qbit_execution_gate"],
+        "complete_when": ["qbit_rate_limit_repair_report.ready=true", "verification_call.success_when is satisfied in job summary"],
+        "stop_when": ["qbit_rate_limit_repair_report.blockers is non-empty", "rate_limits.applied=false after dry_run=false"],
+        "blockers": blockers,
+        "next_actions": _qbit_limits_repair_report_next_actions(ready, dry_run, bool(job_id), blockers),
+    }
+
+
+def _qbit_limits_repair_report_next_actions(ready: bool, dry_run: bool, has_job_id: bool, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve qbit_rate_limit_repair_report.blockers before treating qBittorrent rate limits as repaired."]
+    if dry_run:
+        return ["Review qbit_rate_limit_repair_report.recommended_call.request, then call qbit_apply_limits with dry_run=false after approval."]
+    if ready and has_job_id:
+        return ["Read qbit_rate_limit_repair_report.verification_call and then get_job_summary to confirm qbit_execution_gate.ready=true."]
+    if ready:
+        return ["Use qbit_inspect on the same hash as standalone evidence; pass job_id next time to link this repair to a retorrent job."]
+    return ["Retry qbit_apply_limits or inspect qBittorrent before continuing the retorrent workflow."]
 
 
 def _qbit_limits_next_actions(blockers: list[str], *, dry_run: bool) -> list[str]:
@@ -25051,6 +25122,7 @@ def _qbit_rate_limit_apply_request(job: dict[str, Any], role: str, torrent_hash:
     payload: dict[str, Any] = {
         "hash": torrent_hash,
         "client": request.get("client") or "default",
+        "job_id": job.get("job_id"),
         "role": role,
         "dry_run": dry_run,
     }
@@ -37710,6 +37782,9 @@ def _qbit_limits_tool_request_schema() -> dict[str, Any]:
         "properties": {
             "client": {"type": "string", "default": "default"},
             "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "job_id": {"type": "string", "description": "Optional retorrent job id used to build a verification call after repairing rate limits."},
+            "parent_job_id": {"type": "string", "description": "Alias for job_id."},
+            "retorrent_job_id": {"type": "string", "description": "Alias for job_id."},
             "hash": {"type": "string", "description": "Existing qBittorrent torrent hash/infohash to update."},
             "torrent_hash": {"type": "string", "description": "Alias for hash."},
             "infohash": {"type": "string", "description": "Alias for hash."},
@@ -38245,10 +38320,11 @@ def _qbit_inject_response_contract() -> dict[str, Any]:
 
 def _qbit_limits_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "dry_run", "mutates_qbittorrent", "live_upload", "client", "request", "hash", "tracker", "role", "site_policy", "qbit_limits", "rate_limits", "visible_before", "visible_after", "before", "after", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "dry_run", "mutates_qbittorrent", "live_upload", "client", "request", "hash", "tracker", "role", "site_policy", "qbit_limits", "rate_limits", "visible_before", "visible_after", "before", "after", "agent_summary", "qbit_rate_limit_repair_report", "blockers", "next_actions"],
         "qbit_limit_fields": ["download_limit", "upload_limit", "download_limit_human", "upload_limit_human", "download_limit_source", "upload_limit_source", "role", "tracker", "policy"],
         "rate_limit_fields": ["requested", "applied", "skipped", "dry_run", "calls"],
         "agent_summary_fields": ["ready", "dry_run", "mutates_qbittorrent", "client", "hash", "tracker", "role", "upload_limit", "download_limit", "upload_limit_human", "download_limit_human", "upload_limit_source", "download_limit_source", "rate_limits_applied", "call_count", "blocker_count"],
+        "qbit_rate_limit_repair_report_fields": ["ready", "status", "job_id", "role", "hash", "tracker", "requested_limits", "applied", "dry_run", "verification_call", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "safety": ["dry_run_by_default", "may_change_qbittorrent_rate_limits", "does_not_add_torrents", "does_not_upload"],
     }
 

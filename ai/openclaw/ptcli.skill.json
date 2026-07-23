@@ -25498,6 +25498,18 @@
             "type": "string",
             "description": "Path to data/config.py inside the container."
           },
+          "job_id": {
+            "type": "string",
+            "description": "Optional retorrent job id used to build a verification call after repairing rate limits."
+          },
+          "parent_job_id": {
+            "type": "string",
+            "description": "Alias for job_id."
+          },
+          "retorrent_job_id": {
+            "type": "string",
+            "description": "Alias for job_id."
+          },
           "hash": {
             "type": "string",
             "description": "Existing qBittorrent torrent hash/infohash to update."
@@ -25568,6 +25580,7 @@
           "before",
           "after",
           "agent_summary",
+          "qbit_rate_limit_repair_report",
           "blockers",
           "next_actions"
         ],
@@ -25606,6 +25619,24 @@
           "rate_limits_applied",
           "call_count",
           "blocker_count"
+        ],
+        "qbit_rate_limit_repair_report_fields": [
+          "ready",
+          "status",
+          "job_id",
+          "role",
+          "hash",
+          "tracker",
+          "requested_limits",
+          "applied",
+          "dry_run",
+          "verification_call",
+          "recommended_call",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
         ],
         "safety": [
           "dry_run_by_default",
