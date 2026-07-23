@@ -15650,6 +15650,13 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
     assert job["manual_retorrent_final_report"]["verdict"] == "confirmations_required"
     assert job["manual_retorrent_final_report"]["report_allowed"] is False
     assert job["manual_retorrent_final_report"]["duplicate_check"]["clear"] is True
+    assert job["manual_retorrent_final_report"]["live_recovery_final_report"]["kind"] == "ptcli.live_recovery_final_report"
+    assert job["manual_retorrent_final_report"]["live_recovery_final_report"]["job_id"] == job["job_id"]
+    assert job["manual_retorrent_final_report"]["live_recovery"]["action"] == job["manual_retorrent_final_report"]["live_recovery_final_report"]["action"]
+    assert job["manual_retorrent_final_report"]["live"]["recovery_verdict"] == job["manual_retorrent_final_report"]["live_recovery_final_report"]["verdict"]
+    assert job["manual_retorrent_final_report"]["control"]["action"] == job["manual_retorrent_final_report"]["live_recovery_final_report"]["action"]
+    assert "live_recovery_final_report" in job["manual_retorrent_final_report"]["read_order"]
+    assert "live_recovery_final_report.report_allowed=true" in job["manual_retorrent_final_report"]["complete_when"]
     assert job["agent_decision"]["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
     assert job["agent_decision"]["manual_retorrent_final_report"] == job["manual_retorrent_final_report"]
     assert job["workflow_context"]["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
@@ -15725,6 +15732,9 @@ def test_source_url_retorrent_job_handoff_stops_on_duplicate(monkeypatch, tmp_pa
     assert job["manual_retorrent_final_report"]["verdict"] == "duplicate_stopped"
     assert job["manual_retorrent_final_report"]["duplicate_check"]["exists"] is True
     assert job["manual_retorrent_final_report"]["report_allowed"] is False
+    assert job["manual_retorrent_final_report"]["live_recovery_final_report"]["kind"] == "ptcli.live_recovery_final_report"
+    assert job["manual_retorrent_final_report"]["live_recovery_final_report"]["job_id"] == job["job_id"]
+    assert job["manual_retorrent_final_report"]["live_recovery"]["action"] == job["live_recovery_final_report"]["action"]
     assert job["job_final_report"]["kind"] == "ptcli.job_final_report"
     assert job["job_final_report"]["verdict"] == "duplicate_stopped"
     assert job["job_final_report"]["ready_for_user_report"] is True
@@ -21956,6 +21966,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_final_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "report_allowed" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
     assert "recommended_call" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
+    assert "live_recovery" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
+    assert "live_recovery_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
     assert "closure_checklist" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
     assert "next_step" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
     assert "recommended_tool" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]

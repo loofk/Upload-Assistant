@@ -30169,6 +30169,114 @@ def _job_manual_retorrent_handoff(job: dict[str, Any], summary_payload: dict[str
     }
 
 
+def _job_live_recovery_inline_report(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    existing = job.get("live_recovery_final_report")
+    if isinstance(existing, dict):
+        return existing
+    job_id = str(job.get("job_id") or "")
+    status = str(job.get("status") or "unknown")
+    runtime = _job_runtime(job)
+    completion = _job_seedbox_live_validation_completion_report(job, summary_payload)
+    live_gate = _job_live_completion_gate(job, summary_payload)
+    live_report = _job_live_user_report(job, summary_payload)
+    resume_plan = _job_resume_plan(job)
+    recommended_call = _job_live_recovery_inline_call(job_id, resume_plan, completion, live_gate, live_report)
+    action = _job_live_recovery_inline_action(status, runtime, completion, live_gate, resume_plan, recommended_call)
+    failed_checks: list[str] = []
+    missing_evidence = list(dict.fromkeys(_string_list(completion.get("missing_evidence")) + _string_list((live_report.get("evidence") or {}).get("missing_evidence") if isinstance(live_report.get("evidence"), dict) else [])))
+    blockers = list(dict.fromkeys(_string_list(completion.get("blockers")) + _string_list(live_gate.get("blockers")) + _string_list(live_report.get("blockers"))))
+    report_allowed = live_report.get("report_allowed") is True and completion.get("ready_for_user_report") is True and not missing_evidence and not blockers
+    return {
+        "kind": "ptcli.live_recovery_final_report",
+        "ready": report_allowed or bool(recommended_call.get("tool")),
+        "report_allowed": report_allowed,
+        "verdict": "report_complete" if report_allowed else _job_live_recovery_verdict(action, status, blockers, failed_checks, missing_evidence),
+        "action": action,
+        "status": status,
+        "job_id": job_id or None,
+        "job_kind": job.get("kind"),
+        "terminal": bool(runtime.get("terminal")),
+        "should_poll": bool(runtime.get("should_poll")) or action == "poll",
+        "should_resume": action in {"preview_resume", "execute_resume_after_review"},
+        "summary_file": completion.get("summary_file") or _job_summary_file(job),
+        "status_endpoint": runtime.get("status_endpoint"),
+        "summary_endpoint": runtime.get("summary_endpoint"),
+        "resume_endpoint": runtime.get("resume_endpoint"),
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "dry_run_request": recommended_call.get("dry_run_request"),
+        "execute_request": recommended_call.get("execute_request"),
+        "live_evidence": {
+            "live_validation_completion_audit_allowed": None,
+            "live_user_report_allowed": live_report.get("report_allowed") is True,
+            "seedbox_completion_ready": completion.get("ready_for_user_report") is True,
+            "failed_checks": failed_checks,
+            "missing_evidence": missing_evidence,
+        },
+        "read_order": ["live_recovery_final_report", "live_validation_completion_audit", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report"],
+        "complete_when": ["live_recovery_final_report.report_allowed=true", "live_validation_completion_audit.report_allowed=true", "live_validation_completion_audit.failed_checks=[]", "live_validation_completion_audit.missing_evidence=[]"],
+        "stop_when": _job_live_recovery_stop_when(action, blockers, failed_checks, missing_evidence),
+        "blockers": blockers,
+        "next_actions": _job_live_recovery_next_actions(action, recommended_call, blockers, failed_checks, missing_evidence, job_id),
+    }
+
+
+def _job_live_recovery_inline_call(job_id: str, *reports: dict[str, Any] | None) -> dict[str, Any]:
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        if report.get("recommended") is True and report.get("endpoint"):
+            dry_run_request = {"job_id": job_id, "dry_run": True} if job_id else None
+            execute_request = {"job_id": job_id} if job_id else None
+            return {
+                "tool": "resume_job",
+                "endpoint": report.get("endpoint"),
+                "method": "POST",
+                "request": dry_run_request,
+                "dry_run_request": dry_run_request,
+                "execute_request": execute_request,
+                "safe_to_call_now": True,
+                "requires_user_review": True,
+            }
+        source = report.get("recommended_call") if isinstance(report.get("recommended_call"), dict) else None
+        if source and source.get("tool"):
+            call = dict(source)
+        elif report.get("recommended_tool"):
+            call = {
+                "tool": report.get("recommended_tool"),
+                "endpoint": report.get("recommended_endpoint"),
+                "method": report.get("recommended_method") or report.get("method"),
+                "request": report.get("recommended_request"),
+                "safe_to_call_now": report.get("safe_to_call_now") is True,
+                "requires_user_review": True,
+            }
+        else:
+            continue
+        if not call.get("request") and call.get("tool") in {"get_job_status", "get_job_summary"} and job_id:
+            call["request"] = {"job_id": job_id}
+        return call
+    return {"ready": False, "safe_to_call_now": False, "tool": None, "endpoint": None, "method": None, "request": None, "requires_user_review": True}
+
+
+def _job_live_recovery_inline_action(status: str, runtime: dict[str, Any], completion: dict[str, Any], live_gate: dict[str, Any], resume_plan: dict[str, Any], recommended_call: dict[str, Any]) -> str:
+    if completion.get("ready_for_user_report") is True:
+        return "read_summary"
+    if runtime.get("should_poll"):
+        return "poll"
+    if completion.get("status") == "duplicate_stopped":
+        return "stop_duplicate"
+    if resume_plan.get("recommended") is True or live_gate.get("action") == "resume_job" or recommended_call.get("tool") == "resume_job":
+        return "preview_resume"
+    if status == "complete":
+        return "read_summary"
+    if recommended_call.get("tool"):
+        return str(recommended_call.get("action") or completion.get("status") or "resolve_blockers")
+    return str(live_gate.get("action") or completion.get("status") or "inspect")
+
+
 def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     if not _is_manual_retorrent_job(job, request):
@@ -30181,8 +30289,9 @@ def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dic
     closure = _job_closure_summary(job, summary_payload)
     live_gate = _job_live_completion_gate(job, summary_payload)
     live_report = _job_live_user_report(job, summary_payload)
+    live_recovery = _job_live_recovery_inline_report(job, summary_payload)
     duplicate_check = _job_duplicate_check(job)
-    blockers = _manual_retorrent_final_blockers(manual_handoff, policy_report, material_report, target_upload, closure, live_gate, live_report)
+    blockers = _manual_retorrent_final_blockers(manual_handoff, policy_report, material_report, target_upload, closure, live_gate, live_report, live_recovery)
     missing_confirmations = _missing_live_confirmations(request)
     report_allowed = isinstance(live_report, dict) and live_report.get("report_allowed") is True and not blockers
     verdict = _manual_retorrent_final_verdict(
@@ -30196,7 +30305,7 @@ def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dic
         live_report=live_report,
         blockers=blockers,
     )
-    next_step = _manual_retorrent_final_next_step(live_report, live_gate, manual_handoff, material_report, policy_report)
+    next_step = _manual_retorrent_final_next_step(live_recovery, live_report, live_gate, manual_handoff, material_report, policy_report)
     remaining_sequence = _manual_retorrent_remaining_sequence_from_reports(
         job,
         policy_report=policy_report,
@@ -30256,14 +30365,26 @@ def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dic
             "gate_ready": live_gate.get("ready") if isinstance(live_gate, dict) else None,
             "gate_action": live_gate.get("action") if isinstance(live_gate, dict) else None,
             "user_report_allowed": live_report.get("report_allowed") if isinstance(live_report, dict) else None,
-            "validation_report_allowed": None,
+            "recovery_action": live_recovery.get("action") if isinstance(live_recovery, dict) else None,
+            "recovery_verdict": live_recovery.get("verdict") if isinstance(live_recovery, dict) else None,
+            "recovery_report_allowed": live_recovery.get("report_allowed") if isinstance(live_recovery, dict) else None,
+            "validation_report_allowed": live_recovery.get("live_evidence", {}).get("live_validation_completion_audit_allowed") if isinstance(live_recovery, dict) and isinstance(live_recovery.get("live_evidence"), dict) else None,
             "missing_evidence": _string_list((live_report.get("evidence") or {}).get("missing_evidence")) if isinstance(live_report, dict) and isinstance(live_report.get("evidence"), dict) else [],
         },
         "control": {
-            "action": None,
-            "state": None,
-            "safe_to_call_now": None,
+            "action": live_recovery.get("action") if isinstance(live_recovery, dict) else None,
+            "state": live_recovery.get("verdict") if isinstance(live_recovery, dict) else None,
+            "safe_to_call_now": live_recovery.get("recommended_call", {}).get("safe_to_call_now") if isinstance(live_recovery, dict) and isinstance(live_recovery.get("recommended_call"), dict) else None,
         },
+        "live_recovery": {
+            "action": live_recovery.get("action") if isinstance(live_recovery, dict) else None,
+            "verdict": live_recovery.get("verdict") if isinstance(live_recovery, dict) else None,
+            "report_allowed": live_recovery.get("report_allowed") if isinstance(live_recovery, dict) else None,
+            "recommended_call": live_recovery.get("recommended_call") if isinstance(live_recovery, dict) else None,
+            "missing_evidence": _string_list(live_recovery.get("live_evidence", {}).get("missing_evidence")) if isinstance(live_recovery, dict) and isinstance(live_recovery.get("live_evidence"), dict) else [],
+            "failed_checks": _string_list(live_recovery.get("live_evidence", {}).get("failed_checks")) if isinstance(live_recovery, dict) and isinstance(live_recovery.get("live_evidence"), dict) else [],
+        },
+        "live_recovery_final_report": live_recovery,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_method": next_step.get("method"),
@@ -30277,8 +30398,8 @@ def _job_manual_retorrent_final_report(job: dict[str, Any], summary_payload: dic
             "safe_to_call_now": bool(next_step.get("safe_to_call_now")),
             "requires_user_review": next_step.get("requires_user_review") is not False,
         },
-        "read_order": ["manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "job_control_summary", "policy_execution_final_report", "material_chain_handoff", "material_preparation_final_report", "target_upload_handoff", "live_completion_gate", "live_validation_final_report", "closure_summary"],
-        "complete_when": "manual_retorrent_final_report.report_allowed=true and live_validation_final_report.report_allowed=true before reporting manual retorrent completion.",
+        "read_order": ["manual_retorrent_final_report", "live_recovery_final_report", "live_validation_completion_audit", "manual_retorrent_remaining_sequence", "job_control_summary", "policy_execution_final_report", "material_chain_handoff", "material_preparation_final_report", "target_upload_handoff", "live_completion_gate", "live_validation_final_report", "closure_summary"],
+        "complete_when": "manual_retorrent_final_report.report_allowed=true, live_recovery_final_report.report_allowed=true, and live_validation_completion_audit.report_allowed=true before reporting manual retorrent completion.",
         "stop_when": "manual_retorrent_final_report.verdict in duplicate_stopped, policy_blocked, confirmations_required, blocked, failed, or cancelled without a recommended_call.",
         "blockers": blockers,
         "next_actions": _manual_retorrent_final_next_actions(verdict, blockers, next_step, missing_confirmations),
@@ -30329,18 +30450,20 @@ def _manual_retorrent_final_verdict(
 
 
 def _manual_retorrent_final_next_step(
+    live_recovery: dict[str, Any] | None,
     live_report: dict[str, Any] | None,
     live_gate: dict[str, Any] | None,
     manual_handoff: dict[str, Any] | None,
     material_report: dict[str, Any] | None,
     policy_report: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    for source in (live_report, live_gate, manual_handoff, material_report, policy_report):
+    for source in (live_recovery, live_report, live_gate, manual_handoff, material_report, policy_report):
         if not isinstance(source, dict):
             continue
-        tool = source.get("recommended_tool")
-        endpoint = source.get("recommended_endpoint")
-        request = source.get("recommended_request")
+        recommended_call = source.get("recommended_call") if isinstance(source.get("recommended_call"), dict) else {}
+        tool = source.get("recommended_tool") or recommended_call.get("tool")
+        endpoint = source.get("recommended_endpoint") or recommended_call.get("endpoint")
+        request = source.get("recommended_request") if source.get("recommended_request") is not None else recommended_call.get("request")
         method = source.get("recommended_method") or source.get("method") or ("POST" if tool and request is not None else "GET" if tool else None)
         if tool or endpoint or request:
             return {
@@ -30348,8 +30471,8 @@ def _manual_retorrent_final_next_step(
                 "endpoint": endpoint,
                 "method": method,
                 "request": request,
-                "safe_to_call_now": source.get("safe_to_call_now") is True or (source.get("recommended_call") or {}).get("safe_to_call_now") is True,
-                "requires_user_review": (source.get("recommended_call") or {}).get("requires_user_review") if isinstance(source.get("recommended_call"), dict) else True,
+                "safe_to_call_now": source.get("safe_to_call_now") is True or recommended_call.get("safe_to_call_now") is True,
+                "requires_user_review": recommended_call.get("requires_user_review") if recommended_call else True,
             }
     return {"tool": "get_job_summary", "endpoint": None, "method": "GET", "request": None, "safe_to_call_now": False, "requires_user_review": True}
 
@@ -30389,7 +30512,7 @@ def _job_manual_retorrent_remaining_sequence(job: dict[str, Any], summary_payloa
     live_report = _job_live_user_report(job, summary_payload)
     duplicate_check = _job_duplicate_check(job)
     missing_confirmations = _missing_live_confirmations(request)
-    fallback_next_step = _manual_retorrent_final_next_step(live_report, live_gate, manual_handoff, material_report, policy_report)
+    fallback_next_step = _manual_retorrent_final_next_step(_job_live_recovery_inline_report(job, summary_payload), live_report, live_gate, manual_handoff, material_report, policy_report)
     return _manual_retorrent_remaining_sequence_from_reports(
         job,
         policy_report=policy_report,
@@ -37928,7 +38051,7 @@ def _job_response_contract() -> dict[str, Any]:
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "uploaded_seeding_evidence", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "policy_runtime_ready", "policy_runtime_contract", "policy_application_handoff", "policy_config_apply_handoff", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
-        "manual_retorrent_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "policy", "materials", "target_upload", "closure", "live", "control", "remaining_sequence", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "manual_retorrent_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "policy", "materials", "target_upload", "closure", "live", "control", "live_recovery", "live_recovery_final_report", "remaining_sequence", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "manual_retorrent_remaining_sequence_fields": ["ready", "action", "job_id", "status", "material_chain", "target_materials", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "steps", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "manual_retorrent_remaining_next_call_fields": ["ready", "job_id", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
         "manual_retorrent_remaining_step_fields": ["name", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
