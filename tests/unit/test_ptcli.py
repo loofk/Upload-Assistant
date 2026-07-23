@@ -19915,6 +19915,18 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert config_repair_handoff["rerun"]["tool"] == "site_policies"
     assert config_repair_handoff["next_step"]["tool"] == "site_policies"
     assert config_repair_handoff["safety"]["safe_to_auto_apply"] is False
+    config_apply_final = payload["site_policy_config_apply_final_report"]
+    assert config_apply_final["kind"] == "ptcli.site_policy_config_apply_final_report"
+    assert config_apply_final["ready"] is True
+    assert config_apply_final["report_allowed"] is True
+    assert config_apply_final["verdict"] == "config_verified_for_live_preflight"
+    assert config_apply_final["action"] == "ready_for_live_preflight"
+    assert config_apply_final["copyable_config"]["ready"] is True
+    assert config_apply_final["copyable_config"]["trackers"] == ["U2", "MTEAM"]
+    assert config_apply_final["verification"]["tool"] == "site_policies"
+    assert config_apply_final["recommended_call"]["tool"] == "site_policies"
+    assert config_apply_final["recommended_call"]["safe_to_call_now"] is True
+    assert config_apply_final["safety"]["safe_to_auto_apply"] is False
     assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
     assert payload["config_templates"]["structured_trackers"]["U2"]["qbit_limits"]["download_limit"] == "20 MiB/s"
@@ -21139,6 +21151,18 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert apply_handoff["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert apply_handoff["safety"]["requires_explicit_config_edit"] is True
     assert apply_handoff["safety"]["does_not_generate_rule_review_fingerprint_without_user_evidence"] is True
+    apply_final = payload["site_policy_config_apply_final_report"]
+    assert apply_final["kind"] == "ptcli.site_policy_config_apply_final_report"
+    assert apply_final["ready"] is False
+    assert apply_final["report_allowed"] is False
+    assert apply_final["verdict"] == "manual_rule_review_required"
+    assert apply_final["action"] == "manual_rule_review_then_edit_config"
+    assert apply_final["manual_review"]["required"] is True
+    assert apply_final["copyable_config"]["ready"] is True
+    assert apply_final["copyable_config"]["trackers"] == ["U2", "MTEAM"]
+    assert apply_final["recommended_call"]["tool"] == "site_policy_rule_review"
+    assert apply_final["recommended_call"]["requires_user_review"] is True
+    assert apply_final["safety"]["requires_human_config_edit"] is True
     assert payload["agent_summary"]["policy_coverage_ready"] is False
     assert payload["agent_summary"]["execution_ready"] is False
     assert payload["agent_summary"]["policy_execution_summary"] == payload["policy_execution_summary"]
@@ -22482,6 +22506,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_repair_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "site_policy_config_apply_final_report" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
     assert "qbit_runtime_handoff" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
@@ -22532,6 +22557,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_apply_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "patch_paths" in tool_by_name["site_policies"]["response_contract"]["policy_config_apply_handoff_fields"]
     assert "verification" in tool_by_name["site_policies"]["response_contract"]["policy_config_apply_handoff_fields"]
+    assert "site_policy_config_apply_final_report_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "copyable_config" in tool_by_name["site_policies"]["response_contract"]["site_policy_config_apply_final_report_fields"]
+    assert "recommended_call" in tool_by_name["site_policies"]["response_contract"]["site_policy_config_apply_final_report_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -23222,6 +23250,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_handoff" in site_policy_schema["properties"]
     assert "policy_config_repair_handoff" in site_policy_schema["properties"]
     assert "policy_config_apply_handoff" in site_policy_schema["properties"]
+    assert "site_policy_config_apply_final_report" in site_policy_schema["properties"]
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "policy_execution_plan" in site_policy_schema["properties"]
     assert "policy_execution_sequence" in site_policy_schema["properties"]
@@ -26203,6 +26232,10 @@ services:
     assert "confirm_upload=true before live upload" in payload["evidence"]["site_policies"]["policy_execution_plan"]["required_confirmations"]
     assert "policy_enforcement_bundle.ready=true" in payload["evidence"]["site_policies"]["policy_enforcement_bundle"]["live_job_requirements"]
     assert "source_url" in payload["evidence"]["site_policies"]["policy_runtime_contract"]["required_request_fields"]
+    assert payload["evidence"]["site_policies"]["site_policy_config_apply_final_report"]["kind"] == "ptcli.site_policy_config_apply_final_report"
+    assert payload["evidence"]["site_policies"]["site_policy_config_apply_final_report"]["action"] == "manual_rule_review_then_edit_config"
+    assert payload["evidence"]["site_policies"]["site_policy_config_apply_final_report"]["copyable_config"]["ready"] is True
+    assert "site_policy_config_apply_final_report" in payload["evidence"]["site_policies"]["read_order"]
     assert payload["evidence"]["site_policies"]["next_step"]["tool"] == "site_policy_rule_review"
     adapters = payload["evidence"]["tracker_adapters"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"

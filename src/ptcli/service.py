@@ -5152,6 +5152,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     policy_config_handoff = _site_policy_config_handoff(policy_readiness_summary, policy_repair_gate, config_update_plan, context)
     policy_config_repair_handoff = _site_policy_config_repair_handoff(policy_config_handoff, policy_repair_gate, config_update_plan, context)
     policy_config_apply_handoff = _site_policy_config_apply_handoff(policy_config_handoff, policy_config_repair_handoff, config_update_plan, context)
+    site_policy_config_apply_final_report = _site_policy_config_apply_final_report(policy_config_apply_handoff, policy_repair_gate, policy_execution_handoff, config_update_plan, context)
     overall_ready = bool(report.get("ready")) and bool(policy_setup_summary.get("ready"))
     rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
     site_policy_profiles = {str(item.get("tracker")): item.get("policy_profile") for item in matrix if item.get("tracker")}
@@ -5206,6 +5207,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_config_handoff": policy_config_handoff,
         "policy_config_repair_handoff": policy_config_repair_handoff,
         "policy_config_apply_handoff": policy_config_apply_handoff,
+        "site_policy_config_apply_final_report": site_policy_config_apply_final_report,
         "policy_handoff": policy_handoff,
         "next_step": policy_handoff.get("next_step"),
         "next_call": next_call,
@@ -15273,6 +15275,136 @@ def _site_policy_config_apply_next_actions(ready: bool, manual_review_required: 
     if blockers:
         return ["Apply policy_config_apply_handoff.preferred_patch to policy_config_apply_handoff.patch_paths, then run policy_config_apply_handoff.verification."]
     return ["Inspect policy_config_apply_handoff.next_step before editing policy config."]
+
+
+def _site_policy_config_apply_final_report(
+    apply_handoff: dict[str, Any],
+    repair_gate: dict[str, Any],
+    execution_handoff: dict[str, Any],
+    config_update_plan: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Short final report for the site-policy config edit/verification gate."""
+    manual_review = apply_handoff.get("manual_review") if isinstance(apply_handoff.get("manual_review"), dict) else {}
+    edit_config = apply_handoff.get("edit_config") if isinstance(apply_handoff.get("edit_config"), dict) else {}
+    verification = apply_handoff.get("verification") if isinstance(apply_handoff.get("verification"), dict) else {}
+    next_step = apply_handoff.get("next_step") if isinstance(apply_handoff.get("next_step"), dict) else {}
+    structured_patch = apply_handoff.get("structured_patch") if isinstance(apply_handoff.get("structured_patch"), dict) else config_update_plan.get("structured_patch") if isinstance(config_update_plan.get("structured_patch"), dict) else {}
+    flat_patch = apply_handoff.get("flat_patch") if isinstance(apply_handoff.get("flat_patch"), dict) else config_update_plan.get("flat_patch") if isinstance(config_update_plan.get("flat_patch"), dict) else {}
+    apply_order = _string_list(apply_handoff.get("apply_order")) or _string_list(config_update_plan.get("apply_order")) or _string_list(request_context.get("trackers"))
+    blockers = list(dict.fromkeys(_string_list(apply_handoff.get("blockers")) + _string_list(repair_gate.get("blockers")) + _string_list(execution_handoff.get("blockers"))))
+    ready = bool(apply_handoff.get("ready") is True and repair_gate.get("ready") is True and execution_handoff.get("ready") is True and not blockers)
+    action = "ready_for_live_preflight" if ready else "manual_rule_review_then_edit_config" if manual_review.get("required") else "edit_config_then_verify"
+    recommended_call = _site_policy_config_apply_final_call(ready, manual_review, edit_config, verification, next_step)
+    return {
+        "kind": "ptcli.site_policy_config_apply_final_report",
+        "ready": ready,
+        "report_allowed": ready,
+        "verdict": "config_verified_for_live_preflight" if ready else "manual_rule_review_required" if manual_review.get("required") else "config_edit_required",
+        "status": "ready" if ready else "blocked",
+        "action": action,
+        "accepted_rules": request_context.get("accept_rules") is True,
+        "config_path": apply_handoff.get("config_path") or config_update_plan.get("config_path") or 'config["PTCLI"]["SITE_POLICIES"]',
+        "preferred_shape": apply_handoff.get("preferred_shape") or config_update_plan.get("preferred_shape") or "structured",
+        "apply_order": apply_order,
+        "manual_review": {
+            "required": bool(manual_review.get("required")),
+            "cannot_auto_generate": bool(manual_review.get("cannot_auto_generate")),
+            "request": manual_review.get("request") if isinstance(manual_review.get("request"), dict) else {},
+            "step": manual_review.get("step") if isinstance(manual_review.get("step"), dict) else None,
+        },
+        "copyable_config": _site_policy_copyable_config(structured_patch, flat_patch, apply_order),
+        "preferred_patch": structured_patch or flat_patch,
+        "patch_paths": apply_handoff.get("patch_paths") if isinstance(apply_handoff.get("patch_paths"), list) else [],
+        "verification": verification
+        or {
+            "tool": "site_policies",
+            "endpoint": "/v1/site-policies",
+            "method": "POST",
+            "request": _site_policy_rerun_request(request_context, {"accept_rules": True}),
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "read_order": ["site_policy_config_apply_final_report", "policy_config_apply_handoff", "copyable_config", "manual_review", "verification", "policy_repair_gate", "policy_execution_handoff"],
+        "complete_when": [
+            "site_policy_config_apply_final_report.ready=true",
+            "policy_config_apply_handoff.ready=true",
+            "policy_repair_gate.ready=true",
+            "policy_execution_handoff.ready=true",
+        ],
+        "stop_when": [
+            "manual_review.required=true and site_policy_rule_review.ready is not true",
+            "copyable_config.ready=false while config fields are missing",
+            "verification returns policy_config_apply_handoff.ready=false",
+            "rule_review_fingerprint is missing or placeholder",
+        ],
+        "safety": {
+            "mutates_state": False,
+            "mutates_filesystem": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "safe_to_auto_apply": False,
+            "requires_human_config_edit": not ready,
+            "does_not_generate_rule_review_fingerprint_without_user_evidence": True,
+        },
+        "blockers": blockers,
+        "next_actions": _site_policy_config_apply_final_next_actions(ready, bool(manual_review.get("required")), blockers),
+    }
+
+
+def _site_policy_config_apply_final_call(
+    ready: bool,
+    manual_review: dict[str, Any],
+    edit_config: dict[str, Any],
+    verification: dict[str, Any],
+    next_step: dict[str, Any],
+) -> dict[str, Any]:
+    if ready:
+        call = verification or next_step
+        return {
+            "tool": call.get("tool") or "site_policies",
+            "endpoint": call.get("endpoint") or "/v1/site-policies",
+            "method": call.get("method") or "POST",
+            "request": call.get("request"),
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "reason": "site_policy_config_apply_final_report.verify_ready_policy",
+        }
+    step = manual_review.get("step") if isinstance(manual_review.get("step"), dict) else {}
+    if manual_review.get("required") and step:
+        return {
+            "tool": step.get("tool"),
+            "endpoint": step.get("endpoint"),
+            "method": step.get("method") or "POST",
+            "request": step.get("request"),
+            "safe_to_call_now": True,
+            "requires_user_review": True,
+            "reason": "site_policy_config_apply_final_report.manual_rule_review",
+        }
+    call = edit_config if edit_config else next_step
+    return {
+        "tool": call.get("tool") or "edit_config",
+        "endpoint": call.get("endpoint"),
+        "method": call.get("method"),
+        "request": call.get("request"),
+        "safe_to_call_now": False,
+        "requires_user_review": True,
+        "reason": "site_policy_config_apply_final_report.edit_config_then_verify",
+        "after_edit": call.get("after_edit") if isinstance(call.get("after_edit"), dict) else None,
+    }
+
+
+def _site_policy_config_apply_final_next_actions(ready: bool, manual_review_required: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Run site_policy_config_apply_final_report.verification, then continue with readiness_bundle before live jobs."]
+    if manual_review_required:
+        return ["Complete real tracker rule review, call site_policy_rule_review, merge its patch into copyable_config, edit config manually, then verify site_policies again."]
+    if blockers:
+        return ["Apply site_policy_config_apply_final_report.copyable_config manually, then call verification and inspect blockers."]
+    return ["Inspect site_policy_config_apply_final_report.recommended_call before touching live automation."]
 
 
 def _site_policy_execution_summary_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -35119,6 +35251,9 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     policy_runtime_contract = site_policies.get("policy_runtime_contract") if isinstance(site_policies.get("policy_runtime_contract"), dict) else {}
     policy_enforcement_bundle = site_policies.get("policy_enforcement_bundle") if isinstance(site_policies.get("policy_enforcement_bundle"), dict) else {}
     config_update_plan = site_policies.get("config_update_plan") if isinstance(site_policies.get("config_update_plan"), dict) else {}
+    policy_config_repair_handoff = site_policies.get("policy_config_repair_handoff") if isinstance(site_policies.get("policy_config_repair_handoff"), dict) else {}
+    policy_config_apply_handoff = site_policies.get("policy_config_apply_handoff") if isinstance(site_policies.get("policy_config_apply_handoff"), dict) else {}
+    site_policy_config_apply_final_report = site_policies.get("site_policy_config_apply_final_report") if isinstance(site_policies.get("site_policy_config_apply_final_report"), dict) else {}
     daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
     daily_candidate_config_final_report = deployment.get("daily_candidate_config_final_report") if isinstance(deployment.get("daily_candidate_config_final_report"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
@@ -35174,6 +35309,9 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 if config_update_plan
                 else None,
                 "policy_config_handoff": policy_config_handoff or None,
+                "policy_config_repair_handoff": policy_config_repair_handoff or None,
+                "policy_config_apply_handoff": policy_config_apply_handoff or None,
+                "site_policy_config_apply_final_report": site_policy_config_apply_final_report or None,
                 "policy_execution_ready": policy_execution_handoff.get("ready") if policy_execution_handoff else policy_execution_summary.get("ready"),
                 "policy_execution_phase": policy_execution_handoff.get("phase"),
                 "policy_execution_summary": policy_execution_summary or None,
@@ -35215,7 +35353,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 else policy_config_handoff.get("next_step")
                 if isinstance(policy_config_handoff.get("next_step"), dict)
                 else None,
-                "read_order": ["policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
+                "read_order": ["site_policy_config_apply_final_report", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
                 "blockers": _string_list(site_policies.get("blockers")),
             },
             "tracker_adapters": _goal_progress_tracker_adapter_evidence(tracker_adapters),
@@ -37967,7 +38105,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_refill_loop_report_fields": ["ready", "status", "action", "refill_job_id", "refill_job_status", "refill_request", "before", "after", "progress", "target_met", "safe_to_submit_count", "ready_shortfall_count", "followup", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "loop_control", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
+                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
@@ -37994,7 +38132,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "site_policy_final_report", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "site_policy_profiles", "site_policy_execution_profiles", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_targets", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_application_handoff", "site_policy_final_report", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_handoff", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -38050,6 +38188,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_config_handoff_item_fields": ["tracker", "roles", "ready", "requires_manual_review", "rules_url", "missing_fields", "placeholder_fields", "needs_rate_limit", "needs_seeding_requirement", "needs_rule_review_fingerprint", "preferred_patch", "manual_steps"],
                 "policy_config_repair_handoff_fields": ["ready", "status", "action", "accepted_rules", "config_path", "preferred_shape", "preferred_patch", "apply_order", "manual_review", "edit_config", "rerun", "tracker_items", "read_order", "complete_when", "stop_when", "safety", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "policy_config_apply_handoff_fields": ["ready", "status", "action", "config_path", "preferred_shape", "preferred_patch", "structured_patch", "flat_patch", "apply_order", "manual_review", "edit_config", "merge_sources", "patch_paths", "verification", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "site_policy_config_apply_final_report_fields": ["ready", "report_allowed", "verdict", "status", "action", "accepted_rules", "config_path", "preferred_shape", "apply_order", "manual_review", "copyable_config", "preferred_patch", "patch_paths", "verification", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "config_update_plan", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "rule_obligations"],
                 "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
             },
@@ -40774,6 +40913,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_config_handoff": {"type": "object"},
             "policy_config_repair_handoff": {"type": "object"},
             "policy_config_apply_handoff": {"type": "object"},
+            "site_policy_config_apply_final_report": {"type": "object"},
             "policy_handoff": {"type": "object"},
             "next_step": {"type": "object"},
             "next_call": {"type": "object"},
