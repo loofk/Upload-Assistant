@@ -6,6 +6,27 @@
 
 Upload Assistant (UA) 是一个基于 Python 的工具，用于自动化种子上传到私有 Tracker。功能包括：生成 MediaInfo/BDInfo、截图并上传到图床、从 TMDb/IMDb/TVDB/TVMaze 获取元数据、创建 .torrent 文件、查重、上传到 70+ 个支持的 Tracker 站点。支持 CLI、Discord 机器人和 Web UI 三种界面。
 
+当前新方向是 `ptcli.py`：把 UA 聚焦改造成面向中文 PT 圈的 Docker Compose 本地/盒子部署服务，提供 AI 可调用的 CLI、HTTP API、OpenAPI、OpenClaw/Hermes skill manifest、任务式转种/发种/刷上传工作流。后续 agent 继续目标时，应优先读取 `python3 ptcli.py goal-progress --json` 或 HTTP `/v1/goal/progress`，再根据 `goal_distance_report.next_work` 选择下一步。
+
+### 当前 ptcli 目标状态
+
+已基本落地：
+- Docker Compose 部署骨架：`ptcli-api` 常驻服务、健康检查、挂载 config/cookies/downloads/tmp/job 目录、`.env.ptcli.example`、部署检查 `/v1/deployment/check`。
+- AI 工具契约：`/openapi.json`、`/v1/tools`、`/.well-known/ptcli-agent.json`、`/v1/openclaw/skill.json`、`/v1/hermes/skill.json`，离线模板位于 `ai/openclaw/ptcli.skill.json` 和 `ai/hermes/ptcli.skill.json`。
+- 任务式 API：retorrent/check/from-url/check-and-submit、metadata/materials/target package/target upload、daily candidates job、job status/summary/resume/cancel/list，响应统一暴露 `job_handoff`、`job_progress_handoff`、`recovery_handoff`、`next_call`、`blockers`、`next_actions`。
+- 手动源链接转种：`/v1/retorrent/source-url/preflight` 与 `/v1/jobs/retorrent/from-url/check-and-submit` 支持源站链接识别、目标查重、规则 gate、确认 gate、任务创建和后续恢复。
+- 素材链路：metadata/PTGen、MediaInfo/BDInfo、截图、图床、目标站 package/upload preflight 已纳入同步 API 与 job API，并通过 final report/handoff 暴露缺口和续跑参数。
+- 站点规则配置：`PTCLI.SITE_POLICIES` 支持下载/上传限速、做种要求、转种/促销限制、人工规则审查 fingerprint；`/v1/site-policies` 与 `/v1/site-policies/rule-review` 会给出 rule obligations、配置补丁、copyable config、执行合同和安全 gate。
+- qBittorrent 执行：inspect/match/export/inject/wait/limits，任务中会审计 hash/path/size/sha1、限速应用、上传后新种注入和做种证据。
+- 每日 10 条候选：`/v1/candidates/daily`、schedule、scheduler、deliver、run-and-deliver、batch/refill、候选提交 job 已有服务入口；候选 digest 会暴露查重、元数据、可下载性、策略风险、提交入口和审批要求。
+
+仍未完成或仍需真实环境证明：
+- U2/CHD -> MTEAM 在真实盒子、真实 cookie/API、真实 qBittorrent 上的端到端 live 验证；只有 `live_validation_completion_audit.report_allowed=true` 且 blockers/缺失证据为空，才能向用户宣告闭环完成。
+- 更多中文 PT 站点的完整 source discovery/source info/source download/target upload adapter；当前优先保证 U2、CHD 到 MTEAM，其他站点应按 `/v1/sites` 的 `site_extension_readiness_final_report` 补齐。
+- 每个站点上传/下载/转种规则的逐站维护与程序化 gate；无法程序化判断的规则必须保留人工 review obligation，不得由 AI 猜测。
+- 每日候选的主动推送渠道和真实运行验收；当前已有本地文件/webhook 载荷与 scheduler，但仍需盒子环境验证。
+- legacy 瘦身：旧 Web UI、Discord、海外 tracker 和无关代码应在关键服务闭环稳定后再清理。
+
 ## 常用命令
 
 ### 运行
@@ -16,6 +37,9 @@ python3 upload.py "/path/to/content" --args
 # 聚焦版 PT 转种 CLI（新功能入口）
 python3 ptcli.py sites --json
 python3 ptcli.py goal-progress --from U2 --source-id 60635 --target MTEAM --downloads-path /downloads --json
+python3 ptcli.py serve --host 127.0.0.1 --port 8080
+python3 ptcli.py daily-schedule --write-summary --write-notification --json
+python3 ptcli.py daily-scheduler --once --write-summary --write-notification --json
 python3 ptcli.py rules --trackers MTEAM,TJUPT --json
 python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 python3 ptcli.py source-info --tracker U2 --source-id 60635 --json
@@ -79,6 +103,9 @@ python3 -m bandit -r . -c bandit.yaml
 ### Docker
 ```bash
 docker compose up  # 使用 docker-compose.yml
+docker compose up -d --build ptcli-api
+docker compose --profile daily up -d ptcli-daily-scheduler
+docker compose --profile daily run --rm ptcli-daily-schedule
 ```
 
 ## 架构
@@ -161,19 +188,19 @@ python3 upload.py "/path/to/content" --trackers MTEAM -u2 60635
 
 ### 方式二：Docker 部署（推荐）
 ```bash
-# 拉取镜像
-docker pull ghcr.io/loofk/upload-assistant:latest
+# 本地/盒子服务模式
+cp .env.ptcli.example .env
+# 编辑 .env 中的 PTCLI_API_TOKEN、PTCLI_PUBLIC_BASE_URL、config/cookies/downloads/tmp 路径和每日候选 schedule
+docker compose up -d --build ptcli-api
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/openapi.json
+curl -fsS http://127.0.0.1:8080/v1/tools
 
-# 运行（CLI 模式）
-docker run --rm -it \
-  -v /root/config.py:/Upload-Assistant/data/config.py \
-  -v /root/cookies:/Upload-Assistant/data/cookies \
-  -v /home/user/Downloads:/downloads \
-  ghcr.io/loofk/upload-assistant:latest \
-  "/downloads/[BDMV]..." --trackers MTEAM -u2 60635
+# 读取当前目标进度和下一步
+docker compose --profile cli run --rm ptcli goal-progress --from U2 --source-id 60635 --target MTEAM --downloads-path /downloads --json
 ```
 
-Docker 镜像由 `.github/workflows/docker-build.yml` 在每次 push 到 master 时自动构建（仅 amd64）。
+Docker 镜像由 `.github/workflows/docker-build.yml` 在 push 时构建。`Dockerfile.ptcli` 会打包 ptcli 服务入口和 `ai/` skill 模板。
 
 ## 测试策略
 
