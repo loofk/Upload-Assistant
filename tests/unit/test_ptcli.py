@@ -16884,6 +16884,20 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert approval_final["safety"]["submit_call_may_create_live_retorrent_job"] is True
     assert "daily_candidate_approval_sequence.approval_items" in approval_final["read_order"]
     assert "approval_required=true and explicit user approval is missing" in approval_final["stop_when"]
+    batch_final_decision = list_payload["daily_candidate_batch_final_decision"]
+    assert batch_final_decision["kind"] == "ptcli.daily_candidate_batch_final_decision"
+    assert batch_final_decision["action"] == "ask_user_approval"
+    assert batch_final_decision["status"] == "ready_for_approval"
+    assert batch_final_decision["target"]["target_count"] == 1
+    assert batch_final_decision["target"]["safe_to_submit_count"] == 1
+    assert batch_final_decision["candidate"]["source_id"] == "60635"
+    assert batch_final_decision["recommended_tool"] == "submit_daily_candidate_job"
+    assert batch_final_decision["recommended_request"]["source_id"] == "60635"
+    assert batch_final_decision["safe_to_call_now"] is False
+    assert batch_final_decision["requires_user_review"] is True
+    assert batch_final_decision["safety"]["recommended_call_uploads"] is True
+    assert batch_final_decision["safety"]["submit_requires_explicit_user_approval"] is True
+    assert batch_final_decision["read_order"][0] == "daily_candidate_batch_final_decision"
     publish_payload = list_payload["daily_candidate_batch_publish_payload"]
     assert publish_payload["kind"] == "ptcli.daily_candidate_batch_publish_payload"
     assert publish_payload["status"] == "ready_for_approval"
@@ -17421,6 +17435,11 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert batch_status["submission_gate"] == list_payload["daily_candidate_submission_gate"]
     assert batch_status["daily_candidate_batch_next_call"]["after_call"]["request"] == {"source_tracker": "U2", "target": ["MTEAM"]}
     assert batch_status["next_call"] == batch_status["daily_candidate_batch_next_call"]
+    assert batch_status["daily_candidate_batch_final_decision"]["action"] == "resolve_blockers"
+    assert batch_status["daily_candidate_batch_final_decision"]["recommended_tool"] == blocked_next_call["tool"]
+    assert batch_status["daily_candidate_batch_final_decision"]["safe_to_call_now"] is False
+    assert batch_status["daily_candidate_batch_final_decision"]["blockers"][0].startswith("submitted_job.")
+    assert batch_status["batch_final_decision"] == batch_status["daily_candidate_batch_final_decision"]
     assert batch_status["daily_candidate_final_report"]["kind"] == "ptcli.daily_candidate_final_report"
     assert batch_status["daily_candidate_final_report"]["verdict"] == "blocked"
     assert batch_status["daily_candidate_final_report"]["blockers"][0].startswith("submitted_job.")
@@ -17438,6 +17457,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert empty_batch["daily_candidate_batch_sequence"]["action"] == "create_daily_candidates"
     assert empty_batch["daily_candidate_batch_sequence"]["steps"][0]["tool"] == "daily_candidates_job"
     assert empty_batch["daily_candidate_batch_sequence"]["loop_control"]["should_refill"] is True
+    assert empty_batch["daily_candidate_batch_final_decision"]["action"] == "create_daily_candidates"
+    assert empty_batch["daily_candidate_batch_final_decision"]["recommended_tool"] == "daily_candidates_job"
+    assert empty_batch["daily_candidate_batch_final_decision"]["safe_to_call_now"] is True
     assert empty_batch["daily_candidate_batch_sequence"]["loop_control"]["after_step"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert empty_batch["daily_candidate_approval_sequence"]["action"] == "create_daily_candidates"
     assert empty_batch["daily_candidate_approval_sequence"]["steps"][0]["tool"] == "daily_candidates_job"
@@ -23711,10 +23733,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_batch_next_call" in batch_status_schema["properties"]
     assert "daily_candidate_submission_gate" in batch_status_schema["properties"]
     assert "daily_candidate_approval_final_report" in batch_status_schema["properties"]
+    assert "daily_candidate_batch_final_decision" in batch_status_schema["properties"]
     assert "daily_candidate_refill_plan" in batch_status_schema["properties"]
     assert "daily_candidate_batch_sequence" in batch_status_schema["properties"]
     assert "daily_candidate_approval_sequence" in batch_status_schema["properties"]
     assert "next_call" in batch_status_schema["properties"]
+    assert "batch_final_decision" in batch_status_schema["properties"]
     assert "batch_sequence" in batch_status_schema["properties"]
     assert "batch_summary" in batch_status_schema["properties"]
     assert "batch_gate" in batch_status_schema["properties"]
@@ -23730,6 +23754,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_batch_next_call" in job_list_schema["properties"]
     assert "daily_candidate_submission_gate" in job_list_schema["properties"]
     assert "daily_candidate_approval_final_report" in job_list_schema["properties"]
+    assert "daily_candidate_batch_final_decision" in job_list_schema["properties"]
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "job_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_submission" in job_list_schema["properties"]["jobs"]["items"]["properties"]
@@ -25238,6 +25263,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "ready_shortfall_count" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_fulfillment_report_fields"]
         assert "daily_candidate_batch_next_call" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "daily_candidate_submission_gate" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "daily_candidate_batch_final_decision" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "daily_candidate_batch_final_decision_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_final_decision_fields"]
+        assert "requires_user_review" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_final_decision_fields"]
         assert "daily_candidate_batch_next_call_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_submission_gate_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_batch_publish_payload_fields" in tools_by_name["list_jobs"]["response_contract"]
@@ -25263,6 +25292,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_batch_next_call" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
         assert "daily_candidate_submission_gate" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
         assert "submission_gate" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+        assert "daily_candidate_batch_final_decision" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+        assert "batch_final_decision" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+        assert "daily_candidate_batch_final_decision_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "daily_candidate_batch_next_call_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "daily_candidate_submission_gate_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "approval" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_gate_fields"]
