@@ -17517,6 +17517,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert batch_status["daily_candidate_batch_final_decision"]["safe_to_call_now"] is False
     assert batch_status["daily_candidate_batch_final_decision"]["blockers"][0].startswith("submitted_job.")
     assert batch_status["batch_final_decision"] == batch_status["daily_candidate_batch_final_decision"]
+    assert batch_status["daily_candidate_completion_final_decision"]["kind"] == "ptcli.daily_candidate_completion_final_decision"
+    assert batch_status["daily_candidate_completion_final_decision"]["action"] == "continue_submitted_job"
+    assert batch_status["daily_candidate_completion_final_decision"]["status"] == "blocked"
+    assert batch_status["completion_final_decision"] == batch_status["daily_candidate_completion_final_decision"]
     assert batch_status["daily_candidate_final_report"]["kind"] == "ptcli.daily_candidate_final_report"
     assert batch_status["daily_candidate_final_report"]["verdict"] == "blocked"
     assert batch_status["daily_candidate_final_report"]["blockers"][0].startswith("submitted_job.")
@@ -18037,6 +18041,10 @@ def test_daily_candidate_final_report_exposes_completion_evidence() -> None:
     assert completion_gate["action"] == "report_complete"
     assert completion_gate["progress"]["complete"] == "1/1"
     assert completion_gate["recommended_tool"] == "get_job_summary"
+    submitted_report = ptcli_service._daily_candidate_submitted_jobs_report(
+        {"action": "complete", "submitted_jobs": [complete_job], "complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": [], "remaining_submit_count": 0},
+        completion_gate,
+    )
     publish_payload = ptcli_service._daily_candidate_batch_publish_payload(
         {"blockers": []},
         {"approval_items": []},
@@ -18054,6 +18062,23 @@ def test_daily_candidate_final_report_exposes_completion_evidence() -> None:
     assert "summary_endpoint.target_upload_handoff.uploaded_seeding_evidence" in publish_payload["completion_items"][0]["evidence_refs"]
     assert publish_payload["top_completion"] == publish_payload["completion_items"][0]
     assert publish_payload["publish_contract"]["safe_to_publish_without_tracker_mutation"] is True
+    completion_decision = ptcli_service._daily_candidate_completion_final_decision(
+        completion_gate,
+        submitted_report,
+        {"kind": "ptcli.daily_candidate_batch_final_decision", "action": "report_complete", "blockers": []},
+        report,
+        publish_payload,
+        {"action": "complete", "complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": [], "remaining_submit_count": 0},
+    )
+    assert completion_decision["kind"] == "ptcli.daily_candidate_completion_final_decision"
+    assert completion_decision["action"] == "report_complete"
+    assert completion_decision["status"] == "complete"
+    assert completion_decision["report_allowed"] is True
+    assert completion_decision["target"]["complete"] is True
+    assert completion_decision["recommended_tool"] == "get_job_summary"
+    assert completion_decision["safe_to_call_now"] is True
+    assert completion_decision["requires_user_review"] is False
+    assert completion_decision["safety"]["reporting_does_not_upload"] is True
 
 
 def test_daily_candidate_completion_report_blocks_when_submitted_job_is_blocked() -> None:
@@ -22445,12 +22470,18 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_completion_gate_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "complete" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
     assert "refill_handoff" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
+    assert "daily_candidate_completion_final_decision" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "daily_candidate_completion_final_decision_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_final_decision_fields"]
     assert "daily_candidate_completion_refill_handoff_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "followup" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_refill_handoff_fields"]
     assert "daily_candidate_refill_followup_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "completion_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "daily_candidate_completion_gate_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "completion_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+    assert "daily_candidate_completion_final_decision" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "completion_final_decision" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "daily_candidate_completion_final_decision_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "daily_candidate_completion_refill_handoff_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "daily_candidate_refill_followup_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -23875,6 +23906,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_submission_gate" in batch_status_schema["properties"]
     assert "daily_candidate_approval_final_report" in batch_status_schema["properties"]
     assert "daily_candidate_batch_final_decision" in batch_status_schema["properties"]
+    assert "daily_candidate_completion_final_decision" in batch_status_schema["properties"]
     assert "daily_candidate_refill_plan" in batch_status_schema["properties"]
     assert "daily_candidate_batch_sequence" in batch_status_schema["properties"]
     assert "daily_candidate_approval_sequence" in batch_status_schema["properties"]
@@ -23889,6 +23921,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "approval_sequence" in batch_status_schema["properties"]
     assert "submission_gate" in batch_status_schema["properties"]
     assert "approval_final_report" in batch_status_schema["properties"]
+    assert "completion_final_decision" in batch_status_schema["properties"]
     job_list_schema = openapi["paths"]["/v1/jobs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "jobs" in job_list_schema["properties"]
     assert "daily_candidate_batch_publish_payload" in job_list_schema["properties"]
@@ -23896,6 +23929,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_submission_gate" in job_list_schema["properties"]
     assert "daily_candidate_approval_final_report" in job_list_schema["properties"]
     assert "daily_candidate_batch_final_decision" in job_list_schema["properties"]
+    assert "daily_candidate_completion_final_decision" in job_list_schema["properties"]
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "job_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_submission" in job_list_schema["properties"]["jobs"]["items"]["properties"]
@@ -25439,6 +25473,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_batch_final_decision_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "safe_to_call_now" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_final_decision_fields"]
         assert "requires_user_review" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_final_decision_fields"]
+        assert "daily_candidate_completion_final_decision" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "daily_candidate_completion_final_decision_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_final_decision_fields"]
         assert "daily_candidate_batch_next_call_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_submission_gate_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_batch_publish_payload_fields" in tools_by_name["list_jobs"]["response_contract"]
@@ -25466,6 +25503,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submission_gate" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
         assert "daily_candidate_batch_final_decision" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
         assert "batch_final_decision" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+        assert "daily_candidate_completion_final_decision" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+        assert "completion_final_decision" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+        assert "daily_candidate_completion_final_decision_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "daily_candidate_batch_final_decision_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "daily_candidate_batch_next_call_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "daily_candidate_submission_gate_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
