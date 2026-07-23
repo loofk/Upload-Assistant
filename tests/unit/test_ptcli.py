@@ -13465,6 +13465,12 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["job_handoff"]["recommended_call"]["request"] is None
     assert job["job_handoff"]["recommended_call"]["action"] == "wait"
     assert job["job_handoff"]["recommended_call"]["requires_user_review"] is False
+    assert job["job_handoff"]["recommended_call"]["read_only"] is True
+    assert job["job_handoff"]["recommended_call"]["dry_run"] is False
+    assert job["job_handoff"]["recommended_call"]["mutates_state"] is False
+    assert job["job_handoff"]["recommended_call"]["uploads"] is False
+    assert job["job_handoff"]["recommended_call"]["contacts_trackers"] is False
+    assert job["job_handoff"]["recommended_call"]["contacts_qbittorrent"] is False
     assert job["job_handoff"]["recommended_call"]["gates"]["dry_run_preview"] is False
     assert job["job_handoff"]["recommended_call"]["gates"]["requires_rules"] is False
     assert job["job_handoff"]["recommended_call"]["gates"]["safe_to_call_now"] is True
@@ -14094,6 +14100,12 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["job_handoff"]["recommended_call"]["dry_run_request"] == job["resume_requirements"]["dry_run_request"]
     assert job["job_handoff"]["recommended_call"]["execute_request"] == job["resume_requirements"]["execute_request"]
     assert job["job_handoff"]["recommended_call"]["requires_user_review"] is True
+    assert job["job_handoff"]["recommended_call"]["read_only"] is False
+    assert job["job_handoff"]["recommended_call"]["dry_run"] is True
+    assert job["job_handoff"]["recommended_call"]["mutates_state"] is False
+    assert job["job_handoff"]["recommended_call"]["uploads"] is False
+    assert job["job_handoff"]["recommended_call"]["contacts_trackers"] is False
+    assert job["job_handoff"]["recommended_call"]["contacts_qbittorrent"] is False
     assert job["job_handoff"]["recommended_call"]["gates"]["dry_run_preview"] is True
     assert job["job_handoff"]["recommended_call"]["gates"]["execute_available"] is True
     assert job["job_handoff"]["recommended_call"]["gates"]["requires_rules"] is True
@@ -21383,6 +21395,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_apply_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "verification" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_config_apply_handoff_fields"]
     assert "policy_runtime_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+    for field in ("read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent"):
+        assert field in tool_by_name["manual_retorrent_job"]["response_contract"]["recommended_call_fields"]
     assert "policy_runtime_contract" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_application_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_runtime_contract" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
@@ -23881,6 +23895,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_defaults_application_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
         assert "qbit_defaults_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
         assert "qbit_defaults_blockers" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+        for field in ("read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent"):
+            assert field in tools_by_name["manual_retorrent_job"]["response_contract"]["recommended_call_fields"]
         assert "policy_execution_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]

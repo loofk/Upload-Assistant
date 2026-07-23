@@ -16559,6 +16559,8 @@ def _job_handoff_recommended_call(
     request_value = request if isinstance(request, dict) else None
     gates = _job_handoff_recommended_call_gates(action, request_value, dry_run_request, execute_request)
     safety = _job_handoff_recommended_call_safety(gates, stop_when)
+    method_value = str(method or ("GET" if str(endpoint).endswith("/summary") or action == "wait" else "POST"))
+    side_effects = _job_recommended_call_side_effects(tool, method_value, request_value, action)
     if not tool or not endpoint:
         return {
             "ready": False,
@@ -16569,6 +16571,7 @@ def _job_handoff_recommended_call(
             "request": None,
             "action": action,
             "status": status,
+            **side_effects,
             "dry_run_request": dry_run_request,
             "execute_request": execute_request,
             "requires_user_review": requires_user_review,
@@ -16576,7 +16579,6 @@ def _job_handoff_recommended_call(
             "safety": safety,
             "stop_when": stop_when,
         }
-    method_value = str(method or ("GET" if str(endpoint).endswith("/summary") or action == "wait" else "POST"))
     return {
         "ready": True,
         "safe_to_call_now": bool(gates.get("safe_to_call_now")),
@@ -16586,12 +16588,33 @@ def _job_handoff_recommended_call(
         "request": request_value,
         "action": action,
         "status": status,
+        **side_effects,
         "dry_run_request": dry_run_request,
         "execute_request": execute_request,
         "requires_user_review": requires_user_review,
         "gates": gates,
         "safety": safety,
         "stop_when": stop_when,
+    }
+
+
+def _job_recommended_call_side_effects(tool: Any, method: Any, request: dict[str, Any] | None, action: str) -> dict[str, bool]:
+    is_dry_run = isinstance(request, dict) and request.get("dry_run") is True
+    method_value = str(method or "").upper()
+    mutates_state = method_value == "POST" and not is_dry_run and action not in {"inspect", "read_summary", "done", "stop", "wait", "poll"}
+    uploads = mutates_state and (
+        tool in {"resume_job", "source_url_retorrent_job", "source_url_check_and_submit", "manual_retorrent_job", "target_upload", "target_upload_job"}
+        or action in {"target_upload_closure", "submit_if_clear", "execute_resume"}
+    )
+    contacts_trackers = uploads or (mutates_state and tool not in {"get_job_status", "get_job_summary", "daily_candidate_delivery"})
+    contacts_qbittorrent = uploads or (mutates_state and tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "source_url_check_and_submit", "qbit_inject_torrent", "qbit_wait_complete"})
+    return {
+        "read_only": method_value == "GET",
+        "dry_run": is_dry_run,
+        "mutates_state": mutates_state,
+        "uploads": uploads,
+        "contacts_trackers": contacts_trackers,
+        "contacts_qbittorrent": contacts_qbittorrent,
     }
 
 
@@ -16692,8 +16715,7 @@ def _job_next_call(job: dict[str, Any], payload: dict[str, Any] | None = None) -
     requires_user_review = bool(recommended_call.get("requires_user_review") if "requires_user_review" in recommended_call else action not in {"poll", "read_summary", "done", "wait", "stop"})
     is_dry_run = isinstance(request, dict) and request.get("dry_run") is True
     method_value = str(method or "").upper()
-    mutates_state = method_value == "POST" and not is_dry_run and action not in {"inspect", "read_summary", "done", "stop"}
-    uploads = mutates_state and (tool in {"resume_job", "source_url_retorrent_job", "source_url_check_and_submit", "manual_retorrent_job", "target_upload", "target_upload_job"} or action in {"target_upload_closure", "submit_if_clear", "execute_resume"})
+    side_effects = _job_recommended_call_side_effects(tool, method_value, request if isinstance(request, dict) else None, action)
     return {
         "kind": "ptcli.job_next_call",
         "ready": bool(tool and endpoint),
@@ -16708,10 +16730,10 @@ def _job_next_call(job: dict[str, Any], payload: dict[str, Any] | None = None) -
         "execute_request": execute_request,
         "safe_to_call_now": safe_to_call_now,
         "requires_user_review": requires_user_review,
-        "mutates_state": mutates_state,
-        "uploads": uploads,
-        "contacts_trackers": uploads or (mutates_state and tool not in {"get_job_status", "get_job_summary", "daily_candidate_delivery"}),
-        "contacts_qbittorrent": uploads or (mutates_state and tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "source_url_check_and_submit", "qbit_inject_torrent", "qbit_wait_complete"}),
+        "mutates_state": side_effects["mutates_state"],
+        "uploads": side_effects["uploads"],
+        "contacts_trackers": side_effects["contacts_trackers"],
+        "contacts_qbittorrent": side_effects["contacts_qbittorrent"],
         "reason": _job_next_call_reason(action, status, safe_to_call_now, requires_user_review),
         "status_endpoint": runtime.get("status_endpoint"),
         "summary_endpoint": runtime.get("summary_endpoint"),
@@ -35154,7 +35176,7 @@ def _job_response_contract() -> dict[str, Any]:
         "job_progress_handoff_fields": ["ready", "action", "progress", "current_stage", "stages", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "job_progress_stage_fields": ["name", "label", "ready", "blocked", "recommended_tool", "evidence", "blockers"],
         "job_control_summary_source_fields": ["job_handoff_action", "recovery_action", "recovery_phase", "completion_status", "closure_action", "closure_complete"],
-        "recommended_call_fields": ["ready", "safe_to_call_now", "tool", "endpoint", "method", "request", "action", "status", "dry_run_request", "execute_request", "requires_user_review", "gates", "safety", "stop_when"],
+        "recommended_call_fields": ["ready", "safe_to_call_now", "tool", "endpoint", "method", "request", "action", "status", "read_only", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "dry_run_request", "execute_request", "requires_user_review", "gates", "safety", "stop_when"],
         "recommended_call_gate_fields": ["dry_run_preview", "execute_available", "requires_rules", "requires_upload_confirmation", "accept_rules_present", "confirm_upload_present", "live_execute_requested", "safe_to_call_now", "missing"],
         "recovery_actions": ["poll", "preview_resume", "execute_resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_target_payload", "repair_qbit", "repair_policy_application", "configure_policy", "read_summary", "stop_duplicate", "stop_cancelled", "failed", "resolve_blockers", "inspect"],
         "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "policy_application_report", "policy_config_apply_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
