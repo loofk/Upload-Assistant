@@ -34984,6 +34984,7 @@ def _goal_progress_live_validation_preflight(request: dict[str, Any], live_valid
     validation_summary = readiness.get("live_validation_summary") if isinstance(readiness.get("live_validation_summary"), dict) else {}
     validation_sequence = readiness.get("live_validation_sequence") if isinstance(readiness.get("live_validation_sequence"), dict) else {}
     runbook_final_report = readiness.get("seedbox_live_runbook_final_report") if isinstance(readiness.get("seedbox_live_runbook_final_report"), dict) else {}
+    post_submit_report = readiness.get("seedbox_live_post_submit_report") if isinstance(readiness.get("seedbox_live_post_submit_report"), dict) else {}
     next_step = repair_plan.get("next_step") if isinstance(repair_plan.get("next_step"), dict) else validation_summary.get("next_step") if isinstance(validation_summary.get("next_step"), dict) else {}
     ready = bool(live_execution_package.get("ready") or repair_plan.get("ready") or validation_report.get("ready"))
     return {
@@ -34999,12 +35000,13 @@ def _goal_progress_live_validation_preflight(request: dict[str, Any], live_valid
         "live_validation_summary": validation_summary,
         "live_validation_sequence": validation_sequence,
         "seedbox_live_runbook_final_report": runbook_final_report,
+        "seedbox_live_post_submit_report": post_submit_report,
         "next_step": next_step or None,
         "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
         "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
         "recommended_method": next_step.get("method") if isinstance(next_step, dict) else None,
         "recommended_request": next_step.get("request") if isinstance(next_step, dict) else None,
-        "read_order": ["goal_live_validation_preflight", "seedbox_live_runbook_final_report", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_sequence"],
+        "read_order": ["goal_live_validation_preflight", "seedbox_live_runbook_final_report", "seedbox_live_post_submit_report", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_sequence"],
         "blockers": _string_list(readiness.get("blockers")) + _string_list(repair_plan.get("blockers")) + _string_list(validation_report.get("blockers")),
         "next_actions": _goal_progress_live_validation_preflight_next_actions(ready, next_step, repair_plan, live_execution_package),
     }
@@ -37648,7 +37650,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-                "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "seedbox_live_runbook_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
+                "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "seedbox_live_runbook_final_report", "seedbox_live_post_submit_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },
             "workflow_hints": {"read_first": "goal_distance_report", "then": "critical_path_plan", "repair_with": "goal_distance_report.recommended_call"},

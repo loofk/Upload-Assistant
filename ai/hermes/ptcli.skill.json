@@ -47807,6 +47807,7 @@
           "live_validation_summary",
           "live_validation_sequence",
           "seedbox_live_runbook_final_report",
+          "seedbox_live_post_submit_report",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",

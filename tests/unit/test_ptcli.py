@@ -22807,6 +22807,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_lifecycle_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_preflight_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "live_execution_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+    assert "seedbox_live_post_submit_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "recommended_request" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "request" in tool_by_name["goal_progress"]["response_contract"]["next_step_fields"]
     assert "ready_to_submit" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
@@ -23876,6 +23877,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "policy_runtime_contract" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "live_validation_preflight" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "live_validation_preflight_fields" in goal_progress_tool["response_contract"]
+    assert "seedbox_live_post_submit_report" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
@@ -23983,6 +23985,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_runtime_contract" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "seedbox_live_post_submit_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "rule_review_package" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
@@ -26233,6 +26236,11 @@ services:
     assert preflight["ready"] is True
     assert preflight["live_execution_package"]["ready"] is True
     assert preflight["live_validation_repair_plan"]["ready"] is True
+    assert preflight["seedbox_live_post_submit_report"]["kind"] == "ptcli.seedbox_live_post_submit_report"
+    assert preflight["seedbox_live_post_submit_report"]["ready"] is True
+    assert preflight["seedbox_live_post_submit_report"]["submit"]["tool"] == "source_url_check_and_submit"
+    assert preflight["seedbox_live_post_submit_report"]["finish"]["final_report_field"] == "live_validation_completion_audit"
+    assert "seedbox_live_post_submit_report" in preflight["read_order"]
     assert preflight["next_step"]["tool"] == "ptcli_doctor"
     assert preflight["next_step"]["request"]["argv"] == preflight["live_execution_package"]["steps"][0]["request"]["argv"]
     assert adapters["requested_trackers"] == ["U2", "MTEAM"]
