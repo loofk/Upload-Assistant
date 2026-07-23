@@ -21398,6 +21398,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["agent_smoke"]["safety"]["does_not_contact_trackers"] is True
     assert "run_order" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "manifest" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "agent_manifest_readiness_report" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
+    assert "agent_manifest_readiness_report_fields" in tool_by_name["agent_smoke"]["response_contract"]
+    assert "openclaw_skill_url" in tool_by_name["agent_smoke"]["response_contract"]["agent_manifest_readiness_report_fields"]
+    assert "hermes_skill_url" in tool_by_name["agent_smoke"]["response_contract"]["agent_manifest_readiness_report_fields"]
     assert "deployment" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert "readiness" in tool_by_name["agent_smoke"]["response_contract"]["required_fields"]
     assert tool_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
@@ -23657,12 +23661,20 @@ def test_agent_smoke_exposes_post_deploy_handoff(tmp_path) -> None:
     assert payload["tools"]["missing"] == []
     assert payload["manifest"]["ready"] is True
     assert payload["manifest"]["paths"]["well_known"] == "http://ptcli.local:8080/.well-known/ptcli-agent.json"
+    manifest_report = payload["agent_manifest_readiness_report"]
+    assert manifest_report["kind"] == "ptcli.agent_manifest_readiness_report"
+    assert manifest_report["ready"] is True
+    assert manifest_report["openclaw_skill_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
+    assert manifest_report["hermes_skill_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
+    assert manifest_report["recommended_call"]["endpoint"] == "/.well-known/ptcli-agent.json"
     assert [step["step"] for step in payload["run_order"]] == ["health", "tools", "manifest", "deployment", "readiness", "goal_progress"]
     assert payload["recommended_call"]["tool"] == "deployment_check"
     assert payload["recommended_endpoint"] == "/v1/deployment/check"
     assert payload["safety"]["does_not_contact_trackers"] is True
     assert payload["safety"]["does_not_contact_qbittorrent"] is True
     assert any(check["name"] == "deployment.final_report" for check in payload["checks"])
+    assert any(check["name"] == "manifest.discovery" and check["details"]["kind"] == "ptcli.agent_manifest_readiness_report" for check in payload["checks"])
+    assert "agent_manifest_readiness_report" in payload["read_order"]
     assert "deployment.deployment_final_report" in payload["read_order"]
 
 
@@ -23980,6 +23992,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "python_update_snippet" in tools_by_name["site_policy_rule_review"]["response_contract"]["copyable_config_fields"]
         assert tools_by_name["agent_smoke"]["path"] == "/v1/agent/smoke"
         assert "run_order" in tools_by_name["agent_smoke"]["response_contract"]["required_fields"]
+        assert "agent_manifest_readiness_report" in tools_by_name["agent_smoke"]["response_contract"]["required_fields"]
+        assert "agent_manifest_readiness_report_fields" in tools_by_name["agent_smoke"]["response_contract"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]

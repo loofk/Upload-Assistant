@@ -106,7 +106,7 @@ curl http://127.0.0.1:8080/.well-known/ptcli-agent.json
 curl http://127.0.0.1:8080/v1/openclaw/skill.json
 curl http://127.0.0.1:8080/v1/hermes/skill.json
 
-# 部署后 AI smoke：不联系站点/qBittorrent，聚合 health、tools、manifest、deployment、readiness 和 goal_progress
+# 部署后 AI smoke：不联系站点/qBittorrent，聚合 health、tools、manifest、agent_manifest_readiness_report、deployment、readiness 和 goal_progress
 curl "http://127.0.0.1:8080/v1/agent/smoke?source_url=https%3A%2F%2Fu2.dmhy.org%2Fdetails.php%3Fid%3D60635&target=MTEAM&save_path=/downloads"
 
 # AI 工作流预演：不联系站点/qBittorrent，不创建 job，只输出工具顺序、请求模板和 closure_handoff 处理规则

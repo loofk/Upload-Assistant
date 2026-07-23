@@ -32527,7 +32527,8 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
     readiness = readiness_bundle_payload(request)
     goal_progress = goal_progress_payload(request)
     manifest_summary = _agent_smoke_manifest_summary(base_url)
-    checks = _agent_smoke_checks(health, missing_tools, manifest_summary, deployment, readiness, goal_progress)
+    agent_manifest_readiness_report = _agent_smoke_manifest_readiness_report(manifest_summary)
+    checks = _agent_smoke_checks(health, missing_tools, agent_manifest_readiness_report, deployment, readiness, goal_progress)
     blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
     warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
     recommended_call = _agent_smoke_recommended_call(blockers, readiness, goal_progress, request)
@@ -32550,6 +32551,7 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
             "key_endpoints": _agent_smoke_key_endpoints(tools),
         },
         "manifest": manifest_summary,
+        "agent_manifest_readiness_report": agent_manifest_readiness_report,
         "deployment": {
             "ready": deployment.get("ready") is True,
             "status": deployment.get("status"),
@@ -32576,9 +32578,9 @@ def agent_smoke_payload(request: dict[str, Any] | None = None, *, base_url: str 
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_method": recommended_call.get("method"),
         "recommended_request": recommended_call.get("request"),
-        "read_order": ["agent_smoke", "deployment.deployment_final_report", "readiness.seedbox_live_runbook_final_report", "goal_progress.goal_distance_report"],
-        "complete_when": ["agent_smoke.ready=true", "deployment.deployment_final_report.ready=true", "readiness.seedbox_live_runbook_final_report.ready=true for live validation input"],
-        "stop_when": ["agent_smoke.blockers is non-empty", "deployment.deployment_final_report.blockers is non-empty", "readiness.seedbox_live_runbook_final_report.blockers is non-empty before live tracker action"],
+        "read_order": ["agent_smoke", "agent_manifest_readiness_report", "deployment.deployment_final_report", "readiness.seedbox_live_runbook_final_report", "goal_progress.goal_distance_report"],
+        "complete_when": ["agent_smoke.ready=true", "agent_manifest_readiness_report.ready=true", "deployment.deployment_final_report.ready=true", "readiness.seedbox_live_runbook_final_report.ready=true for live validation input"],
+        "stop_when": ["agent_smoke.blockers is non-empty", "agent_manifest_readiness_report.blockers is non-empty", "deployment.deployment_final_report.blockers is non-empty", "readiness.seedbox_live_runbook_final_report.blockers is non-empty before live tracker action"],
         "safety": {
             "does_not_contact_trackers": True,
             "does_not_contact_qbittorrent": True,
@@ -32613,6 +32615,64 @@ def _agent_smoke_manifest_summary(base_url: str) -> dict[str, Any]:
     }
 
 
+def _agent_smoke_manifest_readiness_report(manifest: dict[str, Any]) -> dict[str, Any]:
+    paths = manifest.get("paths") if isinstance(manifest.get("paths"), dict) else {}
+    required_paths = ["well_known", "openclaw", "hermes", "openapi", "tools"]
+    missing_paths = [name for name in required_paths if not paths.get(name)]
+    tool_count = int(manifest.get("tool_count") or 0)
+    workflow_count = int(manifest.get("workflow_count") or 0)
+    blockers = list(missing_paths)
+    if tool_count <= 0:
+        blockers.append("tool_count=0")
+    if workflow_count <= 0:
+        blockers.append("workflow_count=0")
+    ready = bool(manifest.get("ready")) and not blockers
+    recommended_call = {
+        "tool": "agent_manifest" if ready else "agent_smoke",
+        "endpoint": "/.well-known/ptcli-agent.json" if ready else "/v1/agent/smoke",
+        "method": "GET",
+        "request": None,
+        "safe_to_call_now": True,
+        "requires_user_review": False,
+        "reason": "read_ai_skill_manifest" if ready else "repair_agent_manifest_discovery",
+    }
+    return {
+        "kind": "ptcli.agent_manifest_readiness_report",
+        "ready": ready,
+        "report_allowed": ready,
+        "status": "ready" if ready else "blocked",
+        "manifest_ready": bool(manifest.get("ready")),
+        "schema_version": manifest.get("schema_version"),
+        "base_url": manifest.get("base_url"),
+        "required_paths": required_paths,
+        "paths": paths,
+        "missing_paths": missing_paths,
+        "tool_count": tool_count,
+        "workflow_count": workflow_count,
+        "openclaw_skill_url": paths.get("openclaw"),
+        "hermes_skill_url": paths.get("hermes"),
+        "well_known_url": paths.get("well_known"),
+        "openapi_url": paths.get("openapi"),
+        "tools_url": paths.get("tools"),
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call["tool"],
+        "recommended_endpoint": recommended_call["endpoint"],
+        "recommended_method": recommended_call["method"],
+        "recommended_request": recommended_call["request"],
+        "read_order": ["agent_manifest_readiness_report", "manifest.paths", "manifest.tool_count", "manifest.workflow_count"],
+        "complete_when": ["agent_manifest_readiness_report.ready=true", "openclaw_skill_url is present", "hermes_skill_url is present", "openapi_url is present", "tools_url is present"],
+        "stop_when": ["agent_manifest_readiness_report.blockers is non-empty"],
+        "safety": {
+            "read_only": True,
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "does_not_upload": True,
+        },
+        "blockers": blockers,
+        "next_actions": ["Read agent_manifest_readiness_report.recommended_call, then continue with deployment_check/readiness_bundle."] if ready else ["Repair agent manifest discovery, then rerun agent_smoke."],
+    }
+
+
 def _agent_smoke_key_endpoints(tools: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     key_names = {"agent_smoke", "deployment_check", "readiness_bundle", "goal_progress", "source_url_check_and_submit", "daily_candidate_run_and_deliver", "submit_daily_candidate_job", "get_job_status", "get_job_summary", "resume_job"}
     return {
@@ -32626,7 +32686,7 @@ def _agent_smoke_checks(health: dict[str, Any], missing_tools: list[str], manife
     return [
         {"name": "health", "ok": health.get("status") == "ok", "message": "ptcli service health endpoint is alive."},
         {"name": "tools.required", "ok": not missing_tools, "message": "Required AI tools are present." if not missing_tools else f"Missing required AI tools: {', '.join(missing_tools)}"},
-        {"name": "manifest.discovery", "ok": manifest.get("ready") is True, "message": "Agent manifest discovery is ready." if manifest.get("ready") is True else "Agent manifest discovery is incomplete."},
+        {"name": "manifest.discovery", "ok": manifest.get("ready") is True, "message": "Agent manifest discovery is ready." if manifest.get("ready") is True else "Agent manifest discovery is incomplete.", "details": manifest},
         {"name": "deployment.final_report", "ok": deployment.get("ready") is True, "message": "Deployment final report is ready." if deployment.get("ready") is True else "Deployment final report is blocked.", "details": deployment.get("deployment_final_report")},
         {"name": "readiness.bundle", "ok": readiness.get("ready") is True, "blocking": False, "message": "Readiness bundle is ready for the supplied live request." if readiness.get("ready") is True else "Readiness bundle needs live request/config input before first live validation.", "details": readiness.get("seedbox_live_runbook_final_report")},
         {"name": "goal.progress", "ok": goal_progress.get("status") == "ok", "blocking": False, "message": "Goal progress endpoint is readable.", "details": goal_progress.get("goal_distance_report")},
@@ -38278,9 +38338,10 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
 
 def _agent_smoke_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "base_url", "request", "health", "tools", "manifest", "deployment", "readiness", "goal_progress", "run_order", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "checks", "blockers", "warnings", "next_actions"],
+        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "base_url", "request", "health", "tools", "manifest", "agent_manifest_readiness_report", "deployment", "readiness", "goal_progress", "run_order", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "checks", "blockers", "warnings", "next_actions"],
         "tool_fields": ["count", "required", "missing", "key_endpoints"],
         "manifest_fields": ["ready", "schema_version", "base_url", "paths", "tool_count", "workflow_count", "required_first_read"],
+        "agent_manifest_readiness_report_fields": ["ready", "report_allowed", "status", "manifest_ready", "schema_version", "base_url", "required_paths", "paths", "missing_paths", "tool_count", "workflow_count", "openclaw_skill_url", "hermes_skill_url", "well_known_url", "openapi_url", "tools_url", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "deployment_fields": ["ready", "status", "deployment_final_report", "agent_handoff", "seedbox_bootstrap_handoff"],
         "readiness_fields": ["ready", "status", "next_call", "seedbox_live_runbook_final_report", "live_execution_package"],
         "goal_progress_fields": ["status", "completion_estimate", "goal_distance_report", "next_step"],
@@ -40371,6 +40432,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "health": {"type": "object"},
             "tools": {"type": "object"},
             "manifest": {"type": "object"},
+            "agent_manifest_readiness_report": {"type": "object"},
             "deployment": {"type": "object"},
             "readiness": {"type": "object"},
             "goal_progress": {"type": "object"},
