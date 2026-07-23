@@ -242,7 +242,8 @@
       "qbit_match"
     ],
     "qbit_mutations": [
-      "qbit_inject_torrent"
+      "qbit_inject_torrent",
+      "qbit_apply_limits"
     ]
   },
   "closure_contract": {
@@ -24160,6 +24161,156 @@
       }
     },
     {
+      "name": "qbit_apply_limits",
+      "method": "POST",
+      "path": "/v1/qbit/limits",
+      "description": "Dry-run or apply qBittorrent upload/download limits to an existing torrent hash. Limits may be explicit or resolved from PTCLI.SITE_POLICIES by tracker and role. This never uploads to a tracker.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "hash"
+        ],
+        "properties": {
+          "client": {
+            "type": "string",
+            "default": "default"
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "hash": {
+            "type": "string",
+            "description": "Existing qBittorrent torrent hash/infohash to update."
+          },
+          "torrent_hash": {
+            "type": "string",
+            "description": "Alias for hash."
+          },
+          "infohash": {
+            "type": "string",
+            "description": "Alias for hash."
+          },
+          "tracker": {
+            "type": "string",
+            "description": "Optional tracker whose PTCLI.SITE_POLICIES limits should be used."
+          },
+          "site": {
+            "type": "string",
+            "description": "Alias for tracker."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "source",
+              "target",
+              "uploaded"
+            ],
+            "default": "source"
+          },
+          "upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Optional explicit upload limit, e.g. 2MiB/s or bytes per second."
+          },
+          "download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Optional explicit download limit, e.g. 20MiB/s or bytes per second."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": true,
+            "description": "Defaults true; set false explicitly to mutate qBittorrent."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "dry_run",
+          "mutates_qbittorrent",
+          "live_upload",
+          "client",
+          "request",
+          "hash",
+          "tracker",
+          "role",
+          "site_policy",
+          "qbit_limits",
+          "rate_limits",
+          "visible_before",
+          "visible_after",
+          "before",
+          "after",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_limit_fields": [
+          "download_limit",
+          "upload_limit",
+          "download_limit_human",
+          "upload_limit_human",
+          "download_limit_source",
+          "upload_limit_source",
+          "role",
+          "tracker",
+          "policy"
+        ],
+        "rate_limit_fields": [
+          "requested",
+          "applied",
+          "skipped",
+          "dry_run",
+          "calls"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "dry_run",
+          "mutates_qbittorrent",
+          "client",
+          "hash",
+          "tracker",
+          "role",
+          "upload_limit",
+          "download_limit",
+          "upload_limit_human",
+          "download_limit_human",
+          "upload_limit_source",
+          "download_limit_source",
+          "rate_limits_applied",
+          "call_count",
+          "blocker_count"
+        ],
+        "safety": [
+          "dry_run_by_default",
+          "may_change_qbittorrent_rate_limits",
+          "does_not_add_torrents",
+          "does_not_upload"
+        ]
+      },
+      "workflow_hints": {
+        "dry_run_first": true,
+        "verify_with": "qbit_inspect",
+        "used_by": "qbit_rate_limit_repair_plan"
+      },
+      "safety": {
+        "mutates_state": true,
+        "mutates_qbittorrent": true,
+        "writes_files": false,
+        "live_upload": false,
+        "requires_confirmation": [
+          "dry_run=false must be explicit before changing qBittorrent rate limits"
+        ]
+      }
+    },
+    {
       "name": "qbit_wait_complete",
       "method": "POST",
       "path": "/v1/qbit/wait",
@@ -46808,7 +46959,7 @@
       }
     }
   ],
-  "tool_count": 47,
+  "tool_count": 48,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

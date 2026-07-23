@@ -211,6 +211,33 @@ class QbitReadOnlyService:
             "client_matches": summaries_to_dicts(client_matches),
         }
 
+    async def apply_torrent_limits(
+        self,
+        torrent_hash: str,
+        *,
+        upload_limit: int | None = None,
+        download_limit: int | None = None,
+    ) -> dict[str, Any]:
+        safe_hash = _safe_hash(torrent_hash)
+        if upload_limit is not None and upload_limit < 0:
+            raise ValueError("upload_limit must be >= 0.")
+        if download_limit is not None and download_limit < 0:
+            raise ValueError("download_limit must be >= 0.")
+
+        before = await self.list_torrents(torrent_hash=safe_hash)
+        limit_result = await self._apply_torrent_limits(safe_hash, upload_limit=upload_limit, download_limit=download_limit)
+        after = await self.list_torrents(torrent_hash=safe_hash)
+        return {
+            "hash": safe_hash,
+            "upload_limit": upload_limit,
+            "download_limit": download_limit,
+            "rate_limits": limit_result,
+            "visible_before": bool(before),
+            "visible_after": bool(after),
+            "before": summaries_to_dicts(before),
+            "after": summaries_to_dicts(after),
+        }
+
     async def _wait_for_added_torrent(
         self,
         torrent_hash: str,

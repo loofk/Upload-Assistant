@@ -32,7 +32,7 @@ from src.ptcli.cli import target_upload_payload as cli_target_upload_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
-from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
+from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list
 from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
 from src.ptcli.policies import (
@@ -41,6 +41,7 @@ from src.ptcli.policies import (
     build_site_policy_config_audit,
     build_site_policy_coverage,
     build_site_policy_report,
+    merge_qbit_limits,
     parse_rate_limit,
     qbit_limits_for_tracker,
 )
@@ -860,6 +861,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
+            if path == "/v1/qbit/limits":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, asyncio.run(qbit_limits_payload(query)))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/deployment/check":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -952,6 +963,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/qbit/match": lambda payload: asyncio.run(qbit_match_payload(payload)),
                 "/v1/qbit/export": lambda payload: asyncio.run(qbit_export_payload(payload)),
                 "/v1/qbit/inject": lambda payload: asyncio.run(qbit_inject_payload(payload)),
+                "/v1/qbit/limits": lambda payload: asyncio.run(qbit_limits_payload(payload)),
                 "/v1/qbit/wait": lambda payload: asyncio.run(qbit_wait_payload(payload)),
                 "/v1/materials/prepare": lambda payload: asyncio.run(materials_prepare_payload(payload)),
                 "/v1/metadata/prepare": lambda payload: asyncio.run(metadata_prepare_payload(payload)),
@@ -4554,6 +4566,57 @@ async def qbit_inject_payload(request: dict[str, Any] | None = None) -> dict[str
         "agent_summary": _qbit_inject_agent_summary(result, context, blockers),
         "blockers": blockers,
         "next_actions": _qbit_inject_next_actions(blockers),
+    }
+
+
+async def qbit_limits_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Apply or dry-run qBittorrent rate limits for an existing torrent hash."""
+    request = request or {}
+    context = _qbit_limits_request_context(request)
+    config = load_config(context.get("config"))
+    policy_limits = qbit_limits_for_tracker(config, context["tracker"], role=context["policy_role"]) if context.get("tracker") else {"upload_limit": None, "download_limit": None}
+    qbit_limits = merge_qbit_limits(policy_limits, upload_limit=context.get("upload_limit"), download_limit=context.get("download_limit"))
+    requested_limits = {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}
+    blockers = _qbit_limits_request_blockers(requested_limits)
+    if blockers:
+        return _qbit_limits_blocked_payload(context, qbit_limits, blockers)
+    if context["dry_run"]:
+        return _qbit_limits_dry_run_payload(context, qbit_limits, requested_limits)
+
+    client_name, client_config = resolve_client_config(config, context["client"])
+    service = QbitReadOnlyService(client_config)
+    try:
+        result = await service.apply_torrent_limits(
+            context["hash"],
+            upload_limit=requested_limits["upload_limit"],
+            download_limit=requested_limits["download_limit"],
+        )
+    except ValueError as exc:
+        raise ServiceError(str(exc), status=HTTPStatus.BAD_REQUEST) from exc
+
+    execution_blockers = _qbit_limits_execution_blockers(result)
+    return {
+        "kind": "ptcli.qbit_limits",
+        "status": "ok" if not execution_blockers else "blocked",
+        "ok": not execution_blockers,
+        "dry_run": False,
+        "mutates_qbittorrent": True,
+        "live_upload": False,
+        "client": client_name,
+        "request": context,
+        "hash": result["hash"],
+        "tracker": context.get("tracker"),
+        "role": context.get("role"),
+        "site_policy": qbit_limits.get("policy"),
+        "qbit_limits": qbit_limits,
+        "rate_limits": result["rate_limits"],
+        "visible_before": result["visible_before"],
+        "visible_after": result["visible_after"],
+        "before": result["before"],
+        "after": result["after"],
+        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, result["rate_limits"], execution_blockers, dry_run=False),
+        "blockers": execution_blockers,
+        "next_actions": _qbit_limits_next_actions(execution_blockers, dry_run=False),
     }
 
 
@@ -8826,6 +8889,28 @@ def _qbit_inject_request_context(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _qbit_limits_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    torrent_hash = request.get("hash") or request.get("torrent_hash") or request.get("infohash")
+    if not torrent_hash or not str(torrent_hash).strip():
+        raise ServiceError("hash is required for qBittorrent rate-limit application.", status=HTTPStatus.BAD_REQUEST)
+    role = str(request.get("role") or "source").strip().lower()
+    if role not in {"source", "target", "uploaded"}:
+        raise ServiceError("role must be source, target, or uploaded.", status=HTTPStatus.BAD_REQUEST)
+    policy_role = "target" if role == "uploaded" else role
+    tracker = request.get("tracker") or request.get("site") or request.get("source_tracker") or request.get("target_tracker")
+    return {
+        "config": request.get("config"),
+        "client": str(request.get("client") or "default"),
+        "hash": str(torrent_hash).strip().lower(),
+        "tracker": normalize_tracker(str(tracker)) if tracker else None,
+        "role": role,
+        "policy_role": policy_role,
+        "upload_limit": _optional_rate_limit(request.get("upload_limit")),
+        "download_limit": _optional_rate_limit(request.get("download_limit")),
+        "dry_run": _truthy_default(request.get("dry_run"), True),
+    }
+
+
 def _qbit_wait_request_context(request: dict[str, Any]) -> dict[str, Any]:
     torrent_hash = request.get("hash") or request.get("torrent_hash") or request.get("infohash")
     path = request.get("path") or request.get("content_path")
@@ -9015,6 +9100,113 @@ def _qbit_inject_next_actions(blockers: list[str]) -> list[str]:
     if blockers:
         return ["Inspect client_verification and qbit_inspect the returned hash before continuing the retorrent closure."]
     return ["Use hash with qbit_wait_complete, qbit_inspect, or a retorrent resume step that needs qBittorrent evidence."]
+
+
+def _qbit_limits_request_blockers(requested_limits: dict[str, Any]) -> list[str]:
+    if requested_limits.get("upload_limit") is None and requested_limits.get("download_limit") is None:
+        return ["No qBittorrent upload_limit or download_limit was supplied or resolved from site policy."]
+    return []
+
+
+def _qbit_limits_execution_blockers(result: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if not result.get("visible_before"):
+        blockers.append("Torrent hash was not visible in qBittorrent before applying rate limits.")
+    if not result.get("visible_after"):
+        blockers.append("Torrent hash is not visible in qBittorrent after applying rate limits.")
+    rate_limits = result.get("rate_limits") if isinstance(result.get("rate_limits"), dict) else {}
+    requested = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {}
+    if any(value is not None for value in requested.values()) and not rate_limits.get("applied"):
+        blockers.append("Requested qBittorrent rate limits were not applied.")
+    return blockers
+
+
+def _qbit_limits_blocked_payload(context: dict[str, Any], qbit_limits: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    return {
+        "kind": "ptcli.qbit_limits",
+        "status": "blocked",
+        "ok": False,
+        "dry_run": context["dry_run"],
+        "mutates_qbittorrent": False,
+        "live_upload": False,
+        "client": context["client"],
+        "request": context,
+        "hash": context["hash"],
+        "tracker": context.get("tracker"),
+        "role": context.get("role"),
+        "site_policy": qbit_limits.get("policy"),
+        "qbit_limits": qbit_limits,
+        "rate_limits": {"requested": {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}, "applied": False, "skipped": True, "calls": []},
+        "visible_before": None,
+        "visible_after": None,
+        "before": [],
+        "after": [],
+        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, {}, blockers, dry_run=context["dry_run"]),
+        "blockers": blockers,
+        "next_actions": _qbit_limits_next_actions(blockers, dry_run=context["dry_run"]),
+    }
+
+
+def _qbit_limits_dry_run_payload(context: dict[str, Any], qbit_limits: dict[str, Any], requested_limits: dict[str, Any]) -> dict[str, Any]:
+    calls = []
+    if requested_limits.get("upload_limit") is not None:
+        calls.append({"method": "torrents_set_upload_limit", "torrent_hashes": context["hash"], "limit": requested_limits["upload_limit"]})
+    if requested_limits.get("download_limit") is not None:
+        calls.append({"method": "torrents_set_download_limit", "torrent_hashes": context["hash"], "limit": requested_limits["download_limit"]})
+    rate_limits = {"requested": requested_limits, "applied": False, "skipped": True, "dry_run": True, "calls": calls}
+    return {
+        "kind": "ptcli.qbit_limits",
+        "status": "dry_run",
+        "ok": True,
+        "dry_run": True,
+        "mutates_qbittorrent": False,
+        "live_upload": False,
+        "client": context["client"],
+        "request": context,
+        "hash": context["hash"],
+        "tracker": context.get("tracker"),
+        "role": context.get("role"),
+        "site_policy": qbit_limits.get("policy"),
+        "qbit_limits": qbit_limits,
+        "rate_limits": rate_limits,
+        "visible_before": None,
+        "visible_after": None,
+        "before": [],
+        "after": [],
+        "agent_summary": _qbit_limits_agent_summary(context, qbit_limits, rate_limits, [], dry_run=True),
+        "blockers": [],
+        "next_actions": _qbit_limits_next_actions([], dry_run=True),
+    }
+
+
+def _qbit_limits_agent_summary(context: dict[str, Any], qbit_limits: dict[str, Any], rate_limits: dict[str, Any], blockers: list[str], *, dry_run: bool) -> dict[str, Any]:
+    requested = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {"upload_limit": qbit_limits.get("upload_limit"), "download_limit": qbit_limits.get("download_limit")}
+    return {
+        "ready": not blockers,
+        "dry_run": dry_run,
+        "mutates_qbittorrent": not dry_run and not blockers,
+        "client": context.get("client"),
+        "hash": context.get("hash"),
+        "tracker": context.get("tracker"),
+        "role": context.get("role"),
+        "upload_limit": requested.get("upload_limit"),
+        "download_limit": requested.get("download_limit"),
+        "upload_limit_human": qbit_limits.get("upload_limit_human"),
+        "download_limit_human": qbit_limits.get("download_limit_human"),
+        "upload_limit_source": qbit_limits.get("upload_limit_source"),
+        "download_limit_source": qbit_limits.get("download_limit_source"),
+        "rate_limits_applied": bool(rate_limits.get("applied")),
+        "call_count": len(rate_limits.get("calls") or []) if isinstance(rate_limits.get("calls"), list) else 0,
+        "blocker_count": len(blockers),
+    }
+
+
+def _qbit_limits_next_actions(blockers: list[str], *, dry_run: bool) -> list[str]:
+    if blockers:
+        return ["Provide explicit upload_limit/download_limit or configure PTCLI.SITE_POLICIES for this tracker and role, then retry qbit_apply_limits."]
+    if dry_run:
+        return ["Review rate_limits.calls, then call qbit_apply_limits again with dry_run=false to apply these limits to qBittorrent."]
+    return ["Use qbit_inspect on the same hash and continue the retorrent or uploaded-seeding workflow with this rate-limit evidence."]
 
 
 def _qbit_wait_agent_summary(result: dict[str, Any], context: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
@@ -10983,7 +11175,7 @@ def _daily_candidate_run_next_call(action: str, next_step: dict[str, Any], block
         "mutates_state": mutates_state,
         "uploads": uploads,
         "contacts_trackers": tool not in {None, "daily_candidate_delivery", "get_job_status", "get_job_summary", "inspect_blockers"},
-        "contacts_qbittorrent": tool in {"submit_daily_candidate_job", "resume_job", "manual_retorrent_job", "source_url_retorrent_job", "qbit_inject_torrent", "qbit_wait_complete", "qbit_inspect"},
+        "contacts_qbittorrent": tool in {"submit_daily_candidate_job", "resume_job", "manual_retorrent_job", "source_url_retorrent_job", "qbit_inject_torrent", "qbit_apply_limits", "qbit_wait_complete", "qbit_inspect"},
         "reason": next_step.get("reason") or action,
         "read_before_call": _daily_candidate_run_next_call_read_before(action),
         "after_call": _daily_candidate_run_next_call_after_call(action, schedule_digest),
@@ -16642,7 +16834,7 @@ def _job_recommended_call_side_effects(tool: Any, method: Any, request: dict[str
         or action in {"target_upload_closure", "submit_if_clear", "execute_resume"}
     )
     contacts_trackers = uploads or (mutates_state and tool not in {"get_job_status", "get_job_summary", "daily_candidate_delivery"})
-    contacts_qbittorrent = uploads or (mutates_state and tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "source_url_check_and_submit", "qbit_inject_torrent", "qbit_wait_complete"})
+    contacts_qbittorrent = uploads or (mutates_state and tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "source_url_check_and_submit", "qbit_inject_torrent", "qbit_apply_limits", "qbit_wait_complete"})
     return {
         "read_only": method_value == "GET",
         "dry_run": is_dry_run,
@@ -21632,7 +21824,7 @@ def _daily_candidate_batch_next_call(
         "mutates_state": mutates_state,
         "uploads": uploads,
         "contacts_trackers": tool not in {None, "daily_candidate_batch_status", "get_job_status", "get_job_summary"},
-        "contacts_qbittorrent": tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "qbit_inject_torrent", "qbit_wait_complete", "qbit_inspect"},
+        "contacts_qbittorrent": tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "qbit_inject_torrent", "qbit_apply_limits", "qbit_wait_complete", "qbit_inspect"},
         "reason": next_step.get("reason") or action,
         "read_before_call": _daily_candidate_batch_next_call_read_before(action, source),
         "after_call": after_call,
@@ -29042,7 +29234,7 @@ def _manual_remaining_next_call(job_id: str, action: str, next_step: dict[str, A
     request = next_step.get("request") if "request" in next_step else None
     mutates_state = method != "GET" and tool not in {None, "get_job_status", "get_job_summary"}
     uploads = tool in {"target_upload_job", "target_upload"} or action == "target_upload_closure"
-    contacts_qbit = uploads or tool in {"qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete"}
+    contacts_qbit = uploads or tool in {"qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_apply_limits", "qbit_wait_complete"}
     contacts_trackers = uploads or tool in {"source_info", "source_download", "target_upload_preflight", "target_upload", "target_upload_job"}
     safe_to_call_now = bool(next_step.get("safe_to_call_now"))
     requires_user_review = next_step.get("requires_user_review") is not False
@@ -34017,6 +34209,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     qbit_match_request_schema = _qbit_match_tool_request_schema()
     qbit_export_request_schema = _qbit_export_tool_request_schema()
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
+    qbit_limits_request_schema = _qbit_limits_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     materials_prepare_request_schema = _materials_prepare_tool_request_schema()
     metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
@@ -34325,6 +34518,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": qbit_inject_request_schema,
             "response_contract": _qbit_inject_response_contract(),
             "safety": {"mutates_state": True, "mutates_qbittorrent": True, "writes_files": False, "live_upload": False, "requires_confirmation": ["torrent_file and save_path must be explicit", "site rules and rate limits must already be reviewed for live workflows"]},
+        },
+        {
+            "name": "qbit_apply_limits",
+            "method": "POST",
+            "path": "/v1/qbit/limits",
+            "description": "Dry-run or apply qBittorrent upload/download limits to an existing torrent hash. Limits may be explicit or resolved from PTCLI.SITE_POLICIES by tracker and role. This never uploads to a tracker.",
+            "input_schema": qbit_limits_request_schema,
+            "response_contract": _qbit_limits_response_contract(),
+            "workflow_hints": {"dry_run_first": True, "verify_with": "qbit_inspect", "used_by": "qbit_rate_limit_repair_plan"},
+            "safety": {"mutates_state": True, "mutates_qbittorrent": True, "writes_files": False, "live_upload": False, "requires_confirmation": ["dry_run=false must be explicit before changing qBittorrent rate limits"]},
         },
         {
             "name": "qbit_wait_complete",
@@ -34969,6 +35172,26 @@ def _qbit_inject_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _qbit_limits_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["hash"],
+        "properties": {
+            "client": {"type": "string", "default": "default"},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "hash": {"type": "string", "description": "Existing qBittorrent torrent hash/infohash to update."},
+            "torrent_hash": {"type": "string", "description": "Alias for hash."},
+            "infohash": {"type": "string", "description": "Alias for hash."},
+            "tracker": {"type": "string", "description": "Optional tracker whose PTCLI.SITE_POLICIES limits should be used."},
+            "site": {"type": "string", "description": "Alias for tracker."},
+            "role": {"type": "string", "enum": ["source", "target", "uploaded"], "default": "source"},
+            "upload_limit": {"type": ["string", "integer"], "description": "Optional explicit upload limit, e.g. 2MiB/s or bytes per second."},
+            "download_limit": {"type": ["string", "integer"], "description": "Optional explicit download limit, e.g. 20MiB/s or bytes per second."},
+            "dry_run": {"type": "boolean", "default": True, "description": "Defaults true; set false explicitly to mutate qBittorrent."},
+        },
+    }
+
+
 def _qbit_wait_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -35470,6 +35693,16 @@ def _qbit_inject_response_contract() -> dict[str, Any]:
         "client_verification_fields": ["visible", "hash_matched", "save_path_matched", "category_matched", "tags_matched", "requested", "observed"],
         "agent_summary_fields": ["ready", "mutates_qbittorrent", "client", "hash", "torrent_file", "save_path", "category", "tags", "visible_in_client", "verified_in_client", "rate_limits_requested", "rate_limits_applied", "blocker_count"],
         "safety": ["adds_torrent_to_qbittorrent", "may_change_qbittorrent_rate_limits", "does_not_upload"],
+    }
+
+
+def _qbit_limits_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "dry_run", "mutates_qbittorrent", "live_upload", "client", "request", "hash", "tracker", "role", "site_policy", "qbit_limits", "rate_limits", "visible_before", "visible_after", "before", "after", "agent_summary", "blockers", "next_actions"],
+        "qbit_limit_fields": ["download_limit", "upload_limit", "download_limit_human", "upload_limit_human", "download_limit_source", "upload_limit_source", "role", "tracker", "policy"],
+        "rate_limit_fields": ["requested", "applied", "skipped", "dry_run", "calls"],
+        "agent_summary_fields": ["ready", "dry_run", "mutates_qbittorrent", "client", "hash", "tracker", "role", "upload_limit", "download_limit", "upload_limit_human", "download_limit_human", "upload_limit_source", "download_limit_source", "rate_limits_applied", "call_count", "blocker_count"],
+        "safety": ["dry_run_by_default", "may_change_qbittorrent_rate_limits", "does_not_add_torrents", "does_not_upload"],
     }
 
 
@@ -36149,7 +36382,7 @@ def _agent_tool_selection() -> dict[str, Any]:
         "prepare_target_package_only": "target_package_prepare_job",
         "upload_prepared_target_package": "target_upload_job",
         "qbit_read_only_inspection": ["qbit_inspect", "qbit_match"],
-        "qbit_mutations": ["qbit_inject_torrent"],
+        "qbit_mutations": ["qbit_inject_torrent", "qbit_apply_limits"],
     }
 
 
@@ -36830,6 +37063,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     qbit_match_request_schema = _qbit_match_tool_request_schema()
     qbit_export_request_schema = _qbit_export_tool_request_schema()
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
+    qbit_limits_request_schema = _qbit_limits_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     materials_prepare_request_schema = _materials_prepare_tool_request_schema()
     metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
@@ -37075,6 +37309,31 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "verified_in_client": {"type": "boolean"},
             "client_verification": {"type": "object"},
             "client_matches": {"type": "array", "items": {"type": "object"}},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    qbit_limits_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "dry_run": {"type": "boolean"},
+            "mutates_qbittorrent": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "client": {"type": "string"},
+            "request": {"type": "object"},
+            "hash": {"type": "string"},
+            "tracker": {"type": ["string", "null"]},
+            "role": {"type": "string"},
+            "site_policy": {"type": ["object", "null"]},
+            "qbit_limits": {"type": "object"},
+            "rate_limits": {"type": "object"},
+            "visible_before": {"type": ["boolean", "null"]},
+            "visible_after": {"type": ["boolean", "null"]},
+            "before": {"type": "array", "items": {"type": "object"}},
+            "after": {"type": "array", "items": {"type": "object"}},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -37663,6 +37922,28 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_inject_request_schema}}},
                     "responses": {"200": {"description": "Add a local .torrent to qBittorrent and verify hash/path/category/tag/rate-limit evidence.", "content": {"application/json": {"schema": qbit_inject_response_schema}}}},
+                },
+            },
+            "/v1/qbit/limits": {
+                "get": {
+                    "operationId": "applyQbittorrentLimitsDryRun",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "hash", "in": "query", "required": True, "schema": {"type": "string"}},
+                        {"name": "tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "role", "in": "query", "required": False, "schema": {"type": "string", "enum": ["source", "target", "uploaded"], "default": "source"}},
+                        {"name": "upload_limit", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "download_limit", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "dry_run", "in": "query", "required": False, "schema": {"type": "boolean", "default": True}},
+                    ],
+                    "responses": {"200": {"description": "Dry-run or apply qBittorrent rate limits for an existing hash.", "content": {"application/json": {"schema": qbit_limits_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "applyQbittorrentLimits",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_limits_request_schema}}},
+                    "responses": {"200": {"description": "Dry-run or apply qBittorrent rate limits for an existing hash.", "content": {"application/json": {"schema": qbit_limits_response_schema}}}},
                 },
             },
             "/v1/qbit/wait": {
