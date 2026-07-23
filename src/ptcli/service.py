@@ -21133,10 +21133,11 @@ def _daily_candidate_batch_submission_plan(summary: dict[str, Any], gate: dict[s
     hard_blockers = [blocker for blocker in blockers if blocker not in shortfall_blockers]
     submit_requests = _daily_candidate_batch_submit_requests(items)
     first_submit_request = submit_requests[0] if submit_requests else None
-    target_count = sum(int((item.get("candidate_counts") or {}).get("target") or 0) for item in items)
-    selected_count = sum(int((item.get("candidate_counts") or {}).get("selected") or 0) for item in items)
-    ready_count = sum(int((item.get("candidate_counts") or {}).get("ready") or 0) for item in items)
-    shortfall_count = sum(int((item.get("candidate_counts") or {}).get("shortfall") or 0) for item in items)
+    target_metrics = _daily_candidate_batch_target_metrics(items)
+    target_count = target_metrics["target_count"]
+    selected_count = target_metrics["selected_count"]
+    ready_count = target_metrics["ready_count"]
+    shortfall_count = target_metrics["ready_shortfall_count"]
     running_count = int(summary.get("running_count") or 0)
     if hard_blockers:
         action = "resolve_blockers"
@@ -21161,6 +21162,7 @@ def _daily_candidate_batch_submission_plan(summary: dict[str, Any], gate: dict[s
         "selected_count": selected_count,
         "ready_count": ready_count,
         "safe_to_submit_count": len(submit_requests),
+        "target_groups": target_metrics["target_groups"],
         "submitted_retorrent_job_count": int(summary.get("submitted_retorrent_job_count") or 0),
         "running_count": running_count,
         "shortfall_count": shortfall_count,
@@ -21187,6 +21189,44 @@ def _daily_candidate_batch_submission_plan(summary: dict[str, Any], gate: dict[s
         "blockers": blockers,
         "next_actions": _daily_candidate_batch_submission_plan_next_actions(action, len(submit_requests), shortfall_count, hard_blockers),
     }
+
+
+def _daily_candidate_batch_target_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+    target_by_group: dict[tuple[str, tuple[str, ...]], int] = {}
+    selected_count = 0
+    ready_count = 0
+    for item in items:
+        counts = item.get("candidate_counts") if isinstance(item.get("candidate_counts"), dict) else {}
+        target = int(counts.get("target") or 0)
+        selected_count += int(counts.get("selected") or 0)
+        ready_count += int(counts.get("ready") or 0)
+        key = _daily_candidate_batch_target_group_key(item)
+        target_by_group[key] = max(target_by_group.get(key, 0), target)
+    target_count = sum(target_by_group.values())
+    target_groups = [
+        {
+            "source_tracker": source_tracker or None,
+            "target_trackers": list(target_trackers),
+            "target_count": target,
+        }
+        for (source_tracker, target_trackers), target in sorted(target_by_group.items())
+    ]
+    return {
+        "kind": "ptcli.daily_candidate_batch_target_metrics",
+        "target_count": target_count,
+        "selected_count": selected_count,
+        "ready_count": ready_count,
+        "selected_shortfall_count": max(0, target_count - selected_count),
+        "ready_shortfall_count": max(0, target_count - ready_count),
+        "target_groups": target_groups,
+    }
+
+
+def _daily_candidate_batch_target_group_key(item: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    request = item.get("candidate_request") if isinstance(item.get("candidate_request"), dict) else {}
+    source_tracker = str(request.get("source_tracker") or item.get("source_tracker") or "").strip().upper()
+    targets = _daily_candidate_batch_targets(request.get("target_trackers") or request.get("target") or item.get("target_trackers"))
+    return source_tracker, tuple(sorted(targets))
 
 
 def _daily_candidate_batch_submit_requests(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -21672,6 +21712,7 @@ def _daily_candidate_batch_refill_plan(summary: dict[str, Any], submission_plan:
         "ready": action in {"create_daily_candidates", "rerun_for_shortfall", "submit_available_first"} and not hard_blockers,
         "action": action,
         "target_count": target_count,
+        "target_groups": submission_plan.get("target_groups") if isinstance(submission_plan.get("target_groups"), list) else [],
         "ready_count": ready_count,
         "complete_count": complete_count,
         "remaining_submit_count": remaining_submit_count,
@@ -39626,10 +39667,10 @@ def _job_list_response_contract() -> dict[str, Any]:
         "job_list_next_call_fields": ["ready", "action", "source", "job_id", "job_status", "job_kind", "tool", "endpoint", "method", "request", "dry_run_request", "execute_request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "queue", "approval", "safety", "blockers", "next_actions"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "available_submit_request_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
-        "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
+        "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "target_groups", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
         "daily_candidate_execution_summary_fields": ["ready", "action", "target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "terminal_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "ready_target_met", "completion_ratio", "completed_source_ids", "running_source_ids", "blocked_source_ids", "submitted_jobs", "running_jobs", "blocked_jobs", "complete_jobs", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_submitted_jobs_report_fields": ["ready", "report_allowed", "status", "action", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "completion_ratio", "completed_source_ids", "running_source_ids", "blocked_source_ids", "first_submitted_job", "next_step", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-        "daily_candidate_refill_plan_fields": ["ready", "action", "target_count", "ready_count", "complete_count", "remaining_submit_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "scan_exhausted", "candidate_job_count", "covered_source_ids", "submitted_source_ids", "completed_source_ids", "running_source_ids", "blocked_source_ids", "exclude_source_ids_hint", "refill_request_contract", "refill_job_handoff", "refill_followup", "pagination_supported", "dedupe_strategy", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+        "daily_candidate_refill_plan_fields": ["ready", "action", "target_count", "target_groups", "ready_count", "complete_count", "remaining_submit_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "scan_exhausted", "candidate_job_count", "covered_source_ids", "submitted_source_ids", "completed_source_ids", "running_source_ids", "blocked_source_ids", "exclude_source_ids_hint", "refill_request_contract", "refill_job_handoff", "refill_followup", "pagination_supported", "dedupe_strategy", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_sequence_fields": ["ready", "action", "target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "ready_shortfall_count", "steps", "next_step", "loop_control", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_approval_sequence_fields": ["ready", "action", "target_count", "ready_count", "approval_count", "submitted_retorrent_job_count", "complete_count", "running_count", "ready_shortfall_count", "approval_items", "approved_submit_requests", "steps", "next_step", "human_prompt", "required_user_inputs", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_execution_context_fields": ["ready", "action", "candidate_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_submitted_job", "running_jobs", "blocked_jobs", "complete_jobs", "completed_source_ids", "running_source_ids", "blocked_source_ids", "approval_items", "shortfall_recovery", "refill_job_handoff", "next_step", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],

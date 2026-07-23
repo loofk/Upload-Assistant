@@ -17611,6 +17611,7 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert refill_plan["ready"] is True
     assert refill_plan["action"] == "rerun_for_shortfall"
     assert refill_plan["target_count"] == 10
+    assert refill_plan["target_groups"] == [{"source_tracker": "U2", "target_trackers": ["MTEAM"], "target_count": 10}]
     assert refill_plan["ready_count"] == 1
     assert refill_plan["ready_shortfall_count"] == 9
     assert refill_plan["scan_count"] == 50
@@ -17803,7 +17804,7 @@ def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, 
     assert loop_report["before"]["candidate_job_count"] == 1
     assert loop_report["after"]["candidate_job_count"] == 2
     assert loop_report["progress"] == refill["progress"]
-    assert loop_report["ready_shortfall_count"] == 18
+    assert loop_report["ready_shortfall_count"] == 8
     assert loop_report["recommended_tool"] == "daily_candidate_refill_job"
     assert loop_report["recommended_endpoint"] == "/v1/jobs/candidates/daily/refill"
     assert loop_report["recommended_request"] == refill["after_batch"]["daily_candidate_refill_plan"]["recommended_request"]
@@ -17813,7 +17814,7 @@ def test_daily_candidate_refill_job_creates_followup_discovery_job(monkeypatch, 
     assert loop_control["ready"] is True
     assert loop_control["action"] == "continue_refill"
     assert loop_control["complete"] is False
-    assert loop_control["ready_shortfall_count"] == 18
+    assert loop_control["ready_shortfall_count"] == 8
     assert loop_control["should_continue_refill"] is True
     assert loop_control["should_submit"] is False
     assert loop_control["should_poll"] is False
@@ -21690,6 +21691,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "remaining_submit_count" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_execution_summary_fields"]
     assert "blocked_jobs" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_execution_summary_fields"]
     assert "pagination_supported" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+    assert "target_groups" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+    assert "target_groups" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_plan_fields"]
     assert "scan_limit" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "next_scan_limit" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
     assert "exclude_source_ids_hint" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
@@ -25171,6 +25174,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "loop_control" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
         assert "refill_request_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
         assert "refill_job_handoff" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+        assert "target_groups" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
+        assert "target_groups" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_plan_fields"]
         assert "scan_limit" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
         assert "next_scan_limit" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
         assert "daily_candidate_refill_request_contract_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
