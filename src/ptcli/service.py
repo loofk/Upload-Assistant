@@ -3379,6 +3379,7 @@ def create_daily_candidate_run_and_deliver(job_store: JobStore, request: dict[st
         "schedule_result": schedule_result,
         "delivery_request": delivery_request,
         "delivery_result": delivery_result,
+        "delivery_audit": delivery_result.get("delivery_audit") if isinstance(delivery_result, dict) else None,
         "run_and_deliver_report": report,
         "daily_candidate_run_handoff": schedule_result.get("daily_candidate_run_handoff"),
         "daily_candidate_delivery_final_report": schedule_result.get("daily_candidate_delivery_final_report"),
@@ -4183,6 +4184,17 @@ def daily_candidate_delivery_payload(request: dict[str, Any]) -> dict[str, Any]:
     channel_attempted = bool(file_delivery.get("attempted") or webhook_delivery.get("attempted"))
     ok = not blockers and (dry_run or channel_attempted)
     status = "blocked" if blockers else "dry_run" if dry_run else "delivered" if channel_attempted else "ready"
+    delivery_audit = _daily_candidate_delivery_audit(
+        status=status,
+        ok=ok,
+        dry_run=dry_run,
+        payload_fingerprint=payload_fingerprint,
+        output_dir=output_dir,
+        file_delivery=file_delivery,
+        webhook_delivery=webhook_delivery,
+        blockers=blockers,
+        request=request,
+    )
     return {
         "kind": "ptcli.daily_candidate_delivery_result",
         "status": status,
@@ -4199,8 +4211,9 @@ def daily_candidate_delivery_payload(request: dict[str, Any]) -> dict[str, Any]:
         "delivery_handoff": delivery_handoff or None,
         "file_delivery": file_delivery,
         "webhook_delivery": webhook_delivery,
+        "delivery_audit": delivery_audit,
         "evidence_contract": {
-            "read_after_delivery": ["file_delivery", "webhook_delivery", "payload_fingerprint", "notification_payload", "daily_candidate_batch_publish_payload"],
+            "read_after_delivery": ["delivery_audit", "file_delivery", "webhook_delivery", "payload_fingerprint", "notification_payload", "daily_candidate_batch_publish_payload"],
             "candidate_digest_ref": "daily_candidate_batch_publish_payload.items or notification_payload.items",
             "completion_evidence_refs": [
                 "daily_candidate_batch_publish_payload.completion_items[].qbit_enforcement_ready",
@@ -4220,6 +4233,86 @@ def daily_candidate_delivery_payload(request: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers,
         "next_actions": _daily_candidate_delivery_payload_next_actions(ok, dry_run, bool(file_delivery.get("attempted")), bool(webhook_delivery.get("attempted")), blockers),
     }
+
+
+def _daily_candidate_delivery_audit(
+    *,
+    status: str,
+    ok: bool,
+    dry_run: bool,
+    payload_fingerprint: str | None,
+    output_dir: Path,
+    file_delivery: dict[str, Any],
+    webhook_delivery: dict[str, Any],
+    blockers: list[str],
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    retry_request = {
+        "notification_payload": request.get("notification_payload") if isinstance(request.get("notification_payload"), dict) else None,
+        "daily_candidate_batch_publish_payload": request.get("daily_candidate_batch_publish_payload") if isinstance(request.get("daily_candidate_batch_publish_payload"), dict) else request.get("publish_payload") if isinstance(request.get("publish_payload"), dict) else None,
+        "delivery_handoff": request.get("delivery_handoff") if isinstance(request.get("delivery_handoff"), dict) else request.get("daily_candidate_delivery_handoff") if isinstance(request.get("daily_candidate_delivery_handoff"), dict) else None,
+        "write_files": request.get("write_files") is not False,
+        "output_dir": str(output_dir),
+        "use_env_webhook": bool(request.get("use_env_webhook")),
+        "webhook_timeout": request.get("webhook_timeout") or 10.0,
+        "dry_run": False,
+    }
+    if request.get("webhook_url"):
+        retry_request["webhook_url"] = request.get("webhook_url")
+    retry_request = {key: value for key, value in retry_request.items() if value is not None}
+    return {
+        "kind": "ptcli.daily_candidate_delivery_audit",
+        "ready": ok,
+        "status": status,
+        "dry_run": dry_run,
+        "mutates_state": False,
+        "uploads": False,
+        "contacts_trackers": False,
+        "contacts_qbittorrent": False,
+        "payload_fingerprint": payload_fingerprint,
+        "payload_ref": "notification_payload or daily_candidate_batch_publish_payload",
+        "channels": {
+            "file": {
+                "attempted": bool(file_delivery.get("attempted")),
+                "ok": file_delivery.get("ok"),
+                "output_dir": file_delivery.get("output_dir"),
+                "json": file_delivery.get("json"),
+                "text": file_delivery.get("text"),
+                "json_exists": file_delivery.get("json_exists"),
+                "text_exists": file_delivery.get("text_exists"),
+                "blocker": file_delivery.get("blocker"),
+            },
+            "webhook": {
+                "attempted": bool(webhook_delivery.get("attempted")),
+                "ok": webhook_delivery.get("ok"),
+                "url": webhook_delivery.get("url"),
+                "status_code": webhook_delivery.get("status_code"),
+                "error": webhook_delivery.get("error"),
+                "blocker": webhook_delivery.get("blocker"),
+            },
+        },
+        "retry": {
+            "safe": True,
+            "tool": "daily_candidate_delivery",
+            "endpoint": "/v1/candidates/daily/deliver",
+            "method": "POST",
+            "request": retry_request,
+            "requires_upload_confirmation": False,
+            "reason": "delivery_only_retry_no_upload_or_tracker_contact",
+        },
+        "continue_when": "delivery_audit.ready=true and delivery_audit.mutates_state=false",
+        "stop_when": ["delivery_audit.blockers is not empty", "delivery_audit.uploads=true", "delivery_audit.contacts_trackers=true"],
+        "blockers": blockers,
+        "next_actions": _daily_candidate_delivery_audit_next_actions(blockers, ok, bool(file_delivery.get("attempted")), bool(webhook_delivery.get("attempted"))),
+    }
+
+
+def _daily_candidate_delivery_audit_next_actions(blockers: list[str], ok: bool, file_attempted: bool, webhook_attempted: bool) -> list[str]:
+    if blockers:
+        return ["Retry delivery_audit.retry after fixing file permissions or webhook settings; this does not upload or submit candidates."]
+    if ok and (file_attempted or webhook_attempted):
+        return ["Read delivery_audit.channels, then ask the user before submitting any daily candidate."]
+    return ["Provide a file or webhook delivery channel, then retry delivery_audit.retry."]
 
 
 def _daily_candidate_notification_from_publish_payload(publish_payload: dict[str, Any]) -> dict[str, Any]:
@@ -34609,7 +34702,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Run enabled daily candidate schedules and deliver the resulting digest to local files or webhook in one AI-callable step. This creates candidate scan jobs but never submits candidates or uploads torrents.",
             "input_schema": candidate_run_and_deliver_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
+                "required_fields": ["status", "ok", "delivery_requested", "delivery_performed", "job_count", "jobs", "schedule_result", "delivery_request", "delivery_result", "delivery_audit", "run_and_deliver_report", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "notification_payload", "next_call", "blockers", "next_actions", "safety"],
                 "run_and_deliver_report_fields": ["ready", "action", "schedule_status", "schedule_job_count", "delivery_requested", "delivery_status", "delivery_ok", "notification_delivered", "file_delivery", "webhook_delivery", "payload_fingerprint", "daily_candidate_run_handoff", "daily_candidate_delivery_final_report", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers"],
                 "daily_candidate_operational_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "approval", "completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_fulfillment_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
@@ -36127,9 +36220,10 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 
 def _daily_candidate_delivery_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "payload_fingerprint", "notification_payload", "daily_candidate_batch_publish_payload", "delivery_handoff", "file_delivery", "webhook_delivery", "evidence_contract", "safety", "blockers", "next_actions"],
+        "required_fields": ["kind", "status", "ok", "ready", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "payload_fingerprint", "notification_payload", "daily_candidate_batch_publish_payload", "delivery_handoff", "file_delivery", "webhook_delivery", "delivery_audit", "evidence_contract", "safety", "blockers", "next_actions"],
         "file_delivery_fields": ["attempted", "ok", "dry_run", "output_dir", "json", "text", "json_exists", "text_exists", "blocker"],
         "webhook_delivery_fields": ["attempted", "ok", "dry_run", "url", "status_code", "error", "blocker"],
+        "delivery_audit_fields": ["ready", "status", "dry_run", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "payload_fingerprint", "payload_ref", "channels", "retry", "continue_when", "stop_when", "blockers", "next_actions"],
         "evidence_contract_fields": ["read_after_delivery", "candidate_digest_ref", "completion_evidence_refs", "stop_when"],
         "safety_fields": ["delivery_only", "submits_candidates", "uploads_torrents", "requires_upload_confirmation", "safe_to_retry"],
     }
@@ -37342,6 +37436,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "delivery_handoff": {"type": ["object", "null"]},
             "file_delivery": {"type": "object"},
             "webhook_delivery": {"type": "object"},
+            "delivery_audit": {"type": "object"},
             "evidence_contract": {"type": "object"},
             "safety": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
@@ -37387,6 +37482,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "schedule_result": {"type": "object"},
             "delivery_request": {"type": ["object", "null"]},
             "delivery_result": {"type": ["object", "null"]},
+            "delivery_audit": {"type": ["object", "null"]},
             "run_and_deliver_report": {"type": "object"},
             "daily_candidate_run_handoff": {"type": ["object", "null"]},
             "daily_candidate_delivery_final_report": {"type": ["object", "null"]},

@@ -18881,6 +18881,12 @@ def test_daily_candidate_run_and_deliver_runs_schedule_and_writes_digest(monkeyp
     assert payload["job_count"] == 1
     assert payload["delivery_result"]["ok"] is True
     assert payload["delivery_result"]["file_delivery"]["ok"] is True
+    assert payload["delivery_audit"] == payload["delivery_result"]["delivery_audit"]
+    assert payload["delivery_audit"]["kind"] == "ptcli.daily_candidate_delivery_audit"
+    assert payload["delivery_audit"]["ready"] is True
+    assert payload["delivery_audit"]["retry"]["tool"] == "daily_candidate_delivery"
+    assert payload["delivery_audit"]["retry"]["endpoint"] == "/v1/candidates/daily/deliver"
+    assert payload["delivery_audit"]["uploads"] is False
     assert (output_dir / "ptcli-daily-candidates-notification.json").exists()
     assert (output_dir / "ptcli-daily-candidates-notification.txt").exists()
     report = payload["run_and_deliver_report"]
@@ -19169,6 +19175,14 @@ def test_daily_candidate_delivery_payload_writes_handoff_files(tmp_path) -> None
     assert payload["file_delivery"]["attempted"] is True
     assert payload["file_delivery"]["ok"] is True
     assert payload["webhook_delivery"]["attempted"] is False
+    assert payload["delivery_audit"]["kind"] == "ptcli.daily_candidate_delivery_audit"
+    assert payload["delivery_audit"]["ready"] is True
+    assert payload["delivery_audit"]["channels"]["file"]["ok"] is True
+    assert payload["delivery_audit"]["channels"]["webhook"]["attempted"] is False
+    assert payload["delivery_audit"]["retry"]["safe"] is True
+    assert payload["delivery_audit"]["retry"]["requires_upload_confirmation"] is False
+    assert payload["delivery_audit"]["retry"]["request"]["output_dir"] == str(tmp_path)
+    assert payload["delivery_audit"]["retry"]["request"]["daily_candidate_batch_publish_payload"] == publish_payload
     assert payload["safety"]["delivery_only"] is True
     assert payload["safety"]["submits_candidates"] is False
     assert "daily_candidate_batch_publish_payload.completion_items[].uploaded_seeding_ready" in payload["evidence_contract"]["completion_evidence_refs"]
@@ -22326,7 +22340,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_target_fulfillment_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_run_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
+    assert "delivery_audit" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["required_fields"]
     assert "next_call" in tool_by_name["daily_candidate_run_and_deliver"]["response_contract"]["run_and_deliver_report_fields"]
+    assert "delivery_audit" in tool_by_name["daily_candidate_delivery"]["response_contract"]["required_fields"]
+    assert "delivery_audit_fields" in tool_by_name["daily_candidate_delivery"]["response_contract"]
+    assert "retry" in tool_by_name["daily_candidate_delivery"]["response_contract"]["delivery_audit_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "next_scan_limit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
