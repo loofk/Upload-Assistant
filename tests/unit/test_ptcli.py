@@ -17286,7 +17286,20 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert followup["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
     assert followup["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
     assert followup["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
+    submit_decision = retorrent_job["candidate_submit_final_decision"]
+    assert submit_decision["kind"] == "ptcli.candidate_submit_final_decision"
+    assert submit_decision["action"] == "configure_policy"
+    assert submit_decision["status"] == "policy_review_required"
+    assert submit_decision["candidate"]["candidate_source_id"] == "60635"
+    assert submit_decision["retorrent_job"]["job_id"] == retorrent_job["job_id"]
+    assert submit_decision["recommended_call"]["tool"] == "site_policies"
+    assert submit_decision["safe_to_call_now"] is False
+    assert submit_decision["requires_user_review"] is False
+    assert submit_decision["safety"]["does_not_bypass_site_rules"] is True
+    assert submit_decision["sequence"] == sequence
+    assert submit_decision["followup"] == followup
     assert retorrent_job["workflow_context"]["candidate_submit_sequence"] == sequence
+    assert retorrent_job["workflow_context"]["candidate_submit_final_decision"] == submit_decision
     assert retorrent_job["workflow_context"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert retorrent_job["workflow_context"]["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
     assert retorrent_job["workflow_context"]["candidate_submit_followup"] == followup
@@ -17295,6 +17308,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["agent_decision"]["candidate_execution_context"] == submission_context
     assert retorrent_job["agent_decision"]["candidate_submit_followup"] == followup
     assert retorrent_job["agent_decision"]["candidate_submit_sequence"] == sequence
+    assert retorrent_job["agent_decision"]["candidate_submit_final_decision"] == submit_decision
     assert retorrent_job["agent_decision"]["candidate_submission_execution"] == retorrent_job["candidate_submission_summary"]["execution_handoff"]
     assert retorrent_job["agent_decision"]["material_input_template"] == material_template
     assert retorrent_job["job_handoff"]["candidate_submission_execution"] == retorrent_job["candidate_submission_summary"]["execution_handoff"]
@@ -17318,7 +17332,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert "--upload-screenshots" in retorrent_job["command_argv"]
     summary = store.summary(retorrent_job["job_id"])
     list_payload = store.list({"kind": "ptcli.candidate_retorrent"})
+    assert summary["candidate_submit_final_decision"] == submit_decision
     listed = list_payload["jobs"][0]
+    assert listed["candidate_submit_final_decision"] == submit_decision
     daily_batch = list_payload["daily_candidate_batch_summary"]
     assert daily_batch["kind"] == "ptcli.daily_candidate_jobs_batch_summary"
     assert daily_batch["candidate_job_count"] == 1
@@ -17339,6 +17355,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["candidate_submit_final_decision"] == submit_decision
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_remaining_sequence"] == retorrent_job["manual_retorrent_remaining_sequence"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["remaining_action"] == retorrent_job["manual_retorrent_remaining_sequence"]["action"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["remaining_next_step"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]
@@ -22323,6 +22340,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "primary_report_field" in tool_by_name["get_job_summary"]["response_contract"]["job_summary_final_report_fields"]
     assert "completion_gate" in tool_by_name["get_job_summary"]["response_contract"]["job_summary_final_report_fields"]
     assert "job_summary_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "candidate_submit_final_decision" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "candidate_submit_final_decision" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "candidate_submit_final_decision" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "candidate_submit_final_decision_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["get_job_status"]["response_contract"]["candidate_submit_final_decision_fields"]
     assert "live_action_sequence" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -23508,6 +23530,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "save_path" in resume_schema["properties"]
     assert "job_id" not in resume_schema["properties"]
     summary_schema = openapi["paths"]["/v1/jobs/{job_id}/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    status_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "candidate_submit_final_decision" in status_schema["properties"]
+    assert "candidate_submit_final_decision" in summary_schema["properties"]
     assert "agent_decision" in summary_schema["properties"]
     assert "candidate_digest" in summary_schema["properties"]
     assert "policy_coverage" in summary_schema["properties"]
@@ -23516,7 +23541,6 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_profile_handoff" in summary_schema["properties"]
     assert "submit_if_clear_handoff" in summary_schema["properties"]
     assert "policy_handoff" in summary_schema["properties"]
-    status_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_application_report" in status_schema["properties"]
     assert "policy_application_report" in summary_schema["properties"]
     assert "material_evidence_summary" in status_schema["properties"]
@@ -25218,6 +25242,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_final_report_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "job_complete_report_allowed" in tools_by_name["get_job_status"]["response_contract"]["resume_final_report_fields"]
+        assert "candidate_submit_final_decision" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "candidate_submit_final_decision" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "candidate_submit_final_decision" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "candidate_submit_final_decision_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["get_job_status"]["response_contract"]["candidate_submit_final_decision_fields"]
         assert "job_lifecycle_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "job_lifecycle_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "job_lifecycle_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
