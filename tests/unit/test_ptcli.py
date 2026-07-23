@@ -11136,6 +11136,13 @@ async def test_service_target_upload_returns_closure_handoff(monkeypatch, tmp_pa
     assert payload["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
     assert payload["target_upload_handoff"]["ready"] is True
     assert payload["target_upload_handoff"]["uploaded_seeding_ready"] is True
+    decision = payload["target_upload_final_decision"]
+    assert decision["kind"] == "ptcli.target_upload_final_decision"
+    assert decision["ready"] is True
+    assert decision["action"] == "complete"
+    assert decision["uploaded_seeding_ready"] is True
+    assert decision["recommended_call"]["tool"] == "get_job_summary"
+    assert decision["safe_to_call_now"] is True
     evidence = payload["target_upload_handoff"]["uploaded_seeding_evidence"]
     assert evidence["ready"] is True
     assert evidence["uploaded_torrent_id"] == "999"
@@ -11179,6 +11186,13 @@ async def test_service_target_upload_blocks_live_without_uploaded_torrent_closur
         "inject_uploaded_torrent": False,
         "wait_uploaded_complete": False,
     }
+    decision = payload["target_upload_final_decision"]
+    assert decision["action"] == "satisfy_target_upload_gate"
+    assert decision["recommended_call"]["tool"] == "target_upload_job"
+    assert decision["recommended_call"]["request"]["download_uploaded_torrent"] is True
+    assert decision["recommended_call"]["request"]["inject_uploaded_torrent"] is True
+    assert decision["recommended_call"]["request"]["wait_uploaded_complete"] is True
+    assert decision["safe_to_call_now"] is False
     assert "download_uploaded_torrent=true is required to close uploaded target torrent evidence." in payload["blockers"]
     assert "inject_uploaded_torrent=true is required to seed the uploaded target torrent." in payload["blockers"]
     assert "wait_uploaded_complete=true is required to verify uploaded target torrent seeding." in payload["blockers"]
@@ -11208,9 +11222,14 @@ def test_service_target_upload_job_exposes_handoff(monkeypatch, tmp_path) -> Non
     assert job["status"] == "complete"
     assert job["request"]["write_summary"] is True
     assert job["target_upload_handoff"]["ready"] is True
+    assert job["target_upload_final_decision"]["action"] == "complete"
+    assert job["target_upload_final_decision"]["uploaded_seeding_ready"] is True
     assert job["agent_decision"]["decision"] == "target_upload_complete"
     assert store.summary(job["job_id"])["target_upload_handoff"]["uploaded_seeding_ready"] is True
-    assert store.list({"kind": "ptcli.target_upload"})["jobs"][0]["target_upload_handoff"]["ready"] is True
+    assert store.summary(job["job_id"])["target_upload_final_decision"]["action"] == "complete"
+    listed = store.list({"kind": "ptcli.target_upload"})["jobs"][0]
+    assert listed["target_upload_handoff"]["ready"] is True
+    assert listed["target_upload_final_decision"]["ready"] is True
 
 
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
@@ -21757,6 +21776,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_upload_service_gate" in tool_by_name["target_upload"]["response_contract"]["required_fields"]
     assert "target_upload_service_gate_fields" in tool_by_name["target_upload"]["response_contract"]
     assert "target_upload_handoff" in tool_by_name["target_upload"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision" in tool_by_name["target_upload"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision_fields" in tool_by_name["target_upload"]["response_contract"]
     assert "download_uploaded_torrent" in tool_by_name["target_upload"]["input_schema"]["properties"]
     assert tool_by_name["target_package_prepare_job"]["path"] == "/v1/jobs/target/package/prepare"
     assert "target_package_handoff" in tool_by_name["target_package_prepare_job"]["response_contract"]["required_fields"]
@@ -21766,6 +21787,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["target_upload_job"]["path"] == "/v1/jobs/target/upload"
     assert "target_upload_service_gate" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
     assert tool_by_name["target_upload_job"]["workflow_hints"]["handoff_field"] == "target_upload_handoff"
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
@@ -22225,10 +22247,17 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
     assert "staged_requests" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
     assert "target_upload_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "target_upload_final_decision" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "target_upload_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "target_upload_final_decision_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "recommended_call" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_final_decision_fields"]
+    assert "safe_to_call_now" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_final_decision_fields"]
     assert "next_step" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
     assert "recommended_tool" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
     assert "closure_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -23585,6 +23614,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_upload_service_gate" in target_upload_schema["properties"]
     assert "target_upload_diagnostics" in target_upload_schema["properties"]
     assert "target_upload_handoff" in target_upload_schema["properties"]
+    assert "target_upload_final_decision" in target_upload_schema["properties"]
     assert openapi["paths"]["/v1/jobs/materials/prepare"]["post"]["operationId"] == "createPtcliMaterialsPrepareJob"
     materials_prepare_job_schema = openapi["paths"]["/v1/jobs/materials/prepare"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "materials_prepare_handoff" in materials_prepare_job_schema["properties"]
@@ -23598,6 +23628,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     target_upload_job_schema = openapi["paths"]["/v1/jobs/target/upload"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "target_upload_service_gate" in target_upload_job_schema["properties"]
     assert "target_upload_handoff" in target_upload_job_schema["properties"]
+    assert "target_upload_final_decision" in target_upload_job_schema["properties"]
     assert "material_chain_handoff" in target_upload_job_schema["properties"]
     summary_check_request_schema = openapi["paths"]["/v1/summary/check"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert summary_check_request_schema["required"] == ["summary_file"]
@@ -23639,6 +23670,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_package_handoff" in summary_schema["properties"]
     assert "target_upload_service_gate" in summary_schema["properties"]
     assert "target_upload_handoff" in summary_schema["properties"]
+    assert "target_upload_final_decision" in summary_schema["properties"]
     assert "closure_handoff" in summary_schema["properties"]
     assert "closure_summary" in summary_schema["properties"]
     assert "seedbox_live_validation_completion_report" in summary_schema["properties"]
@@ -23718,6 +23750,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_evidence_collection_handoff" in job_schema["properties"]
     assert "material_gap_summary" in job_schema["properties"]
     assert "target_upload_handoff" in job_schema["properties"]
+    assert "target_upload_final_decision" in job_schema["properties"]
     assert "closure_handoff" in job_schema["properties"]
     assert "closure_summary" in job_schema["properties"]
     assert "seedbox_live_validation_completion_report" in job_schema["properties"]
@@ -23835,6 +23868,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_application_handoff" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "target_upload_service_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "target_upload_handoff" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "target_upload_final_decision" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "material_preparation_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "material_preparation_final_decision" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "daily_candidate_batch_summary" in job_list_schema["properties"]
@@ -25003,10 +25038,16 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
         assert "staged_requests" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
         assert "target_upload_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "target_upload_final_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "target_upload_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "target_upload_final_decision" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "target_upload_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "target_upload_final_decision" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "target_upload_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "target_upload_final_decision" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "target_upload_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "target_upload_final_decision_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "recommended_call" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_final_decision_fields"]
         assert "next_step" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
         assert "recommended_tool" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
         assert "uploaded_seeding_evidence_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
