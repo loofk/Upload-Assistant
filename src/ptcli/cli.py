@@ -292,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     site_policy_rule_review.add_argument("--review-note", dest="review_notes", action="append", help="Alias for --note. Can be repeated.")
     site_policy_rule_review.add_argument("--print-python-update-snippet", action="store_true", help="Print only config_apply_final_report.copyable_config.python_update_snippet when ready.")
     site_policy_rule_review.add_argument("--print-json-patch", action="store_true", help="Print only config_apply_final_report.copyable_config.json_patch when ready.")
+    site_policy_rule_review.add_argument("--print-verify-command", action="store_true", help="Print the site-policy-verify command to run after manually applying the returned config patch.")
     site_policy_rule_review.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     site_policy_verify = subparsers.add_parser(
@@ -12526,6 +12527,34 @@ def _site_policy_rule_review_print_patch(payload: dict[str, Any], field: str) ->
     return 0
 
 
+def _site_policy_rule_review_print_verify_command(payload: dict[str, Any]) -> int:
+    verification = payload.get("verification_bundle") if isinstance(payload.get("verification_bundle"), dict) else {}
+    call = verification.get("verification_call") if isinstance(verification.get("verification_call"), dict) else {}
+    request = call.get("request") if isinstance(call.get("request"), dict) else {}
+    expected = request.get("expected_fingerprints") if isinstance(request.get("expected_fingerprints"), dict) else {}
+    if not expected:
+        return 1
+
+    argv = ["python3", "ptcli.py", "site-policy-verify"]
+    source_tracker = request.get("source_tracker")
+    target = request.get("target")
+    trackers = request.get("trackers")
+    if source_tracker:
+        argv.extend(["--from", str(source_tracker)])
+    if target:
+        argv.extend(["--to", str(target)])
+    elif trackers:
+        trackers_value = ",".join(str(item) for item in trackers) if isinstance(trackers, list) else str(trackers)
+        argv.extend(["--trackers", trackers_value])
+    if request.get("accept_rules") is True:
+        argv.append("--accept-rules")
+    for tracker, fingerprint in sorted(expected.items()):
+        argv.extend(["--expected-fingerprint", f"{tracker}={fingerprint}"])
+    argv.append("--json")
+    print(shlex.join(argv))
+    return 0
+
+
 def site_policy_verify_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import site_policy_verify_payload
 
@@ -12675,6 +12704,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _site_policy_rule_review_print_patch(payload, "python_update_snippet")
             if args.print_json_patch:
                 return _site_policy_rule_review_print_patch(payload, "json_patch")
+            if args.print_verify_command:
+                return _site_policy_rule_review_print_verify_command(payload)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 

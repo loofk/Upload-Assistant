@@ -22020,6 +22020,33 @@ def test_site_policy_rule_review_cli_prints_python_update_snippet(monkeypatch, c
     assert '"kind":' not in out
 
 
+def test_site_policy_rule_review_cli_prints_verify_command(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
+
+    code = main(
+        [
+            "site-policy-rule-review",
+            "--source-url",
+            "https://u2.dmhy.org/details.php?id=60635",
+            "--to",
+            "MTEAM",
+            "--rules-reviewed",
+            "--reviewer",
+            "liuxiang",
+            "--reviewed-at",
+            "2026-07-21",
+            "--print-verify-command",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert out.startswith("python3 ptcli.py site-policy-verify --from U2 --to MTEAM --accept-rules ")
+    assert "--expected-fingerprint MTEAM=" in out
+    assert "--expected-fingerprint U2=" in out
+    assert out.endswith("--json\n")
+
+
 def test_site_policy_rule_review_cli_print_patch_fails_when_not_ready(monkeypatch, capsys) -> None:
     monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
 

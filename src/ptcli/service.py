@@ -44962,6 +44962,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "manual_apply_handoff_fields": ["ready", "status", "action", "trackers", "config_path", "patch_source", "preferred_patch", "copyable_config", "copyable_config_ready", "submit_request_template", "verify_call", "goal_progress_call", "live_readiness_call", "steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "linked_plan"],
                 "ai_config_apply_step_fields": ["step", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when"],
                 "copyable_config_fields": ["ready", "config_path", "preferred_shape", "trackers", "patch_sha256", "preferred_patch", "python_update_snippet", "json_patch", "manual_apply_note", "verify_after_apply", "safety"],
+                "cli_helpers": ["--print-python-update-snippet", "--print-json-patch", "--print-verify-command"],
                 "config_apply_verification_fields": ["tool", "endpoint", "method", "request", "read", "continue_when", "stop_when"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "after_edit"],
             },
