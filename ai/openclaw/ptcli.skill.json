@@ -52117,6 +52117,7 @@
           "create_jobs_call",
           "run_now_call",
           "command_templates",
+          "acceptance_checklist",
           "delivery_delivered",
           "approval_required",
           "can_submit_after_approval",
@@ -52137,7 +52138,22 @@
           "safe_to_run",
           "mutates_state",
           "requires_user_review",
-          "reason"
+          "reason",
+          "continue_when",
+          "stop_when",
+          "evidence"
+        ],
+        "daily_candidate_acceptance_checklist_fields": [
+          "ready",
+          "status",
+          "target_count",
+          "ready_count",
+          "shortfall_count",
+          "delivered",
+          "approval_required",
+          "items",
+          "complete_when",
+          "stop_when"
         ],
         "daily_candidate_compact_workflow_step_fields": [
           "name",

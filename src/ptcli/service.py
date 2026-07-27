@@ -39826,6 +39826,7 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "ready_count": daily.get("ready_count"),
             "shortfall_count": daily.get("shortfall_count"),
             "delivery_delivered": daily.get("delivery_delivered"),
+            "acceptance_checklist": daily.get("acceptance_checklist") if isinstance(daily.get("acceptance_checklist"), dict) else None,
             "recommended_tool": daily.get("recommended_tool"),
             "recommended_call": _goal_progress_compact_call(daily.get("recommended_call") if isinstance(daily.get("recommended_call"), dict) else {}),
             "command_templates": _goal_progress_agent_brief_cli_templates(daily.get("command_templates") if isinstance(daily.get("command_templates"), list) else []),
@@ -40066,6 +40067,15 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
     missing_inputs = _goal_progress_daily_candidate_missing_inputs(action, blockers, schedule_handoff, delivery, approval)
     run_now_call = {"tool": "daily_candidate_run_and_deliver", "endpoint": "/v1/jobs/candidates/daily/run-and-deliver", "method": "POST", "request": {"schedules": schedule_env_example.get("json"), "write_files": True, "use_env_webhook": True}}
     command_templates = _goal_progress_daily_candidate_command_templates(schedule_env_example, schedule_handoff, run_now_call, action)
+    acceptance_checklist = _goal_progress_daily_candidate_acceptance_checklist(
+        configured=bool(daily_candidate_evidence.get("configured") or goal_handoff.get("configured")),
+        target_count=target_count,
+        ready_count=ready_count,
+        shortfall_count=shortfall_count,
+        delivery=delivery,
+        approval=approval,
+        blockers=blockers,
+    )
     return {
         "kind": "ptcli.goal_daily_candidate_compact_handoff",
         "ready": goal_report.get("ready") is True or target_progress.get("ready") is True,
@@ -40088,6 +40098,7 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "create_jobs_call": _goal_progress_compact_call(schedule_api.get("create_jobs") if isinstance(schedule_api.get("create_jobs"), dict) else {}),
         "run_now_call": run_now_call,
         "command_templates": command_templates,
+        "acceptance_checklist": acceptance_checklist,
         "delivery_delivered": delivery.get("delivered"),
         "approval_required": approval.get("required_before_submit", True),
         "can_submit_after_approval": approval.get("can_submit_after_approval"),
@@ -40095,7 +40106,7 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
         "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
         "recommended_method": (recommended_call or {}).get("method") if isinstance(recommended_call, dict) else None,
-        "read_order": ["daily_candidate_handoff", "schedule_env_example", "command_templates", "configure_schedule_call", "create_jobs_call", "run_now_call", "evidence.daily_candidates.schedule_handoff", "evidence.daily_candidates.daily_candidate_execution_plan", "evidence.daily_candidates.daily_candidate_goal_final_report", "evidence.daily_candidates.goal_handoff"],
+        "read_order": ["daily_candidate_handoff", "acceptance_checklist", "schedule_env_example", "command_templates", "configure_schedule_call", "create_jobs_call", "run_now_call", "evidence.daily_candidates.schedule_handoff", "evidence.daily_candidates.daily_candidate_execution_plan", "evidence.daily_candidates.daily_candidate_goal_final_report", "evidence.daily_candidates.goal_handoff"],
         "continue_when": "ready_count>=target_count, digest delivered, and user explicitly approves one candidate before submit.",
         "stop_when": [
             "site policy gate is not ready",
@@ -40114,6 +40125,82 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         },
         "blockers": blockers,
         "next_actions": _string_list(goal_report.get("next_actions")) or _string_list(goal_handoff.get("next_actions")) or _string_list(daily_candidate_evidence.get("next_actions")),
+    }
+
+
+def _goal_progress_daily_candidate_acceptance_checklist(
+    *,
+    configured: bool,
+    target_count: int,
+    ready_count: int,
+    shortfall_count: int,
+    delivery: dict[str, Any],
+    approval: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    delivered = delivery.get("delivered") is True
+    approval_required = approval.get("required_before_submit", True) is not False
+    can_submit_after_approval = approval.get("can_submit_after_approval") is True
+    items = [
+        {
+            "name": "schedule_configured",
+            "ready": configured,
+            "evidence": ["daily_candidate_handoff.configured", "schedule_env_example", "configure_schedule_call"],
+            "continue_when": "configured=true or api_configure_daily_schedule_curl has been reviewed/run",
+            "stop_when": "schedule points to wrong source_tracker/target or unintended timezone",
+        },
+        {
+            "name": "ten_candidate_digest",
+            "ready": ready_count >= target_count and shortfall_count == 0,
+            "evidence": ["target_count", "ready_count", "shortfall_count", "daily_candidate_batch_publish_payload"],
+            "continue_when": "ready_count>=target_count and shortfall_count=0",
+            "stop_when": "shortfall_count>0 without a safe refill/re-run call",
+        },
+        {
+            "name": "digest_delivery",
+            "ready": delivered,
+            "evidence": ["delivery.delivered", "daily_candidate_delivery_final_report", "notification_payload"],
+            "continue_when": "delivery.delivered=true or operator accepts API-only daily candidates",
+            "stop_when": "delivery webhook/file target is missing or publish payload is absent",
+        },
+        {
+            "name": "explicit_candidate_approval",
+            "ready": approval_required and not can_submit_after_approval,
+            "evidence": ["approval.required_before_submit", "daily_candidate_user_approval_package", "api_submit_approved_daily_candidate_curl"],
+            "continue_when": "user explicitly chooses one candidate and confirm_upload=true is present",
+            "stop_when": "AI tries to submit a candidate without explicit user approval",
+        },
+        {
+            "name": "rule_gate_preserved",
+            "ready": not blockers,
+            "evidence": ["blockers", "site_policy_config_blockers", "rule_review_fingerprint"],
+            "continue_when": "site policy blockers are empty and accept_rules=true follows human rule review",
+            "stop_when": "rule review fingerprint or qBittorrent policy limit is missing",
+        },
+    ]
+    ready = all(item["ready"] for item in items)
+    return {
+        "kind": "ptcli.daily_candidate_acceptance_checklist",
+        "ready": ready,
+        "status": "ready_for_daily_digest_validation" if ready else "incomplete",
+        "target_count": target_count,
+        "ready_count": ready_count,
+        "shortfall_count": shortfall_count,
+        "delivered": delivered,
+        "approval_required": approval_required,
+        "items": items,
+        "complete_when": [
+            "configured=true",
+            "ready_count>=target_count",
+            "shortfall_count=0",
+            "digest payload contains per-candidate duplicate/risk/submit evidence",
+            "candidate submit remains blocked until explicit user approval and confirm_upload=true",
+        ],
+        "stop_when": [
+            "site policy gate is not ready",
+            "daily digest has fewer than target_count ready candidates",
+            "AI attempts live submit without user approval",
+        ],
     }
 
 
@@ -40136,6 +40223,9 @@ def _goal_progress_daily_candidate_command_templates(
             "mutates_state": False,
             "requires_user_review": False,
             "reason": "Configure the local daily candidate schedule environment; this does not submit uploads.",
+            "continue_when": f"{DAILY_CANDIDATE_SCHEDULE_ENV} is set for the intended source/target schedule",
+            "stop_when": "schedule JSON references the wrong tracker pair, time, or timezone",
+            "evidence": ["schedule_env_example.shell", "schedule_env_example.json"],
         },
         {
             "name": "api_configure_daily_schedule_curl",
@@ -40156,6 +40246,9 @@ def _goal_progress_daily_candidate_command_templates(
             "mutates_state": False,
             "requires_user_review": False,
             "reason": "Preview/configure daily candidate schedule payload; candidate submission still requires later user approval.",
+            "continue_when": "response exposes schedule_handoff, configure_schedule_call, and no unintended live submit",
+            "stop_when": "response omits schedules or reports a malformed schedule payload",
+            "evidence": ["schedule_handoff", "daily_candidate_config_final_report"],
         },
         {
             "name": "api_run_and_deliver_daily_candidates_curl",
@@ -40176,6 +40269,9 @@ def _goal_progress_daily_candidate_command_templates(
             "mutates_state": True,
             "requires_user_review": False,
             "reason": "Create/read daily candidate jobs and write digest artifacts; it must not submit any candidate without explicit later approval.",
+            "continue_when": "daily_candidate_run_final_decision.action is deliver_digest, ask_user_approval, poll_jobs, or report_complete",
+            "stop_when": "run_and_deliver_report.blockers is non-empty or response tries to upload torrents",
+            "evidence": ["daily_candidate_run_final_report", "daily_candidate_batch_publish_payload", "run_and_deliver_report"],
         },
         {
             "name": "cli_daily_scheduler_once",
@@ -40184,6 +40280,9 @@ def _goal_progress_daily_candidate_command_templates(
             "mutates_state": True,
             "requires_user_review": False,
             "reason": "Run one local daily candidate scheduler pass and write summary/notification files; no live candidate submit.",
+            "continue_when": "ptcli-daily-summary.json or notification payload is written and no submit job is auto-approved",
+            "stop_when": "scheduler attempts live upload or lacks site policy readiness evidence",
+            "evidence": ["ptcli-daily-summary.json", "ptcli-daily-notification.json"],
         },
     ]
     daemon_command = str(compose.get("daemon") or "").strip()
@@ -40196,6 +40295,9 @@ def _goal_progress_daily_candidate_command_templates(
                 "mutates_state": True,
                 "requires_user_review": False,
                 "reason": "Start the daily candidate scheduler profile in Docker Compose; submission approval remains separate.",
+                "continue_when": "ptcli-daily-scheduler container is running and logs show schedule polling",
+                "stop_when": "container exits or Docker mount paths do not match qBittorrent/download paths",
+                "evidence": ["docker compose ps ptcli-daily-scheduler", "scheduler logs"],
             }
         )
     command_templates.extend(
@@ -40207,6 +40309,9 @@ def _goal_progress_daily_candidate_command_templates(
                 "mutates_state": False,
                 "requires_user_review": False,
                 "reason": "Read the current daily candidate batch, approval queue, publish payload, and per-candidate submit calls.",
+                "continue_when": "daily_candidate_batch_publish_payload and approval queue are readable",
+                "stop_when": "batch response omits duplicate/risk/submit evidence for candidates",
+                "evidence": ["daily_candidate_batch_publish_payload", "daily_candidate_approval_sequence", "daily_candidate_user_approval_package"],
             },
             {
                 "name": "api_daily_candidate_deliver_digest_curl",
@@ -40227,6 +40332,9 @@ def _goal_progress_daily_candidate_command_templates(
                 "mutates_state": True,
                 "requires_user_review": False,
                 "reason": "Deliver an already-read candidate digest to files/webhook; does not submit torrents, but requires a real publish payload.",
+                "continue_when": "delivery_result reports file or webhook delivery success",
+                "stop_when": "placeholder daily_candidate_batch_publish_payload has not been replaced with a real payload",
+                "evidence": ["delivery_result", "daily_candidate_delivery_final_report"],
             },
             {
                 "name": "api_submit_approved_daily_candidate_curl",
@@ -40247,6 +40355,9 @@ def _goal_progress_daily_candidate_command_templates(
                 "mutates_state": True,
                 "requires_user_review": True,
                 "reason": "Submit exactly one user-approved candidate; AI must read approval_queue and get explicit approval before replacing the placeholder job id.",
+                "continue_when": "a retorrent job_id is returned and can be polled with get_job_status",
+                "stop_when": "candidate_job_id placeholder was not replaced or confirm_upload=true was not explicitly approved",
+                "evidence": ["candidate_job_id", "submit_daily_candidate_job response", "retorrent job_id"],
             },
         ]
     )
@@ -46410,8 +46521,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "manual_retorrent_entry_handoff_fields": ["ready", "status", "action", "source", "target", "preflight_ready", "policy_ready", "live_readiness_ready", "accept_rules", "confirm_upload", "preflight_call", "check_and_submit_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "required_inputs", "cli_templates", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "manual_retorrent_entry_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "safe_to_call_now", "requires_user_review", "continue_when", "stop_when"],
                 "manual_retorrent_entry_safety_fields": ["read_only", "mutates_state", "preflight_does_not_upload", "check_and_submit_may_create_live_job", "check_and_submit_requires_user_review", "must_check_duplicates_before_submit", "must_not_bypass_site_policy", "live_upload_requires_confirm_upload"],
-                "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "missing_inputs", "schedule_env", "schedule_env_example", "compose", "configure_schedule_call", "create_jobs_call", "run_now_call", "command_templates", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
-                "daily_candidate_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
+                "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "missing_inputs", "schedule_env", "schedule_env_example", "compose", "configure_schedule_call", "create_jobs_call", "run_now_call", "command_templates", "acceptance_checklist", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason", "continue_when", "stop_when", "evidence"],
+                "daily_candidate_acceptance_checklist_fields": ["ready", "status", "target_count", "ready_count", "shortfall_count", "delivered", "approval_required", "items", "complete_when", "stop_when"],
                 "daily_candidate_compact_workflow_step_fields": ["name", "ready", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "daily_candidate_compact_missing_input_fields": ["name", "required", "source", "blockers"],
                 "daily_candidate_compact_handoff_safety_fields": ["read_only", "uploads", "submits_candidates", "submit_requires_user_approval", "confirm_upload_required_for_submit", "never_auto_submit_without_user_approval", "site_policy_gate_required"],

@@ -22556,6 +22556,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_fields"]
     assert "next_stage" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "acceptance_checklist" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "daily_candidate_acceptance_checklist_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "complete_when" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_acceptance_checklist_fields"]
     assert "daily_candidate_compact_workflow_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "requires_user_review" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_workflow_step_fields"]
     assert "daily_candidate_compact_handoff_safety_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -25256,6 +25259,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "run_now_call" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
     assert "command_templates" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
     assert "daily_candidate_command_template_fields" in goal_progress_tool["response_contract"]
+    assert "continue_when" in goal_progress_tool["response_contract"]["daily_candidate_command_template_fields"]
+    assert "stop_when" in goal_progress_tool["response_contract"]["daily_candidate_command_template_fields"]
+    assert "evidence" in goal_progress_tool["response_contract"]["daily_candidate_command_template_fields"]
+    assert "acceptance_checklist" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "daily_candidate_acceptance_checklist_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_compact_missing_input_fields" in goal_progress_tool["response_contract"]
     assert "qbittorrent" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "qbittorrent_evidence_fields" in goal_progress_tool["response_contract"]
@@ -27494,16 +27502,33 @@ services:
     assert payload["progress_summary"]["daily_candidate_handoff"]["configure_schedule_call"]["tool"] == "daily_candidates_schedule"
     assert payload["progress_summary"]["daily_candidate_handoff"]["create_jobs_call"]["tool"] == "daily_candidates_schedule_job"
     assert payload["progress_summary"]["daily_candidate_handoff"]["run_now_call"]["tool"] == "daily_candidate_run_and_deliver"
+    acceptance = payload["progress_summary"]["daily_candidate_handoff"]["acceptance_checklist"]
+    assert acceptance["kind"] == "ptcli.daily_candidate_acceptance_checklist"
+    assert acceptance["ready"] is False
+    assert acceptance["target_count"] == 10
+    assert acceptance["ready_count"] == 0
+    assert acceptance["shortfall_count"] == 10
+    assert [item["name"] for item in acceptance["items"]] == [
+        "schedule_configured",
+        "ten_candidate_digest",
+        "digest_delivery",
+        "explicit_candidate_approval",
+        "rule_gate_preserved",
+    ]
+    assert "candidate submit remains blocked until explicit user approval and confirm_upload=true" in acceptance["complete_when"]
     daily_templates = {item["name"]: item for item in payload["progress_summary"]["daily_candidate_handoff"]["command_templates"]}
     assert daily_templates["shell_export_schedule_env"]["safe_to_run"] is True
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in daily_templates["shell_export_schedule_env"]["command"]
+    assert "schedule_env_example.json" in daily_templates["shell_export_schedule_env"]["evidence"]
     assert daily_templates["api_configure_daily_schedule_curl"]["mutates_state"] is False
     assert "/v1/candidates/daily/schedule" in daily_templates["api_configure_daily_schedule_curl"]["command"]
     assert daily_templates["api_run_and_deliver_daily_candidates_curl"]["mutates_state"] is True
+    assert "run_and_deliver_report.blockers" in daily_templates["api_run_and_deliver_daily_candidates_curl"]["stop_when"]
     assert "/v1/jobs/candidates/daily/run-and-deliver" in daily_templates["api_run_and_deliver_daily_candidates_curl"]["command"]
     assert daily_templates["cli_daily_scheduler_once"]["safe_to_run"] is True
     assert "daily-scheduler --once" in daily_templates["cli_daily_scheduler_once"]["command"]
     assert daily_templates["docker_compose_start_daily_scheduler"]["command"] == "docker compose --profile daily up -d ptcli-daily-scheduler"
+    assert "docker compose ps ptcli-daily-scheduler" in daily_templates["docker_compose_start_daily_scheduler"]["evidence"]
     assert any(item["name"] == "daily_candidate_schedule" for item in payload["progress_summary"]["daily_candidate_handoff"]["missing_inputs"])
     compact_steps = payload["progress_summary"]["daily_candidate_handoff"]["workflow_steps"]
     assert [step["name"] for step in compact_steps] == [
@@ -27624,6 +27649,8 @@ services:
     assert brief_payload["manual_retorrent"]["cli_templates"][0]["name"] == "api_preflight_curl"
     assert brief_payload["manual_retorrent"]["cli_templates"][2]["requires_user_review"] is True
     assert brief_payload["daily_candidates"]["target_count"] == 10
+    assert brief_payload["daily_candidates"]["acceptance_checklist"]["target_count"] == 10
+    assert brief_payload["daily_candidates"]["acceptance_checklist"]["ready"] is False
     assert brief_payload["daily_candidates"]["command_templates"][0]["name"] == "shell_export_schedule_env"
     assert brief_payload["daily_candidates"]["command_templates"][2]["mutates_state"] is True
     daily_brief_templates = {item["name"]: item for item in brief_payload["daily_candidates"]["command_templates"]}
