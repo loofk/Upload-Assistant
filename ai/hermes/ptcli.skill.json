@@ -52622,9 +52622,11 @@
           "coverage",
           "reference_status",
           "profile_gaps",
+          "extension_requirements",
           "rollout",
           "missing_inputs",
           "workflow_steps",
+          "command_templates",
           "recommended_call",
           "recommended_tool",
           "recommended_endpoint",
@@ -52635,6 +52637,21 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "tracker_adapter_extension_requirements_fields": [
+          "kind",
+          "source_tracker",
+          "target_tracker",
+          "allowlist",
+          "reference_baselines",
+          "required_components",
+          "role_requirements",
+          "required_evidence_by_role",
+          "adapter_acceptance",
+          "profile_gaps",
+          "profile_report_summary",
+          "continue_when",
+          "stop_when"
         ],
         "tracker_adapter_compact_coverage_fields": [
           "ready",

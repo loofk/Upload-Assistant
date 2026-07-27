@@ -39691,6 +39691,8 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "requested_flow": adapters.get("requested_flow") if isinstance(adapters.get("requested_flow"), dict) else None,
             "reference_status": adapters.get("reference_status") if isinstance(adapters.get("reference_status"), dict) else None,
             "profile_gaps": adapters.get("profile_gaps") if isinstance(adapters.get("profile_gaps"), dict) else None,
+            "extension_requirements": adapters.get("extension_requirements") if isinstance(adapters.get("extension_requirements"), dict) else None,
+            "command_templates": _goal_progress_agent_brief_cli_templates(adapters.get("command_templates") if isinstance(adapters.get("command_templates"), list) else []),
             "reference_sources_to_mteam": _string_list(adapter_coverage.get("reference_sources_to_mteam")),
             "live_reference_sources_to_mteam": _string_list(adapter_coverage.get("live_reference_sources_to_mteam")),
             "blockers": _string_list(adapters.get("blockers"))[:6],
@@ -44193,6 +44195,8 @@ def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dic
     policy_gate_ready = not profile_gaps["policy_gate_missing_by_tracker"] and not profile_gaps["preflight_gate_missing_by_tracker"]
     reference_flows_to_mteam = coverage.get("reference_flows_to_mteam") if isinstance(coverage.get("reference_flows_to_mteam"), list) else []
     profile_summary = profile_report.get("summary") if isinstance(profile_report.get("summary"), dict) else {}
+    command_templates = _goal_progress_tracker_adapter_command_templates(current_call, requested_flow, profile_gaps)
+    extension_requirements = _goal_progress_tracker_adapter_extension_requirements(readiness_report, profile_report, profile_gaps, requested_flow, coverage)
     return {
         "kind": "ptcli.goal_tracker_adapter_compact_handoff",
         "ready": ready,
@@ -44228,6 +44232,7 @@ def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dic
             "u2_chd_to_mteam_reference_ready": {source: any(str(flow.get("source_tracker")) == source and str(flow.get("target_tracker")) == "MTEAM" for flow in reference_flows_to_mteam if isinstance(flow, dict)) for source in ("U2", "CHD")},
         },
         "profile_gaps": profile_gaps,
+        "extension_requirements": extension_requirements,
         "rollout": {
             "ready": rollout.get("ready"),
             "action": rollout.get("action"),
@@ -44240,11 +44245,12 @@ def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dic
         },
         "missing_inputs": _goal_progress_tracker_adapter_missing_inputs(readiness_report, profile_report, rollout, tracker_adapter_evidence),
         "workflow_steps": _goal_progress_tracker_adapter_workflow_steps(action, current_call, requested_flow),
+        "command_templates": command_templates,
         "recommended_call": _goal_progress_compact_call(current_call),
         "recommended_tool": current_call.get("tool") if isinstance(current_call, dict) else None,
         "recommended_endpoint": current_call.get("endpoint") if isinstance(current_call, dict) else None,
         "recommended_method": current_call.get("method") if isinstance(current_call, dict) else None,
-        "read_order": ["tracker_adapter_handoff", "requested_flow", "rollout", "missing_inputs", "workflow_steps", "evidence.tracker_adapters.adapter_extension_final_report", "evidence.tracker_adapters.site_extension_readiness_final_report", "evidence.tracker_adapters.site_adapter_profile_final_report"],
+        "read_order": ["tracker_adapter_handoff", "requested_flow", "rollout", "profile_gaps", "extension_requirements", "command_templates", "missing_inputs", "workflow_steps", "evidence.tracker_adapters.adapter_extension_final_report", "evidence.tracker_adapters.site_extension_readiness_final_report", "evidence.tracker_adapters.site_adapter_profile_final_report"],
         "complete_when": "requested_flow.ready=true, site_extension_readiness_final_report.report_allowed=true, and missing_by_tracker={} before treating a Chinese PT site flow as live-ready.",
         "stop_when": [
             "requested_flow.ready=false",
@@ -44330,6 +44336,170 @@ def _goal_progress_tracker_adapter_profile_gaps(readiness_report: dict[str, Any]
         "validation_blocked_trackers": _string_list(rollout.get("validation_blocked_trackers")),
         "priority_next": coverage.get("priority_next") if isinstance(coverage.get("priority_next"), dict) else None,
         "next_gate": "site_policy_rule_review" if policy_gate_missing else "readiness_bundle" if preflight_gate_missing else "site_profiles" if adapter_component_missing else "live_validation",
+    }
+
+
+def _goal_progress_tracker_adapter_command_templates(current_call: dict[str, Any], requested_flow: dict[str, Any], profile_gaps: dict[str, Any]) -> list[dict[str, Any]]:
+    source = str(requested_flow.get("source_tracker") or "U2")
+    target = str(requested_flow.get("target_tracker") or "MTEAM")
+    templates: list[dict[str, Any]] = []
+
+    def add(name: str, command: str, *, safe_to_run: bool, mutates_state: bool, requires_user_review: bool, reason: str, continue_when: str, stop_when: str) -> None:
+        templates.append(
+            {
+                "name": name,
+                "command": command,
+                "safe_to_run": safe_to_run,
+                "mutates_state": mutates_state,
+                "requires_user_review": requires_user_review,
+                "reason": reason,
+                "continue_when": continue_when,
+                "stop_when": stop_when,
+            }
+        )
+
+    add(
+        "cli_sites_requested_flow",
+        shlex.join(["python3", "ptcli.py", "sites", "--from", source, "--target", target, "--json"]),
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="Inspect requested source/target adapter and profile readiness.",
+        continue_when="requested_flow.ready=true and missing_by_tracker explains any remaining gaps",
+        stop_when="source or target is outside the Chinese PT allowlist",
+    )
+    add(
+        "api_sites_requested_flow_curl",
+        f"curl -fsS 'http://127.0.0.1:8080/v1/sites?source_tracker={source}&target={target}'",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="HTTP equivalent for AI agents inspecting site adapter/profile readiness.",
+        continue_when="site_extension_readiness_final_report and tracker_rollout_handoff are present",
+        stop_when="API response lacks requested_flow or site_extension_readiness_final_report",
+    )
+    add(
+        "api_site_policy_rule_review_for_profiles_curl",
+        "curl -fsS -X POST http://127.0.0.1:8080/v1/site-policies/rule-review -H 'Content-Type: application/json' -d "
+        + shlex.quote(
+            json.dumps(
+                {
+                    "source_tracker": source,
+                    "target": target,
+                    "trackers": [source, target],
+                    "rules_reviewed": False,
+                    "reviewer": "<reviewer>",
+                    "reviewed_at": "<YYYY-MM-DD>",
+                    "notes": ["Review tracker rules before setting rules_reviewed=true."],
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        ),
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=True,
+        reason="Collect policy profile and rule obligations for adapter/profile readiness.",
+        continue_when="after human review, response includes merged_config_patch and verification_bundle.expected_fingerprints",
+        stop_when="rules_reviewed=true was not based on actual tracker-rule review",
+    )
+    add(
+        "api_readiness_bundle_for_adapter_validation_curl",
+        "curl -fsS -X POST http://127.0.0.1:8080/v1/readiness/bundle -H 'Content-Type: application/json' -d "
+        + shlex.quote(json.dumps({"source_tracker": source, "target": target, "accept_rules": False, "confirm_upload": False}, ensure_ascii=False, separators=(",", ":"))),
+        safe_to_run=not profile_gaps.get("policy_gate_missing_by_tracker"),
+        mutates_state=False,
+        requires_user_review=False,
+        reason="Validate adapter/profile readiness after policy gates are repaired.",
+        continue_when="readiness_bundle reports source/target credentials and rule gates clearly",
+        stop_when="policy profile, rule obligations, credentials, or qBittorrent config is missing",
+    )
+    add(
+        "cli_goal_progress_after_adapter_repair",
+        shlex.join(["python3", "ptcli.py", "goal-progress", "--from", source, "--target", target, "--brief", "--json"]),
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="Reread adapter rollout status after profile/rule repairs.",
+        continue_when="tracker_adapter_handoff.policy_gate_ready=true or blockers are narrowed to live validation",
+        stop_when="profile_gaps still includes adapter_component_missing_by_tracker for requested flow",
+    )
+    if current_call:
+        add(
+            "recommended_tracker_adapter_call",
+            _goal_progress_tracker_adapter_shell_for_call(current_call),
+            safe_to_run=current_call.get("safe_to_call_now") is not False,
+            mutates_state=False,
+            requires_user_review=bool(current_call.get("requires_user_review")),
+            reason=str(current_call.get("reason") or "follow_tracker_adapter_recommended_call"),
+            continue_when="recommended call returns ready=true or actionable blockers",
+            stop_when="recommended call would require unreviewed live tracker automation",
+        )
+    return templates
+
+
+def _goal_progress_tracker_adapter_shell_for_call(call: dict[str, Any]) -> str:
+    tool = str(call.get("tool") or "")
+    endpoint = str(call.get("endpoint") or "")
+    method = str(call.get("method") or "GET").upper()
+    request = call.get("request") if isinstance(call.get("request"), dict) else {}
+    if tool == "site_profiles":
+        source = str(request.get("source_tracker") or request.get("source") or "")
+        target = str(request.get("target") or "")
+        args = ["python3", "ptcli.py", "sites"]
+        if source:
+            args.extend(["--from", source])
+        if target:
+            args.extend(["--target", target])
+        args.append("--json")
+        return shlex.join(args)
+    if endpoint:
+        if method == "GET":
+            return f"curl -fsS http://127.0.0.1:8080{endpoint}"
+        return "curl -fsS -X " + method + f" http://127.0.0.1:8080{endpoint} -H 'Content-Type: application/json' -d " + shlex.quote(json.dumps(request, ensure_ascii=False, separators=(",", ":")))
+    return "python3 ptcli.py sites --json"
+
+
+def _goal_progress_tracker_adapter_extension_requirements(
+    readiness_report: dict[str, Any],
+    profile_report: dict[str, Any],
+    profile_gaps: dict[str, Any],
+    requested_flow: dict[str, Any],
+    coverage: dict[str, Any],
+) -> dict[str, Any]:
+    role_requirements = readiness_report.get("role_requirements") if isinstance(readiness_report.get("role_requirements"), dict) else {}
+    evidence_by_role = readiness_report.get("required_evidence_by_role") if isinstance(readiness_report.get("required_evidence_by_role"), dict) else {}
+    adapter_acceptance = readiness_report.get("adapter_acceptance") if isinstance(readiness_report.get("adapter_acceptance"), dict) else {}
+    source = requested_flow.get("source_tracker")
+    target = requested_flow.get("target_tracker")
+    return {
+        "kind": "ptcli.tracker_adapter_extension_requirements",
+        "source_tracker": source,
+        "target_tracker": target,
+        "allowlist": list(CHINESE_PT_TRACKERS),
+        "reference_baselines": {
+            "api_target": "MTEAM",
+            "nexusphp_sources": ["U2", "CHD"],
+            "reference_sources_to_mteam": _string_list(coverage.get("reference_sources_to_mteam")),
+            "live_reference_sources_to_mteam": _string_list(coverage.get("live_reference_sources_to_mteam")),
+        },
+        "required_components": {
+            "source": ["source_info_adapter", "source_download_adapter", "policy_profile", "rule_obligations", "retorrent_preflight"],
+            "target": ["target_duplicate_check", "target_upload_adapter", "uploaded_torrent_download", "policy_profile", "rule_obligations", "retorrent_preflight"],
+            "shared": ["site policy profile", "manual rule review fingerprint", "qBittorrent rate-limit contract", "live validation evidence"],
+        },
+        "role_requirements": role_requirements,
+        "required_evidence_by_role": evidence_by_role,
+        "adapter_acceptance": adapter_acceptance,
+        "profile_gaps": profile_gaps,
+        "profile_report_summary": profile_report.get("summary") if isinstance(profile_report.get("summary"), dict) else {},
+        "continue_when": "requested_flow.ready=true, policy_gate_ready=true, and site_extension_readiness_final_report.missing_by_tracker={}",
+        "stop_when": [
+            "tracker is not in the Chinese PT allowlist",
+            "site rules are not manually reviewed",
+            "adapter component is missing for the requested role",
+            "live validation evidence is absent for a new flow",
+        ],
     }
 
 
@@ -46115,7 +46285,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "rule_review_verification_bundle_fields": ["ready", "requested_trackers", "expected_fingerprints", "verification_call", "read", "continue_when", "stop_when", "safety"],
                 "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "site_adapter_profile_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-                "tracker_adapter_compact_handoff_fields": ["ready", "status", "verdict", "action", "adapter_code_ready", "policy_gate_ready", "requested_trackers", "requested_flow", "coverage", "reference_status", "profile_gaps", "rollout", "missing_inputs", "workflow_steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "tracker_adapter_compact_handoff_fields": ["ready", "status", "verdict", "action", "adapter_code_ready", "policy_gate_ready", "requested_trackers", "requested_flow", "coverage", "reference_status", "profile_gaps", "extension_requirements", "rollout", "missing_inputs", "workflow_steps", "command_templates", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "tracker_adapter_extension_requirements_fields": ["kind", "source_tracker", "target_tracker", "allowlist", "reference_baselines", "required_components", "role_requirements", "required_evidence_by_role", "adapter_acceptance", "profile_gaps", "profile_report_summary", "continue_when", "stop_when"],
                 "tracker_adapter_compact_coverage_fields": ["ready", "priority_next", "source_ready_trackers", "target_ready_trackers", "live_reference_sources_to_mteam", "reference_sources_to_mteam", "reference_flows_to_mteam"],
                 "tracker_adapter_compact_reference_status_fields": ["requested_flow_has_reference", "reference_trackers", "reference_sources_to_mteam", "live_reference_sources_to_mteam", "reference_flows_to_mteam", "u2_chd_to_mteam_reference_ready"],
                 "tracker_adapter_compact_profile_gap_fields": ["policy_gate_missing_by_tracker", "preflight_gate_missing_by_tracker", "adapter_component_missing_by_tracker", "validation_blocked_trackers", "priority_next", "next_gate"],

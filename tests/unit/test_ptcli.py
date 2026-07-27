@@ -23961,6 +23961,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "reference_sources_to_mteam" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_coverage_fields"]
     assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
     assert "missing_inputs" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "command_templates" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "extension_requirements" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "tracker_adapter_extension_requirements_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "tracker_adapter_compact_missing_input_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "tracker_adapter_compact_workflow_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
@@ -27620,6 +27623,23 @@ services:
     assert brief_payload["tracker_adapters"]["profile_gaps"]["policy_gate_missing_by_tracker"]["U2"] == ["policy_profile", "rule_obligations"]
     assert brief_payload["tracker_adapters"]["profile_gaps"]["preflight_gate_missing_by_tracker"]["MTEAM"] == ["retorrent_preflight"]
     assert brief_payload["tracker_adapters"]["profile_gaps"]["adapter_component_missing_by_tracker"] == {}
+    adapter_templates = {item["name"]: item for item in payload["progress_summary"]["tracker_adapter_handoff"]["command_templates"]}
+    assert adapter_templates["cli_sites_requested_flow"]["safe_to_run"] is True
+    assert "sites --from U2 --target MTEAM" in adapter_templates["cli_sites_requested_flow"]["command"]
+    assert adapter_templates["api_sites_requested_flow_curl"]["mutates_state"] is False
+    assert adapter_templates["api_site_policy_rule_review_for_profiles_curl"]["requires_user_review"] is True
+    assert adapter_templates["api_readiness_bundle_for_adapter_validation_curl"]["safe_to_run"] is False
+    assert adapter_templates["cli_goal_progress_after_adapter_repair"]["command"] == "python3 ptcli.py goal-progress --from U2 --target MTEAM --brief --json"
+    extension_requirements = payload["progress_summary"]["tracker_adapter_handoff"]["extension_requirements"]
+    assert extension_requirements["kind"] == "ptcli.tracker_adapter_extension_requirements"
+    assert extension_requirements["source_tracker"] == "U2"
+    assert extension_requirements["target_tracker"] == "MTEAM"
+    assert "MTEAM" in extension_requirements["allowlist"]
+    assert extension_requirements["reference_baselines"]["nexusphp_sources"] == ["U2", "CHD"]
+    assert "policy_profile" in extension_requirements["required_components"]["source"]
+    brief_adapter_templates = {item["name"]: item for item in brief_payload["tracker_adapters"]["command_templates"]}
+    assert brief_adapter_templates["cli_sites_requested_flow"]["safe_to_run"] is True
+    assert brief_payload["tracker_adapters"]["extension_requirements"]["required_components"]["target"][0] == "target_duplicate_check"
     assert brief_payload["tracker_adapters"]["reference_status"]["u2_chd_to_mteam_reference_ready"] == {"U2": True, "CHD": True}
     assert brief_payload["full_view_request"] == {"brief": False}
     assert len(json.dumps(brief_payload, ensure_ascii=False)) < len(json.dumps(payload["progress_summary"], ensure_ascii=False))
