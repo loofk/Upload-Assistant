@@ -24742,6 +24742,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["discovery"]["source_url_preflight"] == "http://ptcli.local:8080/v1/retorrent/source-url/preflight"
     assert manifest["discovery"]["readiness_bundle"] == "http://ptcli.local:8080/v1/readiness/bundle"
     assert manifest["discovery"]["site_policy_rule_review"] == "http://ptcli.local:8080/v1/site-policies/rule-review"
+    assert manifest["discovery"]["site_policy_verify"] == "http://ptcli.local:8080/v1/site-policies/verify"
     assert manifest["discovery"]["summary_check"] == "http://ptcli.local:8080/v1/summary/check"
     assert manifest["discovery"]["materials_prepare"] == "http://ptcli.local:8080/v1/materials/prepare"
     assert manifest["discovery"]["materials_prepare_job"] == "http://ptcli.local:8080/v1/jobs/materials/prepare"
@@ -24987,6 +24988,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         assert payload["discovery"]["source_url_preflight"].endswith("/v1/retorrent/source-url/preflight")
         assert payload["discovery"]["readiness_bundle"].endswith("/v1/readiness/bundle")
+        assert payload["discovery"]["site_policy_verify"].endswith("/v1/site-policies/verify")
         assert payload["discovery"]["summary_check"].endswith("/v1/summary/check")
         assert payload["discovery"]["materials_prepare"].endswith("/v1/materials/prepare")
         assert payload["discovery"]["materials_prepare_job"].endswith("/v1/jobs/materials/prepare")

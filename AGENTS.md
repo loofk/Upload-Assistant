@@ -16,7 +16,7 @@ Upload Assistant (UA) 是一个基于 Python 的工具，用于自动化种子�
 - 任务式 API：retorrent/check/from-url/check-and-submit、metadata/materials/target package/target upload、daily candidates job、job status/summary/resume/cancel/list，响应统一暴露 `job_handoff`、`job_progress_handoff`、`recovery_handoff`、`next_call`、`blockers`、`next_actions`。
 - 手动源链接转种：`/v1/retorrent/source-url/preflight` 与 `/v1/jobs/retorrent/from-url/check-and-submit` 支持源站链接识别、目标查重、规则 gate、确认 gate、任务创建和后续恢复。
 - 素材链路：metadata/PTGen、MediaInfo/BDInfo、截图、图床、目标站 package/upload preflight 已纳入同步 API 与 job API，并通过 final report/handoff 暴露缺口和续跑参数。
-- 站点规则配置：`PTCLI.SITE_POLICIES` 支持下载/上传限速、做种要求、转种/促销限制、人工规则审查 fingerprint；`/v1/site-policies` 与 `/v1/site-policies/rule-review` 会给出 rule obligations、配置补丁、copyable config、执行合同和安全 gate。
+- 站点规则配置：`PTCLI.SITE_POLICIES` 支持下载/上传限速、做种要求、转种/促销限制、人工规则审查 fingerprint；`/v1/site-policies`、`/v1/site-policies/rule-review` 与 `/v1/site-policies/verify` 会给出 rule obligations、配置补丁、copyable config、fingerprint 验证、执行合同和安全 gate。
 - qBittorrent 执行：inspect/match/export/inject/wait/limits，任务中会审计 hash/path/size/sha1、限速应用、上传后新种注入和做种证据。
 - 每日 10 条候选：`/v1/candidates/daily`、schedule、scheduler、deliver、run-and-deliver、batch/refill、候选提交 job 已有服务入口；候选 digest 会暴露查重、元数据、可下载性、策略风险、提交入口和审批要求。
 

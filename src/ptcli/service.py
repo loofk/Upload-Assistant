@@ -44028,6 +44028,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
             "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
             "site_policy_rule_review": f"{public_base_url}/v1/site-policies/rule-review",
+            "site_policy_verify": f"{public_base_url}/v1/site-policies/verify",
             "summary_check": f"{public_base_url}/v1/summary/check",
             "materials_prepare": f"{public_base_url}/v1/materials/prepare",
             "materials_prepare_job": f"{public_base_url}/v1/jobs/materials/prepare",

@@ -23,6 +23,7 @@
     "source_url_preflight": "http://127.0.0.1:8080/v1/retorrent/source-url/preflight",
     "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
     "site_policy_rule_review": "http://127.0.0.1:8080/v1/site-policies/rule-review",
+    "site_policy_verify": "http://127.0.0.1:8080/v1/site-policies/verify",
     "summary_check": "http://127.0.0.1:8080/v1/summary/check",
     "materials_prepare": "http://127.0.0.1:8080/v1/materials/prepare",
     "materials_prepare_job": "http://127.0.0.1:8080/v1/jobs/materials/prepare",
@@ -51978,6 +51979,7 @@
           "rule_review_request",
           "rule_review_preview",
           "rule_review_verification_bundle",
+          "site_policy_verify_handoff",
           "config_update_plan",
           "policy_config_handoff",
           "policy_config_repair_handoff",
@@ -52019,6 +52021,25 @@
           "continue_when",
           "stop_when",
           "safety"
+        ],
+        "site_policy_verify_handoff_fields": [
+          "ready",
+          "status",
+          "action",
+          "expected_fingerprints",
+          "actual_fingerprints",
+          "matches",
+          "missing",
+          "mismatches",
+          "policy_ready",
+          "recommended_call",
+          "after_success",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
         ],
         "tracker_adapter_evidence_fields": [
           "ready",
@@ -54132,9 +54153,125 @@
         "does_not_contact_trackers": true,
         "does_not_edit_config": true
       }
+    },
+    {
+      "name": "site_policy_verify",
+      "method": "POST",
+      "path": "/v1/site-policies/verify",
+      "description": "Verify that expected manual rule-review fingerprints are present in current PTCLI.SITE_POLICIES and that the site policy gate is ready. This does not contact trackers or edit config.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "trackers": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Comma-separated tracker codes or an array, e.g. U2,MTEAM."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional source tracker code when asking for a source/target pair."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker code(s) when asking for a source/target pair."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Whether manual rule review obligations are acknowledged for this policy read."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "expected_fingerprints": {
+            "type": "object",
+            "description": "Expected per-tracker rule_review_fingerprint values, e.g. {\"U2\":\"...\",\"MTEAM\":\"...\"}."
+          },
+          "expected_fingerprints_json": {
+            "type": "string",
+            "description": "JSON object alias for expected_fingerprints, useful from CLI/query strings."
+          },
+          "expected_fingerprint": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "TRACKER=FINGERPRINT entry or list of entries."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "request",
+          "expected_fingerprints",
+          "actual_fingerprints",
+          "matches",
+          "missing",
+          "mismatches",
+          "items",
+          "policy_ready",
+          "policy_repair_gate",
+          "policy_config_apply_handoff",
+          "policy_execution_handoff",
+          "verification_call",
+          "next_step",
+          "blockers",
+          "next_actions"
+        ],
+        "item_fields": [
+          "tracker",
+          "expected",
+          "actual",
+          "match",
+          "status"
+        ],
+        "status_values": [
+          "match",
+          "missing",
+          "mismatch"
+        ],
+        "read_order": [
+          "items",
+          "missing",
+          "mismatches",
+          "policy_repair_gate",
+          "policy_config_apply_handoff",
+          "policy_execution_handoff",
+          "blockers"
+        ]
+      },
+      "workflow_hints": {
+        "after": "copy site_policy_rule_review.merged_config_patch into PTCLI.SITE_POLICIES",
+        "continue_when": "ready=true",
+        "then": "readiness_bundle"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_contact_trackers": true,
+        "does_not_contact_qbittorrent": true,
+        "does_not_edit_config": true
+      }
     }
   ],
-  "tool_count": 49,
+  "tool_count": 50,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",
