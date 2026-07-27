@@ -51491,6 +51491,7 @@
           "daily_candidate_config_final_report",
           "daily_candidate_schedule_final_report",
           "daily_candidate_target_progress",
+          "daily_candidate_execution_plan",
           "daily_candidate_goal_final_report",
           "goal_handoff",
           "next_step",
@@ -51537,6 +51538,30 @@
           "continue_when",
           "stop_when",
           "safety"
+        ],
+        "daily_candidate_execution_plan_fields": [
+          "ready",
+          "status",
+          "current_step",
+          "current_step_index",
+          "target_count",
+          "ready_count",
+          "shortfall_count",
+          "safe_to_submit_count",
+          "steps",
+          "recommended_call",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "safety"
+        ],
+        "daily_candidate_execution_step_fields": [
+          "name",
+          "ready",
+          "status",
+          "recommended_call",
+          "continue_when",
+          "stop_when"
         ],
         "daily_candidate_goal_final_report_fields": [
           "ready",

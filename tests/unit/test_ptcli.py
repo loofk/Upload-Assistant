@@ -23312,6 +23312,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_config_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_execution_plan" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_execution_plan_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "daily_candidate_execution_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "daily_candidate_goal_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_approval_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -24489,6 +24492,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_target_progress" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_target_progress_fields" in goal_progress_tool["response_contract"]
+    assert "daily_candidate_execution_plan" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_execution_plan_fields" in goal_progress_tool["response_contract"]
+    assert "daily_candidate_execution_step_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_run_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_run_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
@@ -24600,6 +24606,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_schedule_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_target_progress" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_target_progress_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "daily_candidate_execution_plan" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_execution_plan_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "daily_candidate_execution_step_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_target_fulfillment_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_run_loop_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -26657,6 +26666,14 @@ services:
     assert missing_target_progress["ready_count"] == 0
     assert missing_target_progress["shortfall_count"] == 10
     assert missing_target_progress["action"] == "refill_shortfall"
+    execution_plan = payload["evidence"]["daily_candidates"]["daily_candidate_execution_plan"]
+    assert execution_plan["kind"] == "ptcli.daily_candidate_execution_plan"
+    assert execution_plan["current_step"] == "configure_schedule"
+    assert execution_plan["current_step_index"] == 0
+    assert execution_plan["steps"][0]["recommended_call"]["tool"] == "daily_candidates_schedule"
+    assert execution_plan["steps"][2]["name"] == "refill_until_ten_ready"
+    assert execution_plan["steps"][4]["name"] == "request_user_approval"
+    assert execution_plan["steps"][5]["stop_when"] == "confirm_upload is not true, duplicate exists, or site policy gate is not ready"
     assert payload["evidence"]["daily_candidates"]["daily_candidate_delivery_final_report"] is None
     assert payload["evidence"]["daily_candidates"]["daily_candidate_schedule_final_report"]["verdict"] == "schedule_missing"
     daily_goal_report = payload["evidence"]["daily_candidates"]["daily_candidate_goal_final_report"]
