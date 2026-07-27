@@ -21836,6 +21836,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
     assert tool_by_name["agent_run_preview"]["safety"]["mutates_state"] is False
     assert "closure_contract" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+    assert "preflight_gate" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+    assert "preflight_gate_fields" in tool_by_name["agent_run_preview"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["agent_run_preview"]["response_contract"]["one_call_fields"]
     assert "steps" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["agent_run_preview"]["response_contract"]["workflows"]
     assert "seedbox_live_post_submit_report" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
@@ -24166,6 +24169,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_runbook_final_report" in readiness_schema["properties"]
     assert "next_call" in readiness_schema["properties"]
     assert "agent_decision" in readiness_schema["properties"]
+    preview_schema = openapi["paths"]["/v1/agent/run-preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "preflight_gate" in preview_schema["properties"]
 
 
 def test_agent_run_preview_exposes_closure_walkthrough() -> None:
@@ -24194,7 +24199,15 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["request_template"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert ready["request_template"]["target"] == "MTEAM"
     assert ready["request_template"]["save_path"] == "/downloads"
+    assert ready["preflight_gate"]["kind"] == "ptcli.agent_run_preview_preflight_gate"
+    assert ready["preflight_gate"]["ready"] is False
+    assert ready["preflight_gate"]["blocker_breakdown"]["first_owner"] == "user_review"
+    assert ready["preflight_gate"]["recommended_call"]["tool"] == "site_policy_rule_review"
     assert ready["one_call_handoff"]["ready"] is True
+    assert ready["one_call_handoff"]["preflight_gate_ready"] is False
+    assert ready["one_call_handoff"]["safe_to_call_now"] is False
+    assert "preflight_gate.ready=true" in ready["one_call_handoff"]["requires_before_call"]
+    assert any("first blocker owner: user_review" in blocker for blocker in ready["one_call_handoff"]["blockers"])
     assert ready["one_call_handoff"]["tool"] == "source_url_check_and_submit"
     assert ready["one_call_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert ready["recommended_tool"] == "source_url_check_and_submit"
@@ -24686,6 +24699,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "agent_manifest_readiness_report_fields" in tools_by_name["agent_smoke"]["response_contract"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+        assert "preflight_gate" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+        assert "safe_to_call_now" in tools_by_name["agent_run_preview"]["response_contract"]["one_call_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]

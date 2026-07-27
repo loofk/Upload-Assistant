@@ -40610,6 +40610,8 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
     blockers = _agent_preview_blockers(str(workflow.get("name") or ""), source_url, source_tracker, target_trackers, accept_rules, confirm_upload, request)
     steps = _agent_preview_steps(workflow, request_template)
     one_call_handoff = _agent_preview_one_call_handoff(workflow, request_template)
+    preflight_gate = _agent_preview_preflight_gate(request_template)
+    one_call_handoff = _agent_preview_one_call_with_preflight_gate(one_call_handoff, preflight_gate)
     one_call_ready = not blockers and one_call_handoff.get("ready")
     closure_contract = _agent_closure_contract()
     return {
@@ -40635,6 +40637,7 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
         "request_template": request_template,
         "closure_contract": closure_contract,
         "closure_handoff_examples": _agent_preview_closure_examples(),
+        "preflight_gate": preflight_gate,
         "one_call_handoff": one_call_handoff,
         "steps": steps,
         "next_step": one_call_handoff.get("next_step") if one_call_ready else steps[0] if steps else None,
@@ -40765,8 +40768,64 @@ def _agent_preview_one_call_handoff(workflow: dict[str, Any], request_template: 
         }
         if not blockers
         else None,
+        "safe_to_call_now": not blockers,
         "blockers": blockers,
     }
+
+
+def _agent_preview_preflight_gate(request_template: dict[str, Any]) -> dict[str, Any]:
+    try:
+        progress = goal_progress_payload(request_template)
+    except ServiceError as exc:
+        return {
+            "kind": "ptcli.agent_run_preview_preflight_gate",
+            "ready": False,
+            "status": "blocked",
+            "source": "goal_progress",
+            "blocker_breakdown": None,
+            "next_work": None,
+            "recommended_call": None,
+            "blockers": [str(exc)],
+            "next_actions": ["Run goal_progress separately, then repair blockers before live-capable calls."],
+        }
+    distance = progress.get("goal_distance_report") if isinstance(progress.get("goal_distance_report"), dict) else {}
+    blocker_breakdown = progress.get("blocker_breakdown") if isinstance(progress.get("blocker_breakdown"), dict) else {}
+    if not blocker_breakdown and isinstance(distance.get("blocker_breakdown"), dict):
+        blocker_breakdown = distance["blocker_breakdown"]
+    next_work = distance.get("next_work") if isinstance(distance.get("next_work"), dict) else {}
+    recommended_call = distance.get("recommended_call") if isinstance(distance.get("recommended_call"), dict) else {}
+    blockers = _string_list(progress.get("blockers"))
+    critical_ready = (progress.get("completion_estimate") if isinstance(progress.get("completion_estimate"), dict) else {}).get("critical_path_ready") is True
+    return {
+        "kind": "ptcli.agent_run_preview_preflight_gate",
+        "ready": bool(critical_ready and not blockers),
+        "status": "ok" if critical_ready and not blockers else "blocked",
+        "source": "goal_progress",
+        "estimated_percent": (progress.get("completion_estimate") if isinstance(progress.get("completion_estimate"), dict) else {}).get("estimated_percent"),
+        "next_work": next_work or None,
+        "recommended_call": recommended_call or None,
+        "blocker_breakdown": blocker_breakdown or None,
+        "safe_to_call_one_call": bool(critical_ready and not blockers),
+        "read_order": ["preflight_gate.blocker_breakdown", "preflight_gate.next_work", "preflight_gate.recommended_call", "one_call_handoff"],
+        "continue_when": "preflight_gate.ready=true or the user explicitly chooses a dry-run/split preflight path.",
+        "stop_when": ["preflight_gate.blocker_breakdown.first_owner=user_review", "site_policies.policy_execution_handoff.ready=false", "live upload confirmation missing"],
+        "blockers": blockers,
+        "next_actions": _string_list(progress.get("next_actions")),
+    }
+
+
+def _agent_preview_one_call_with_preflight_gate(one_call: dict[str, Any], preflight_gate: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(one_call)
+    gate_ready = preflight_gate.get("ready") is True
+    enriched["preflight_gate_ready"] = gate_ready
+    enriched["safe_to_call_now"] = bool(one_call.get("ready") and gate_ready)
+    enriched["requires_before_call"] = ["preflight_gate.ready=true", "duplicate_check.exists=false", "accept_rules=true", "confirm_upload=true"]
+    blockers = _string_list(enriched.get("blockers"))
+    if one_call.get("ready") and not gate_ready:
+        first_owner = ((preflight_gate.get("blocker_breakdown") or {}).get("first_owner") if isinstance(preflight_gate.get("blocker_breakdown"), dict) else None) or "preflight_gate"
+        blockers.append(f"preflight_gate.ready=true is required before one-call execution; first blocker owner: {first_owner}.")
+    enriched["blockers"] = list(dict.fromkeys(blocker for blocker in blockers if blocker))
+    return enriched
 
 
 def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> dict[str, Any] | None:
@@ -42207,9 +42266,10 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _agent_run_preview_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "kind", "dry_run", "mutates_state", "live_upload", "workflow", "tool", "request", "request_template", "closure_contract", "closure_handoff_examples", "one_call_handoff", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "kind", "dry_run", "mutates_state", "live_upload", "workflow", "tool", "request", "request_template", "closure_contract", "closure_handoff_examples", "preflight_gate", "one_call_handoff", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "workflows": ["source_url_retorrent", "daily_candidates"],
-        "one_call_fields": ["ready", "tool", "endpoint", "method", "request", "continue_when", "stop_when", "then_follow", "next_step", "blockers"],
+        "preflight_gate_fields": ["ready", "status", "source", "estimated_percent", "next_work", "recommended_call", "blocker_breakdown", "safe_to_call_one_call", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+        "one_call_fields": ["ready", "tool", "endpoint", "method", "request", "safe_to_call_now", "preflight_gate_ready", "requires_before_call", "continue_when", "stop_when", "then_follow", "next_step", "blockers"],
         "step_fields": ["index", "step", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when", "complete_when", "resume_with"],
         "closure_examples": ["complete", "resume", "stop"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_create_jobs", "does_not_upload"],
@@ -44358,6 +44418,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "request_template": {"type": "object"},
             "closure_contract": {"type": "object"},
             "closure_handoff_examples": {"type": "object"},
+            "preflight_gate": {"type": "object"},
             "one_call_handoff": {"type": "object"},
             "steps": {"type": "array", "items": {"type": "object"}},
             "next_step": {"type": ["object", "null"]},
