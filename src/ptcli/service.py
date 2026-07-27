@@ -39633,7 +39633,7 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "blockers": _string_list(environment.get("blockers"))[:4],
             "mkdir_commands": _string_list(environment.get("mkdir_commands"))[:4],
             "bootstrap_commands": _goal_progress_agent_brief_bootstrap_commands(environment.get("bootstrap_commands") if isinstance(environment.get("bootstrap_commands"), list) else []),
-            "command_templates": _goal_progress_agent_brief_cli_templates(environment.get("command_templates") if isinstance(environment.get("command_templates"), list) else []),
+            "command_templates": _goal_progress_agent_brief_cli_templates(environment.get("command_templates") if isinstance(environment.get("command_templates"), list) else [], limit=16),
             "verification_steps": _goal_progress_agent_brief_verification_steps(environment.get("verification_steps") if isinstance(environment.get("verification_steps"), list) else []),
             "print_bootstrap_commands": environment.get("print_bootstrap_commands"),
         },
@@ -39732,9 +39732,9 @@ def _goal_progress_agent_brief_bootstrap_commands(commands: list[Any]) -> list[d
     return compact
 
 
-def _goal_progress_agent_brief_cli_templates(commands: list[Any]) -> list[dict[str, Any]]:
+def _goal_progress_agent_brief_cli_templates(commands: list[Any], *, limit: int = 8) -> list[dict[str, Any]]:
     compact: list[dict[str, Any]] = []
-    for item in commands[:8]:
+    for item in commands[:limit]:
         if not isinstance(item, dict):
             continue
         command = str(item.get("command") or "").strip()
@@ -39764,6 +39764,7 @@ def _goal_progress_agent_brief_verification_steps(steps: list[Any]) -> list[dict
                 "command_templates": _string_list(item.get("command_templates"))[:4],
                 "continue_when": item.get("continue_when"),
                 "stop_when": _string_list(item.get("stop_when"))[:3],
+                "evidence": _string_list(item.get("evidence"))[:4],
             }
         )
     return compact

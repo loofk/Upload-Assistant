@@ -38521,8 +38521,13 @@ services:
     brief_command_templates = {item["name"]: item for item in brief_payload["environment"]["command_templates"]}
     assert brief_command_templates["cli_print_bootstrap_commands"]["mutates_state"] is False
     assert brief_command_templates[f"mkdir:{job_dir}"]["mutates_state"] is True
+    assert brief_command_templates["api_health_curl"]["mutates_state"] is False
+    assert brief_command_templates["api_agent_manifest_curl"]["safe_to_run"] is True
+    assert brief_command_templates["docker_compose_ps_api"]["command"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} ps ptcli-api"
+    assert brief_command_templates["cli_deployment_check_json"]["command"] == "python3 ptcli.py deployment-check --json"
     assert brief_payload["environment"]["verification_steps"][0]["name"] == "print_bootstrap_commands"
     assert brief_payload["environment"]["verification_steps"][0]["command_templates"] == ["cli_print_bootstrap_commands"]
+    assert brief_payload["environment"]["verification_steps"][0]["evidence"] == ["printed bootstrap commands"]
     assert brief_payload["environment"]["print_bootstrap_commands"] == "python3 ptcli.py deployment-check --print-bootstrap-commands"
     handoff = payload["progress_summary"]["environment_repair_handoff"]
     assert payload["progress_summary"]["environment_blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
