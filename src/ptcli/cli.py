@@ -257,6 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     site_policy_rule_review.add_argument("--rules-urls-json", help='Optional per-tracker rules URL JSON, e.g. {"U2":"...","MTEAM":"..."}.')
     site_policy_rule_review.add_argument("--note", dest="notes", action="append", help="Manual review note. Can be repeated.")
     site_policy_rule_review.add_argument("--review-note", dest="review_notes", action="append", help="Alias for --note. Can be repeated.")
+    site_policy_rule_review.add_argument("--print-python-update-snippet", action="store_true", help="Print only config_apply_final_report.copyable_config.python_update_snippet when ready.")
+    site_policy_rule_review.add_argument("--print-json-patch", action="store_true", help="Print only config_apply_final_report.copyable_config.json_patch when ready.")
     site_policy_rule_review.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     rule_check = subparsers.add_parser("rule-check", help="Run executable rule gates for a source/target workflow.")
@@ -12386,6 +12388,17 @@ def site_policy_rule_review_cli_payload(args: argparse.Namespace) -> dict[str, A
     return site_policy_rule_review_payload({key: value for key, value in request.items() if value not in (None, "", [])})
 
 
+def _site_policy_rule_review_print_patch(payload: dict[str, Any], field: str) -> int:
+    copyable = ((payload.get("config_apply_final_report") or {}).get("copyable_config") or {}) if isinstance(payload.get("config_apply_final_report"), dict) else {}
+    if not isinstance(copyable, dict) or copyable.get("ready") is not True:
+        return 1
+    value = copyable.get(field)
+    if not isinstance(value, str) or not value.strip():
+        return 1
+    print(value)
+    return 0
+
+
 def readiness_bundle_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import readiness_bundle_payload
 
@@ -12482,6 +12495,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "site-policy-rule-review":
             payload = _with_captured_stdout(lambda: site_policy_rule_review_cli_payload(args), json_output)
+            if args.print_python_update_snippet:
+                return _site_policy_rule_review_print_patch(payload, "python_update_snippet")
+            if args.print_json_patch:
+                return _site_policy_rule_review_print_patch(payload, "json_patch")
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 
