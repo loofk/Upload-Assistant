@@ -21671,6 +21671,13 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert apply_report["verification_bundle"] == final_report["verification_bundle"]
     assert apply_report["safety"]["does_not_edit_config"] is True
     assert apply_report["recommended_tool"] == "site_policy_rule_review"
+    ai_plan = payload["ai_config_apply_plan"]
+    assert ai_plan["kind"] == "ptcli.site_policy_rule_review_ai_config_apply_plan"
+    assert ai_plan["ready"] is False
+    assert ai_plan["status"] == "waiting_for_manual_rule_review"
+    assert ai_plan["steps"][0]["step"] == "collect_manual_rule_review"
+    assert ai_plan["recommended_call"]["tool"] == "site_policy_rule_review"
+    assert ai_plan["safety"]["must_not_fabricate_fingerprint"] is True
 
 
 def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
@@ -21764,6 +21771,19 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert apply_report["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert apply_report["safety"]["safe_to_auto_apply"] is False
     assert "copyable_config" in apply_report["read_order"]
+    ai_plan = payload["ai_config_apply_plan"]
+    assert ai_plan["kind"] == "ptcli.site_policy_rule_review_ai_config_apply_plan"
+    assert ai_plan["ready"] is True
+    assert ai_plan["status"] == "ready_to_apply_manually"
+    assert ai_plan["trackers"] == ["U2", "MTEAM"]
+    assert ai_plan["steps"][0]["step"] == "manual_edit_config"
+    assert ai_plan["steps"][0]["copyable_config_ready"] is True
+    assert ai_plan["steps"][1]["step"] == "verify_policy_gate"
+    assert ai_plan["steps"][1]["endpoint"] == "/v1/site-policies"
+    assert ai_plan["steps"][1]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert ai_plan["steps"][2]["tool"] == "goal_progress"
+    assert ai_plan["recommended_call"]["endpoint"] == "/v1/site-policies"
+    assert ai_plan["safety"]["safe_to_auto_apply"] is False
     assert payload["next_step"]["tool"] == "edit_config"
     assert payload["next_step"]["request"] == payload["merged_config_patch"]
     assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
@@ -23039,11 +23059,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "config_apply_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "ai_config_apply_plan" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
     assert "rule_review_package" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "config_apply_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "ai_config_apply_plan_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "steps" in tool_by_name["site_policy_rule_review"]["response_contract"]["ai_config_apply_plan_fields"]
     assert "copyable_config" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_final_report_fields"]
     assert "copyable_config_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
     assert "preferred_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["copyable_config_fields"]
@@ -23781,6 +23804,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "merged_config_patch" in rule_review_schema["properties"]
     assert "rule_review_final_report" in rule_review_schema["properties"]
     assert "config_apply_final_report" in rule_review_schema["properties"]
+    assert "ai_config_apply_plan" in rule_review_schema["properties"]
     assert "reviews" in rule_review_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
@@ -24487,10 +24511,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "merged_config_patch" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report" in rule_review_tool["response_contract"]["required_fields"]
     assert "config_apply_final_report" in rule_review_tool["response_contract"]["required_fields"]
+    assert "ai_config_apply_plan" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in rule_review_tool["response_contract"]
     assert "merged_config_patch" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
     assert "config_apply_final_report_fields" in rule_review_tool["response_contract"]
+    assert "ai_config_apply_plan_fields" in rule_review_tool["response_contract"]
     assert "copyable_config" in rule_review_tool["response_contract"]["config_apply_final_report_fields"]
     assert "copyable_config_fields" in rule_review_tool["response_contract"]
     assert "python_update_snippet" in rule_review_tool["response_contract"]["copyable_config_fields"]
@@ -24686,10 +24712,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submit_request_template" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_package_fields"]
         assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "config_apply_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+        assert "ai_config_apply_plan" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "rule_review_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
         assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
         assert "merge_plan" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
         assert "config_apply_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
+        assert "ai_config_apply_plan_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
         assert "copyable_config" in tools_by_name["site_policy_rule_review"]["response_contract"]["config_apply_final_report_fields"]
         assert "copyable_config_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
         assert "python_update_snippet" in tools_by_name["site_policy_rule_review"]["response_contract"]["copyable_config_fields"]

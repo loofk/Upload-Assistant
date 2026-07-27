@@ -53729,6 +53729,7 @@
           "verification_bundle",
           "rule_review_final_report",
           "config_apply_final_report",
+          "ai_config_apply_plan",
           "next_step",
           "blockers",
           "next_actions"
@@ -53830,6 +53831,34 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "ai_config_apply_plan_fields": [
+          "ready",
+          "status",
+          "action",
+          "trackers",
+          "config_path",
+          "patch_source",
+          "copyable_config_source",
+          "verification_source",
+          "steps",
+          "recommended_call",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "ai_config_apply_step_fields": [
+          "step",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "stop_when"
         ],
         "copyable_config_fields": [
           "ready",
