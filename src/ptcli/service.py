@@ -39415,6 +39415,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
     deployment_evidence = evidence.get("deployment") if isinstance(evidence.get("deployment"), dict) else {}
     daily_candidate_evidence = evidence.get("daily_candidates") if isinstance(evidence.get("daily_candidates"), dict) else {}
+    qbittorrent_evidence = evidence.get("qbittorrent") if isinstance(evidence.get("qbittorrent"), dict) else {}
     site_policy_evidence = evidence.get("site_policies") if isinstance(evidence.get("site_policies"), dict) else {}
     live_validation_evidence = evidence.get("live_validation") if isinstance(evidence.get("live_validation"), dict) else {}
     live_validation_preflight = evidence.get("live_validation_preflight") if isinstance(evidence.get("live_validation_preflight"), dict) else {}
@@ -39448,6 +39449,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "environment_blockers": _goal_progress_owner_blockers(by_owner, "environment"),
         "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
         "daily_candidate_handoff": _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence),
+        "qbit_handoff": _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence),
         "site_policy_repair_handoff": _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence),
         "live_validation_handoff": _goal_progress_compact_live_validation_handoff(live_validation_evidence, live_validation_preflight),
         "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
@@ -41990,6 +41992,180 @@ def _goal_progress_qbittorrent_next_actions(configured: bool, enforcement_ready:
     return ["Run the live validation doctor or qbit_inspect to collect qBittorrent connectivity, injection, wait, and rate-limit evidence."]
 
 
+def _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence: dict[str, Any]) -> dict[str, Any] | None:
+    if not qbittorrent_evidence:
+        return None
+    policy_limit_progress = qbittorrent_evidence.get("policy_limit_progress") if isinstance(qbittorrent_evidence.get("policy_limit_progress"), dict) else {}
+    enforcement = qbittorrent_evidence.get("qbit_enforcement_summary") if isinstance(qbittorrent_evidence.get("qbit_enforcement_summary"), dict) else {}
+    next_step = qbittorrent_evidence.get("next_step") if isinstance(qbittorrent_evidence.get("next_step"), dict) else {}
+    configured = qbittorrent_evidence.get("configured") is True
+    enforcement_ready = enforcement.get("ready") is True
+    policy_ready = policy_limit_progress.get("ready") is True
+    if not configured:
+        action = "configure_qbittorrent"
+    elif not policy_ready:
+        action = "repair_policy_limits"
+    elif enforcement_ready:
+        action = "report_qbit_ready"
+    else:
+        action = "collect_live_qbit_evidence"
+    missing_inputs = _goal_progress_qbit_missing_inputs(configured, policy_limit_progress, enforcement, qbittorrent_evidence)
+    workflow_steps = _goal_progress_qbit_workflow_steps(action, next_step, policy_limit_progress, qbittorrent_evidence)
+    current_step = next((step for step in workflow_steps if step.get("status") == "current"), None)
+    recommended_call = current_step.get("recommended_call") if isinstance(current_step, dict) and isinstance(current_step.get("recommended_call"), dict) else _goal_progress_compact_call(next_step)
+    return {
+        "kind": "ptcli.goal_qbit_compact_handoff",
+        "ready": qbittorrent_evidence.get("ready") is True,
+        "configured": configured,
+        "status": qbittorrent_evidence.get("status"),
+        "action": action,
+        "client": qbittorrent_evidence.get("client"),
+        "torrent_client": qbittorrent_evidence.get("torrent_client"),
+        "connectivity_checked": qbittorrent_evidence.get("connectivity_checked") is True,
+        "policy_limit_ready": policy_ready,
+        "policy_limit_progress": {
+            "ready": policy_limit_progress.get("ready"),
+            "status": policy_limit_progress.get("status"),
+            "role_count": policy_limit_progress.get("role_count"),
+            "configured_role_count": policy_limit_progress.get("configured_role_count"),
+            "missing_role_count": policy_limit_progress.get("missing_role_count"),
+            "missing_roles": _string_list(policy_limit_progress.get("missing_roles")),
+            "request_defaults": policy_limit_progress.get("request_defaults") if isinstance(policy_limit_progress.get("request_defaults"), dict) else {},
+            "request_default_sources": policy_limit_progress.get("request_default_sources") if isinstance(policy_limit_progress.get("request_default_sources"), dict) else {},
+        },
+        "enforcement_ready": enforcement_ready,
+        "enforcement_status": enforcement.get("status"),
+        "live_job_id": qbittorrent_evidence.get("live_job_id"),
+        "live_job_status": qbittorrent_evidence.get("live_job_status"),
+        "live_execution_package_qbit_step": qbittorrent_evidence.get("live_execution_package_qbit_step"),
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool") if isinstance(recommended_call, dict) else None,
+        "recommended_endpoint": recommended_call.get("endpoint") if isinstance(recommended_call, dict) else None,
+        "recommended_method": recommended_call.get("method") if isinstance(recommended_call, dict) else None,
+        "missing_inputs": missing_inputs,
+        "workflow_steps": workflow_steps,
+        "read_order": ["qbit_handoff", "policy_limit_progress", "recommended_call", "evidence.qbittorrent.qbit_enforcement_summary", "evidence.qbittorrent.live_user_report_qbit"],
+        "complete_when": qbittorrent_evidence.get("complete_when"),
+        "stop_when": qbittorrent_evidence.get("stop_when") if isinstance(qbittorrent_evidence.get("stop_when"), list) else [],
+        "safety": {
+            "read_only": action in {"configure_qbittorrent", "repair_policy_limits", "report_qbit_ready"},
+            "mutates_qbittorrent": action == "collect_live_qbit_evidence",
+            "contacts_trackers": action == "collect_live_qbit_evidence",
+            "requires_user_review_before_mutation": True,
+            "live_upload_requires_qbit_evidence": True,
+            "must_apply_policy_limits_before_live_upload": True,
+        },
+        "blockers": _string_list(qbittorrent_evidence.get("blockers")),
+        "next_actions": _string_list(qbittorrent_evidence.get("next_actions")),
+    }
+
+
+def _goal_progress_qbit_missing_inputs(configured: bool, policy_limit_progress: dict[str, Any], enforcement: dict[str, Any], qbittorrent_evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    missing: list[dict[str, Any]] = []
+
+    def add(name: str, source: str, blocker: str) -> None:
+        for item in missing:
+            if item["name"] == name:
+                if blocker not in item["blockers"]:
+                    item["blockers"].append(blocker)
+                return
+        missing.append({"name": name, "required": True, "source": source, "blockers": [blocker]})
+
+    if not configured:
+        add("qbit_config", "deployment_check", "qBittorrent client is not configured in data/config.py.")
+    for role in _string_list(policy_limit_progress.get("missing_roles")):
+        add("policy_qbit_limits", "site_policy_rule_review", f"{role}: qBittorrent policy rate-limit fields are missing.")
+    if configured and policy_limit_progress.get("ready") is True and enforcement.get("ready") is not True:
+        add("live_qbit_evidence", "ptcli_doctor", "Live qBittorrent injection, wait, hash/path/size, and rate-limit evidence has not been collected.")
+    for blocker in _string_list(qbittorrent_evidence.get("blockers")):
+        lower = blocker.lower()
+        if "not configured" in lower:
+            add("qbit_config", "deployment_check", blocker)
+        elif "policy" in lower or "limit" in lower:
+            add("policy_qbit_limits", "site_policy_rule_review", blocker)
+        elif "evidence" in lower or "enforcement" in lower:
+            add("live_qbit_evidence", "ptcli_doctor", blocker)
+    return missing
+
+
+def _goal_progress_qbit_workflow_steps(action: str, next_step: dict[str, Any], policy_limit_progress: dict[str, Any], qbittorrent_evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    order = ["configure_qbittorrent", "repair_policy_limits", "inspect_qbit", "collect_live_qbit_evidence", "verify_qbit_summary"]
+    current_index = order.index(action) if action in order else len(order) - 1
+
+    def status(name: str) -> str:
+        index = order.index(name)
+        if action == "report_qbit_ready":
+            return "complete"
+        if index < current_index:
+            return "complete"
+        if index == current_index:
+            return "current"
+        return "locked"
+
+    return [
+        {
+            "name": "configure_qbittorrent",
+            "status": status("configure_qbittorrent"),
+            "tool": "deployment_check",
+            "endpoint": "/v1/deployment/check",
+            "method": "GET",
+            "recommended_call": {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "deployment.qbit.configured=true and qBittorrent config points to the seedbox client",
+            "stop_when": "qBittorrent client config is missing or Docker cannot reach the host qBittorrent URL",
+        },
+        {
+            "name": "repair_policy_limits",
+            "status": status("repair_policy_limits"),
+            "tool": policy_limit_progress.get("recommended_tool") or "site_policy_rule_review",
+            "endpoint": policy_limit_progress.get("recommended_endpoint") or "/v1/site-policies/rule-review",
+            "method": policy_limit_progress.get("recommended_method") or "POST",
+            "recommended_call": _goal_progress_compact_call(policy_limit_progress.get("next_step") if isinstance(policy_limit_progress.get("next_step"), dict) else {}) or {"tool": "site_policy_rule_review", "endpoint": "/v1/site-policies/rule-review", "method": "POST"},
+            "requires_user_review": True,
+            "safe_to_call_now": False,
+            "continue_when": "policy_limit_progress.ready=true and request_defaults include qBittorrent limits for source and target roles",
+            "stop_when": "missing_roles is non-empty or request_fields lacks qbit_*_limit defaults",
+        },
+        {
+            "name": "inspect_qbit",
+            "status": "current" if action == "collect_live_qbit_evidence" and not qbittorrent_evidence.get("connectivity_checked") else status("inspect_qbit"),
+            "tool": "qbit_inspect",
+            "endpoint": "/v1/qbit/inspect",
+            "method": "GET",
+            "recommended_call": {"tool": "qbit_inspect", "endpoint": "/v1/qbit/inspect", "method": "GET"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "qBittorrent connectivity and torrent list are readable",
+            "stop_when": "qBittorrent connection fails or credentials are invalid",
+        },
+        {
+            "name": "collect_live_qbit_evidence",
+            "status": status("collect_live_qbit_evidence"),
+            "tool": next_step.get("tool") or "ptcli_doctor",
+            "endpoint": next_step.get("endpoint"),
+            "method": next_step.get("method") or "CLI",
+            "recommended_call": _goal_progress_compact_call(next_step),
+            "requires_user_review": True,
+            "safe_to_call_now": False,
+            "continue_when": "qbit_enforcement_summary.ready=true and uploaded/source qBittorrent hash/path/size evidence is present",
+            "stop_when": "live upload is attempted before qBittorrent injection/wait and policy limit evidence is collected",
+        },
+        {
+            "name": "verify_qbit_summary",
+            "status": status("verify_qbit_summary"),
+            "tool": "get_job_summary",
+            "endpoint": "/v1/jobs/{job_id}/summary",
+            "method": "GET",
+            "recommended_call": {"tool": "get_job_summary", "endpoint": "/v1/jobs/{job_id}/summary", "method": "GET", "request": {"job_id": qbittorrent_evidence.get("live_job_id") or "<live_retorrent_job_id>"}},
+            "requires_user_review": False,
+            "safe_to_call_now": bool(qbittorrent_evidence.get("live_job_id")),
+            "continue_when": "summary qbit_enforcement_summary.ready=true and live_validation_completion_audit.report_allowed=true",
+            "stop_when": "qbit_enforcement_summary.blockers is non-empty",
+        },
+    ]
+
+
 def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) -> dict[str, Any]:
     final_report = tracker_adapters.get("adapter_extension_final_report") if isinstance(tracker_adapters.get("adapter_extension_final_report"), dict) else {}
     readiness_final_report = tracker_adapters.get("site_extension_readiness_final_report") if isinstance(tracker_adapters.get("site_extension_readiness_final_report"), dict) else {}
@@ -43653,7 +43829,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "qbit_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -43686,6 +43862,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "daily_candidate_refill_final_report_fields": ["ready", "report_allowed", "verdict", "action", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "target_met", "candidate_job_count", "automatic_loop", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "policy_limit_progress", "policy_limit_ready", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+                "qbit_compact_handoff_fields": ["ready", "configured", "status", "action", "client", "torrent_client", "connectivity_checked", "policy_limit_ready", "policy_limit_progress", "enforcement_ready", "enforcement_status", "live_job_id", "live_job_status", "live_execution_package_qbit_step", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "missing_inputs", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "qbit_compact_missing_input_fields": ["name", "required", "source", "blockers"],
+                "qbit_compact_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "qbit_policy_limit_progress_fields": ["ready", "status", "role_count", "configured_role_count", "missing_role_count", "roles", "missing_roles", "request_defaults", "request_default_sources", "request_fields", "client_fields", "evidence_required", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "qbit_policy_limit_role_fields": ["role", "tracker", "role_key", "ready", "request_fields", "request_field_sources", "qbit_client_fields", "limits_human", "seeding_requirements", "missing_fields", "evidence_required"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "rule_review_preview", "rule_review_verification_bundle", "site_policy_verify_handoff", "site_policy_repair_handoff", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],

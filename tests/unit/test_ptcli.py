@@ -23833,6 +23833,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbittorrent_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "qbit_enforcement_summary" in tool_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
     assert "policy_limit_progress" in tool_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
+    assert "qbit_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "qbit_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["qbit_compact_handoff_fields"]
+    assert "missing_inputs" in tool_by_name["goal_progress"]["response_contract"]["qbit_compact_handoff_fields"]
+    assert "qbit_compact_missing_input_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "qbit_compact_workflow_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "qbit_policy_limit_progress_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "missing_roles" in tool_by_name["goal_progress"]["response_contract"]["qbit_policy_limit_progress_fields"]
     assert "qbit_client_fields" in tool_by_name["goal_progress"]["response_contract"]["qbit_policy_limit_role_fields"]
@@ -27404,6 +27410,25 @@ services:
     assert qbit["policy_limit_progress"]["roles"][0]["missing_fields"] == ["qbit_client_fields"]
     assert "policy_limit_progress" in qbit["read_order"]
     assert "policy_limit_progress.ready=false before live upload" in qbit["stop_when"]
+    qbit_brief = payload["progress_summary"]["qbit_handoff"]
+    assert qbit_brief["kind"] == "ptcli.goal_qbit_compact_handoff"
+    assert qbit_brief["configured"] is True
+    assert qbit_brief["action"] == "repair_policy_limits"
+    assert qbit_brief["recommended_tool"] == "site_policy_rule_review"
+    assert qbit_brief["policy_limit_ready"] is False
+    assert qbit_brief["policy_limit_progress"]["missing_roles"] == ["source:U2", "target:MTEAM"]
+    assert any(item["name"] == "policy_qbit_limits" for item in qbit_brief["missing_inputs"])
+    assert [step["name"] for step in qbit_brief["workflow_steps"]] == [
+        "configure_qbittorrent",
+        "repair_policy_limits",
+        "inspect_qbit",
+        "collect_live_qbit_evidence",
+        "verify_qbit_summary",
+    ]
+    assert qbit_brief["workflow_steps"][1]["status"] == "current"
+    assert qbit_brief["workflow_steps"][1]["requires_user_review"] is True
+    assert qbit_brief["workflow_steps"][3]["requires_user_review"] is True
+    assert qbit_brief["safety"]["must_apply_policy_limits_before_live_upload"] is True
     assert payload["evidence"]["daily_candidates"]["configured"] is False
     assert payload["evidence"]["daily_candidates"]["schedule_handoff"]["action"] == "configure_schedule"
     assert payload["evidence"]["daily_candidates"]["daily_schedule_gate"] is None
