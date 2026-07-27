@@ -39417,6 +39417,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     daily_candidate_evidence = evidence.get("daily_candidates") if isinstance(evidence.get("daily_candidates"), dict) else {}
     qbittorrent_evidence = evidence.get("qbittorrent") if isinstance(evidence.get("qbittorrent"), dict) else {}
     site_policy_evidence = evidence.get("site_policies") if isinstance(evidence.get("site_policies"), dict) else {}
+    tracker_adapter_evidence = evidence.get("tracker_adapters") if isinstance(evidence.get("tracker_adapters"), dict) else {}
     live_validation_evidence = evidence.get("live_validation") if isinstance(evidence.get("live_validation"), dict) else {}
     live_validation_preflight = evidence.get("live_validation_preflight") if isinstance(evidence.get("live_validation_preflight"), dict) else {}
     capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
@@ -39450,6 +39451,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
         "daily_candidate_handoff": _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence),
         "qbit_handoff": _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence),
+        "tracker_adapter_handoff": _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence),
         "site_policy_repair_handoff": _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence),
         "live_validation_handoff": _goal_progress_compact_live_validation_handoff(live_validation_evidence, live_validation_preflight),
         "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
@@ -42222,6 +42224,214 @@ def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) ->
     }
 
 
+def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dict[str, Any]) -> dict[str, Any] | None:
+    if not tracker_adapter_evidence:
+        return None
+    final_report = tracker_adapter_evidence.get("adapter_extension_final_report") if isinstance(tracker_adapter_evidence.get("adapter_extension_final_report"), dict) else {}
+    readiness_report = tracker_adapter_evidence.get("site_extension_readiness_final_report") if isinstance(tracker_adapter_evidence.get("site_extension_readiness_final_report"), dict) else {}
+    profile_report = tracker_adapter_evidence.get("site_adapter_profile_final_report") if isinstance(tracker_adapter_evidence.get("site_adapter_profile_final_report"), dict) else {}
+    rollout = tracker_adapter_evidence.get("tracker_rollout_handoff") if isinstance(tracker_adapter_evidence.get("tracker_rollout_handoff"), dict) else {}
+    coverage = tracker_adapter_evidence.get("adapter_coverage_summary") if isinstance(tracker_adapter_evidence.get("adapter_coverage_summary"), dict) else {}
+    requested_flow = tracker_adapter_evidence.get("requested_flow") if isinstance(tracker_adapter_evidence.get("requested_flow"), dict) else rollout.get("requested_flow") if isinstance(rollout.get("requested_flow"), dict) else {}
+    next_step = tracker_adapter_evidence.get("next_step") if isinstance(tracker_adapter_evidence.get("next_step"), dict) else final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else rollout.get("next_step") if isinstance(rollout.get("next_step"), dict) else {}
+    ready = tracker_adapter_evidence.get("ready") is True or final_report.get("ready") is True
+    verdict = str(tracker_adapter_evidence.get("verdict") or final_report.get("verdict") or readiness_report.get("verdict") or "")
+    action = _goal_progress_tracker_adapter_action(ready, verdict, requested_flow, rollout, readiness_report)
+    current_call = _goal_progress_tracker_adapter_recommended_call(action, next_step, rollout, readiness_report, requested_flow)
+    return {
+        "kind": "ptcli.goal_tracker_adapter_compact_handoff",
+        "ready": ready,
+        "status": tracker_adapter_evidence.get("status"),
+        "verdict": verdict or None,
+        "action": action,
+        "requested_trackers": _string_list(tracker_adapter_evidence.get("requested_trackers")) or _string_list(rollout.get("requested_trackers")),
+        "requested_flow": {
+            "source_tracker": requested_flow.get("source_tracker"),
+            "target_tracker": requested_flow.get("target_tracker"),
+            "ready": requested_flow.get("ready") is True,
+            "source_ready": requested_flow.get("source_ready"),
+            "target_ready": requested_flow.get("target_ready"),
+            "blockers": _string_list(requested_flow.get("blockers")),
+        },
+        "coverage": {
+            "ready": coverage.get("ready"),
+            "priority_next": coverage.get("priority_next") if isinstance(coverage.get("priority_next"), dict) else None,
+            "source_ready_trackers": _string_list(coverage.get("source_ready_trackers")),
+            "target_ready_trackers": _string_list(coverage.get("target_ready_trackers")),
+            "live_reference_sources_to_mteam": _string_list(coverage.get("live_reference_sources_to_mteam")),
+        },
+        "rollout": {
+            "ready": rollout.get("ready"),
+            "action": rollout.get("action"),
+            "next_source_tracker": rollout.get("next_source_tracker"),
+            "next_target_tracker": rollout.get("next_target_tracker"),
+            "validation_ready_trackers": _string_list(rollout.get("validation_ready_trackers")),
+            "validation_blocked_trackers": _string_list(rollout.get("validation_blocked_trackers")),
+            "live_reference_sources_to_mteam": _string_list(rollout.get("live_reference_sources_to_mteam")),
+        },
+        "missing_inputs": _goal_progress_tracker_adapter_missing_inputs(readiness_report, profile_report, rollout, tracker_adapter_evidence),
+        "workflow_steps": _goal_progress_tracker_adapter_workflow_steps(action, current_call, requested_flow),
+        "recommended_call": _goal_progress_compact_call(current_call),
+        "recommended_tool": current_call.get("tool") if isinstance(current_call, dict) else None,
+        "recommended_endpoint": current_call.get("endpoint") if isinstance(current_call, dict) else None,
+        "recommended_method": current_call.get("method") if isinstance(current_call, dict) else None,
+        "read_order": ["tracker_adapter_handoff", "requested_flow", "rollout", "missing_inputs", "workflow_steps", "evidence.tracker_adapters.adapter_extension_final_report", "evidence.tracker_adapters.site_extension_readiness_final_report", "evidence.tracker_adapters.site_adapter_profile_final_report"],
+        "complete_when": "requested_flow.ready=true, site_extension_readiness_final_report.report_allowed=true, and missing_by_tracker={} before treating a Chinese PT site flow as live-ready.",
+        "stop_when": [
+            "requested_flow.ready=false",
+            "site policy/profile evidence is missing for requested trackers",
+            "validation_blocked_trackers is non-empty",
+            "new site live automation is attempted without adapter and rule-gate evidence",
+        ],
+        "safety": {
+            "read_only": True,
+            "does_not_contact_trackers": True,
+            "does_not_upload": True,
+            "requires_rule_gate_before_live": True,
+            "requires_live_reference_before_marking_ready": True,
+        },
+        "blockers": _string_list(tracker_adapter_evidence.get("blockers")),
+        "next_actions": _string_list(tracker_adapter_evidence.get("next_actions")),
+    }
+
+
+def _goal_progress_tracker_adapter_action(ready: bool, verdict: str, requested_flow: dict[str, Any], rollout: dict[str, Any], readiness_report: dict[str, Any]) -> str:
+    if ready:
+        return "report_adapter_ready"
+    if requested_flow.get("ready") is not True:
+        return "extend_adapter_coverage"
+    if readiness_report.get("missing_by_tracker"):
+        return "repair_site_profiles"
+    rollout_action = str(rollout.get("action") or "")
+    if rollout_action:
+        return rollout_action
+    if verdict in {"policy_blocked", "validation_blocked"}:
+        return "validate_requested_flow"
+    return "inspect_site_profiles"
+
+
+def _goal_progress_tracker_adapter_recommended_call(action: str, next_step: dict[str, Any], rollout: dict[str, Any], readiness_report: dict[str, Any], requested_flow: dict[str, Any]) -> dict[str, Any]:
+    if action == "repair_site_profiles":
+        return {"tool": "site_policy_rule_review", "endpoint": "/v1/site-policies/rule-review", "method": "POST", "request": {"source_tracker": requested_flow.get("source_tracker"), "target": requested_flow.get("target_tracker"), "rules_reviewed": False}, "reason": "repair_site_policy_profiles_before_adapter_ready"}
+    if next_step:
+        return next_step
+    if isinstance(readiness_report.get("recommended_call"), dict):
+        return readiness_report["recommended_call"]
+    if isinstance(rollout.get("next_step"), dict):
+        return rollout["next_step"]
+    return {"tool": "site_profiles", "endpoint": "/v1/sites", "method": "GET", "request": {"source_tracker": requested_flow.get("source_tracker"), "target": requested_flow.get("target_tracker")}, "reason": "inspect_tracker_adapter_rollout"}
+
+
+def _goal_progress_tracker_adapter_missing_inputs(readiness_report: dict[str, Any], profile_report: dict[str, Any], rollout: dict[str, Any], tracker_adapter_evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    missing: list[dict[str, Any]] = []
+
+    def add(name: str, source: str, blocker: str) -> None:
+        for item in missing:
+            if item["name"] == name:
+                if blocker not in item["blockers"]:
+                    item["blockers"].append(blocker)
+                return
+        missing.append({"name": name, "required": True, "source": source, "blockers": [blocker]})
+
+    missing_by_tracker = readiness_report.get("missing_by_tracker") if isinstance(readiness_report.get("missing_by_tracker"), dict) else profile_report.get("missing_by_tracker") if isinstance(profile_report.get("missing_by_tracker"), dict) else {}
+    for tracker, fields in missing_by_tracker.items():
+        add("site_profile", "site_policy_rule_review", f"{tracker}: missing {', '.join(_string_list(fields))}.")
+    for tracker in _string_list(rollout.get("validation_blocked_trackers")):
+        add("adapter_validation", "site_profiles", f"{tracker}: adapter validation is blocked.")
+    for blocker in _string_list(tracker_adapter_evidence.get("blockers")):
+        lower = blocker.lower()
+        if "policy" in lower or "profile" in lower or "rule" in lower:
+            add("site_profile", "site_policy_rule_review", blocker)
+        elif "validation" in lower or "adapter" in lower:
+            add("adapter_validation", "site_profiles", blocker)
+        elif "flow" in lower:
+            add("requested_flow", "site_profiles", blocker)
+    return missing
+
+
+def _goal_progress_tracker_adapter_workflow_steps(action: str, recommended_call: dict[str, Any], requested_flow: dict[str, Any]) -> list[dict[str, Any]]:
+    order = ["inspect_site_profiles", "extend_adapter_coverage", "repair_site_profiles", "validate_requested_flow", "report_adapter_ready"]
+    current_index = order.index(action) if action in order else 0
+    validation_call = (
+        recommended_call
+        if action == "validate_requested_flow"
+        else {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": {"source_tracker": requested_flow.get("source_tracker"), "target": requested_flow.get("target_tracker")}}
+    )
+
+    def status(name: str) -> str:
+        if action == "report_adapter_ready":
+            return "complete"
+        index = order.index(name)
+        if index < current_index:
+            return "complete"
+        if index == current_index:
+            return "current"
+        return "locked"
+
+    return [
+        {
+            "name": "inspect_site_profiles",
+            "status": status("inspect_site_profiles"),
+            "tool": "site_profiles",
+            "endpoint": "/v1/sites",
+            "method": "GET",
+            "recommended_call": {"tool": "site_profiles", "endpoint": "/v1/sites", "method": "GET", "request": {"source_tracker": requested_flow.get("source_tracker"), "target": requested_flow.get("target_tracker")}},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "tracker_rollout_handoff and requested_flow are present",
+            "stop_when": "requested trackers are outside the Chinese PT allowlist",
+        },
+        {
+            "name": "extend_adapter_coverage",
+            "status": status("extend_adapter_coverage"),
+            "tool": "site_profiles",
+            "endpoint": "/v1/sites",
+            "method": "GET",
+            "recommended_call": recommended_call if action == "extend_adapter_coverage" else {"tool": "site_profiles", "endpoint": "/v1/sites", "method": "GET"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "requested_flow.source_ready=true and requested_flow.target_ready=true",
+            "stop_when": "adapter/profile components for a requested tracker are missing",
+        },
+        {
+            "name": "repair_site_profiles",
+            "status": status("repair_site_profiles"),
+            "tool": "site_policy_rule_review",
+            "endpoint": "/v1/site-policies/rule-review",
+            "method": "POST",
+            "recommended_call": recommended_call if action == "repair_site_profiles" else {"tool": "site_policy_rule_review", "endpoint": "/v1/site-policies/rule-review", "method": "POST"},
+            "requires_user_review": True,
+            "safe_to_call_now": False,
+            "continue_when": "site_extension_readiness_final_report.missing_by_tracker={} and rule gates are ready",
+            "stop_when": "manual tracker-rule review or required policy fields are missing",
+        },
+        {
+            "name": "validate_requested_flow",
+            "status": status("validate_requested_flow"),
+            "tool": validation_call.get("tool") or "readiness_bundle",
+            "endpoint": validation_call.get("endpoint") or "/v1/readiness/bundle",
+            "method": validation_call.get("method") or "POST",
+            "recommended_call": validation_call,
+            "requires_user_review": False,
+            "safe_to_call_now": action == "validate_requested_flow" and validation_call.get("safe_to_call_now") is not False,
+            "continue_when": "site_extension_readiness_final_report.report_allowed=true",
+            "stop_when": "validation_blocked_trackers is non-empty or policy blockers remain",
+        },
+        {
+            "name": "report_adapter_ready",
+            "status": status("report_adapter_ready"),
+            "tool": "goal_progress",
+            "endpoint": "/v1/goal/progress",
+            "method": "GET",
+            "recommended_call": {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "adapter_extension_final_report.report_allowed=true and requested flow is live-safe",
+            "stop_when": "new site live automation is attempted without live validation evidence",
+        },
+    ]
+
+
 def _goal_progress_items(
     deployment: dict[str, Any],
     site_policies: dict[str, Any],
@@ -43829,7 +44039,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "qbit_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -43875,6 +44085,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "rule_review_verification_bundle_fields": ["ready", "requested_trackers", "expected_fingerprints", "verification_call", "read", "continue_when", "stop_when", "safety"],
                 "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "site_adapter_profile_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+                "tracker_adapter_compact_handoff_fields": ["ready", "status", "verdict", "action", "requested_trackers", "requested_flow", "coverage", "rollout", "missing_inputs", "workflow_steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "tracker_adapter_compact_missing_input_fields": ["name", "required", "source", "blockers"],
+                "tracker_adapter_compact_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_compact_handoff_fields": ["ready", "report_allowed", "status", "verdict", "phase", "action", "next_stage", "job_id", "summary_file", "preflight_ready", "submission_ready", "completion_audit", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "run_order", "read_order", "complete_when", "stop_when", "missing_inputs", "workflow_steps", "safety", "blockers", "next_actions"],
                 "live_validation_missing_input_fields": ["name", "required", "source", "blockers"],

@@ -23846,6 +23846,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "tracker_adapter_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "adapter_extension_final_report" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
     assert "tracker_rollout_handoff" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
+    assert "tracker_adapter_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "tracker_adapter_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "missing_inputs" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "tracker_adapter_compact_missing_input_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "tracker_adapter_compact_workflow_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "live_validation_preflight" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "site_policy_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -27467,6 +27473,25 @@ services:
     assert daily_handoff["safety"]["submit_requires_human_approval"] is True
     assert payload["evidence"]["daily_candidates"]["next_step"]["tool"] == "daily_candidates_schedule"
     assert payload["evidence"]["daily_candidates"]["next_step"]["request"]["schedules"][0]["limit"] == 10
+    adapter_brief = payload["progress_summary"]["tracker_adapter_handoff"]
+    assert adapter_brief["kind"] == "ptcli.goal_tracker_adapter_compact_handoff"
+    assert adapter_brief["requested_trackers"] == ["U2", "MTEAM"]
+    assert adapter_brief["requested_flow"]["source_tracker"] == "U2"
+    assert adapter_brief["requested_flow"]["target_tracker"] == "MTEAM"
+    assert adapter_brief["requested_flow"]["ready"] is True
+    assert adapter_brief["action"] in {"validate_requested_flow", "repair_site_profiles"}
+    assert adapter_brief["rollout"]["action"] == "validate_requested_flow"
+    assert "U2" in adapter_brief["coverage"]["live_reference_sources_to_mteam"]
+    assert any(item["name"] in {"site_profile", "adapter_validation"} for item in adapter_brief["missing_inputs"])
+    assert [step["name"] for step in adapter_brief["workflow_steps"]] == [
+        "inspect_site_profiles",
+        "extend_adapter_coverage",
+        "repair_site_profiles",
+        "validate_requested_flow",
+        "report_adapter_ready",
+    ]
+    assert adapter_brief["workflow_steps"][2]["requires_user_review"] is True
+    assert adapter_brief["safety"]["requires_rule_gate_before_live"] is True
     daily_summary = tmp_path / "ptcli-daily-schedule-summary.json"
     daily_summary.write_text(
         json.dumps(
