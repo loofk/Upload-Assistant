@@ -52192,6 +52192,7 @@
           "trackers",
           "rules_to_review",
           "submit_request_template",
+          "missing_config_fields",
           "copyable_config_ready",
           "copyable_config",
           "preferred_patch",
@@ -52202,6 +52203,7 @@
           "recommended_tool",
           "recommended_endpoint",
           "recommended_method",
+          "repair_steps",
           "steps",
           "read_order",
           "continue_when",
@@ -52209,6 +52211,23 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "site_policy_repair_step_fields": [
+          "name",
+          "status",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "requires_user_review",
+          "safe_to_call_now",
+          "continue_when",
+          "stop_when"
+        ],
+        "site_policy_missing_config_field_fields": [
+          "tracker",
+          "field",
+          "category"
         ],
         "rule_review_preview_fields": [
           "ready",

@@ -23854,6 +23854,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_repair_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "manual_apply_ready" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
     assert "verify_call" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
+    assert "missing_config_fields" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
+    assert "repair_steps" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
+    assert "site_policy_repair_step_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "requires_user_review" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_step_fields"]
+    assert "site_policy_missing_config_field_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "manual_apply_handoff" in tool_by_name["goal_progress"]["response_contract"]["rule_review_preview_fields"]
     assert "site_policy_verify_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "site_policy_verify_final_report" in tool_by_name["site_policy_verify"]["response_contract"]["required_fields"]
@@ -27259,6 +27264,16 @@ services:
     assert payload["progress_summary"]["site_policy_repair_handoff"]["copyable_config"] is None
     assert "manual_steps" not in payload["progress_summary"]["site_policy_repair_handoff"]["rules_to_review"][0]
     assert payload["progress_summary"]["site_policy_repair_handoff"]["safety"]["must_not_fabricate_fingerprint"] is True
+    missing_policy_fields = payload["progress_summary"]["site_policy_repair_handoff"]["missing_config_fields"]
+    assert {"tracker": "U2", "field": "download_rate_limit", "category": "rate_limits"} in missing_policy_fields
+    assert {"tracker": "MTEAM", "field": "upload_rate_limit", "category": "rate_limits"} in missing_policy_fields
+    repair_steps = payload["progress_summary"]["site_policy_repair_handoff"]["repair_steps"]
+    assert [step["name"] for step in repair_steps] == ["review_tracker_rules", "apply_site_policy_config", "verify_site_policy", "return_to_goal_progress"]
+    assert repair_steps[0]["tool"] == "site_policy_rule_review"
+    assert repair_steps[0]["requires_user_review"] is True
+    assert repair_steps[1]["tool"] == "edit_config"
+    assert repair_steps[1]["safe_to_call_now"] is False
+    assert repair_steps[2]["tool"] == "site_policy_verify"
     assert payload["progress_summary"]["live_validation_handoff"]["kind"] == "ptcli.goal_live_validation_handoff"
     assert payload["progress_summary"]["live_validation_handoff"]["action"] == "repair_readiness"
     assert payload["progress_summary"]["live_validation_handoff"]["ready"] is False
