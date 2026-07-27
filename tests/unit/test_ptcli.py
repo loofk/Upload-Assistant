@@ -21677,7 +21677,9 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert final_report["merged_config_patch"] is None
     assert final_report["rule_review_package"] == review_package
     assert final_report["verification_bundle"]["ready"] is False
-    assert final_report["verification_bundle"]["verification_call"]["endpoint"] == "/v1/site-policies"
+    assert final_report["verification_bundle"]["verification_call"]["tool"] == "site_policy_verify"
+    assert final_report["verification_bundle"]["verification_call"]["endpoint"] == "/v1/site-policies/verify"
+    assert final_report["verification_bundle"]["policy_gate_call"]["endpoint"] == "/v1/site-policies"
     assert final_report["safety"]["must_not_fabricate_fingerprint"] is True
     assert final_report["recommended_tool"] == "site_policy_rule_review"
     apply_report = payload["config_apply_final_report"]
@@ -21758,7 +21760,18 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
         "U2": reviews["U2"]["rule_review_fingerprint"],
         "MTEAM": reviews["MTEAM"]["rule_review_fingerprint"],
     }
-    assert verification_bundle["verification_call"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert verification_bundle["verification_call"]["tool"] == "site_policy_verify"
+    assert verification_bundle["verification_call"]["endpoint"] == "/v1/site-policies/verify"
+    assert verification_bundle["verification_call"]["request"] == {
+        "accept_rules": True,
+        "source_tracker": "U2",
+        "target": "MTEAM",
+        "expected_fingerprints": {
+            "U2": reviews["U2"]["rule_review_fingerprint"],
+            "MTEAM": reviews["MTEAM"]["rule_review_fingerprint"],
+        },
+    }
+    assert verification_bundle["policy_gate_call"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert "policy_execution_handoff.ready" in verification_bundle["read"]
     final_report = payload["rule_review_final_report"]
     assert final_report["ready"] is True
@@ -21771,7 +21784,7 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert final_report["merge_plan"]["fingerprint_patch_source"] == "site_policy_rule_review.config_patch.structured_patch"
     assert final_report["merge_plan"]["merged_patch_source"] == "site_policy_rule_review.merged_config_patch"
     assert final_report["merge_plan"]["fingerprint_patch_wins"] is True
-    assert final_report["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert final_report["after_edit"] == verification_bundle["verification_call"]
     assert final_report["review_items"][0]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
     apply_report = payload["config_apply_final_report"]
     assert apply_report["ready"] is True
@@ -21789,12 +21802,17 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert "'U2':" in copyable["python_update_snippet"]
     assert '"MTEAM"' in copyable["json_patch"]
     assert copyable["safety"]["requires_human_config_edit"] is True
-    assert apply_report["verification"]["endpoint"] == "/v1/site-policies"
-    assert apply_report["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
-    assert apply_report["verification"]["continue_when"] == "policy_config_apply_handoff.ready=true and policy_repair_gate.ready=true and policy_execution_handoff.ready=true"
+    assert copyable["verify_after_apply"] == verification_bundle["verification_call"]
+    assert apply_report["verification"]["tool"] == "site_policy_verify"
+    assert apply_report["verification"]["endpoint"] == "/v1/site-policies/verify"
+    assert apply_report["verification"]["request"] == verification_bundle["verification_call"]["request"]
+    assert apply_report["verification"]["continue_when"] == "site_policy_verify.ready=true and policy_config_apply_handoff.ready=true and policy_repair_gate.ready=true and policy_execution_handoff.ready=true"
     assert apply_report["verification_bundle"] == verification_bundle
     assert apply_report["next_step"]["tool"] == "edit_config"
-    assert apply_report["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert apply_report["next_step"]["after_edit"] == verification_bundle["verification_call"]
+    assert apply_report["manual_steps"][1]["tool"] == "site_policy_verify"
+    assert apply_report["manual_steps"][1]["endpoint"] == "/v1/site-policies/verify"
+    assert apply_report["manual_steps"][1]["request"] == verification_bundle["verification_call"]["request"]
     assert apply_report["safety"]["safe_to_auto_apply"] is False
     assert "copyable_config" in apply_report["read_order"]
     ai_plan = payload["ai_config_apply_plan"]
@@ -21805,10 +21823,11 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert ai_plan["steps"][0]["step"] == "manual_edit_config"
     assert ai_plan["steps"][0]["copyable_config_ready"] is True
     assert ai_plan["steps"][1]["step"] == "verify_policy_gate"
-    assert ai_plan["steps"][1]["endpoint"] == "/v1/site-policies"
-    assert ai_plan["steps"][1]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert ai_plan["steps"][1]["tool"] == "site_policy_verify"
+    assert ai_plan["steps"][1]["endpoint"] == "/v1/site-policies/verify"
+    assert ai_plan["steps"][1]["request"] == verification_bundle["verification_call"]["request"]
     assert ai_plan["steps"][2]["tool"] == "goal_progress"
-    assert ai_plan["recommended_call"]["endpoint"] == "/v1/site-policies"
+    assert ai_plan["recommended_call"]["endpoint"] == "/v1/site-policies/verify"
     assert ai_plan["safety"]["safe_to_auto_apply"] is False
     manual_handoff = payload["manual_apply_handoff"]
     assert manual_handoff["kind"] == "ptcli.site_policy_rule_review_manual_apply_handoff"
@@ -21820,6 +21839,7 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert manual_handoff["verify_call"] == verification_bundle["verification_call"]
     assert manual_handoff["goal_progress_call"]["tool"] == "goal_progress"
     assert manual_handoff["live_readiness_call"]["tool"] == "readiness_bundle"
+    assert manual_handoff["live_readiness_call"]["endpoint"] == "/v1/readiness/bundle"
     assert manual_handoff["steps"][0]["step"] == "copy_structured_patch"
     assert manual_handoff["steps"][1]["step"] == "verify_policy_gate"
     assert manual_handoff["steps"][2]["step"] == "return_to_goal"
@@ -21828,7 +21848,7 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert manual_handoff["linked_plan"] == ai_plan
     assert payload["next_step"]["tool"] == "edit_config"
     assert payload["next_step"]["request"] == payload["merged_config_patch"]
-    assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert payload["next_step"]["after_edit"] == verification_bundle["verification_call"]
     assert payload["recommended_request"] == payload["merged_config_patch"]
     assert payload["recommended_endpoint"] is None
     assert payload["read_order"][0] == "rule_review_package"
@@ -21882,7 +21902,8 @@ def test_site_policy_rule_review_cli_generates_patch(monkeypatch, capsys) -> Non
     assert payload["request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
     assert payload["config_apply_final_report"]["copyable_config"]["ready"] is True
     assert payload["config_apply_final_report"]["safety"]["does_not_edit_config"] is True
-    assert payload["manual_apply_handoff"]["verify_call"]["tool"] == "site_policies"
+    assert payload["manual_apply_handoff"]["verify_call"]["tool"] == "site_policy_verify"
+    assert payload["manual_apply_handoff"]["verify_call"]["endpoint"] == "/v1/site-policies/verify"
     assert payload["next_step"]["tool"] == "edit_config"
 
 

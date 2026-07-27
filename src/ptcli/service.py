@@ -6038,13 +6038,14 @@ def site_policy_rule_review_payload(request: dict[str, Any] | None = None) -> di
     }
     merged_config_patch = _site_policy_rule_review_merged_config_patch(base_policy_patch, config_patch) if ready else None
     review_package = _site_policy_rule_review_package(ready, blockers, context, reviews, request, rerun_request)
+    verification_call = verification_bundle.get("verification_call") if isinstance(verification_bundle.get("verification_call"), dict) else {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request}
     next_step = {
         "tool": "edit_config" if ready else "site_policy_rule_review",
         "endpoint": None if ready else "/v1/site-policies/rule-review",
         "method": None if ready else "POST",
         "request": merged_config_patch if ready else review_package["submit_request_template"],
         "reason": "copy_rule_review_patch_to_config" if ready else "complete_manual_rule_review_evidence",
-        "after_edit": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request},
+        "after_edit": verification_call,
     }
     final_report = _site_policy_rule_review_final_report(ready, blockers, context, reviews, config_patch, merged_config_patch, review_package, next_step, rerun_request, verification_bundle)
     config_apply_final_report = _site_policy_rule_review_config_apply_final_report(ready, blockers, context, merged_config_patch, final_report, rerun_request, verification_bundle)
@@ -6302,24 +6303,27 @@ def _site_policy_rule_review_verification_bundle(context: dict[str, Any], review
         for item in reviews
         if ready and item.get("tracker") and item.get("rule_review_fingerprint")
     }
+    verification_request = {**rerun_request, "expected_fingerprints": expected_fingerprints}
     return {
         "kind": "ptcli.site_policy_rule_review_verification_bundle",
         "ready": ready,
         "requested_trackers": trackers,
         "expected_fingerprints": expected_fingerprints,
-        "verification_call": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request},
+        "verification_call": {"tool": "site_policy_verify", "endpoint": "/v1/site-policies/verify", "method": "POST", "request": verification_request},
+        "policy_gate_call": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request},
         "read": [
-            "policy_matrix[].policy_profile.config_audit.rule_review.fingerprint",
-            "policy_matrix[].policy_profile.config_audit.placeholder_fields",
-            "policy_config_apply_handoff.ready",
+            "items[].status",
+            "missing",
+            "mismatches",
             "policy_repair_gate.ready",
+            "policy_config_apply_handoff.ready",
             "policy_execution_handoff.ready",
         ],
-        "continue_when": "Every expected_fingerprint matches the configured site policy and policy_execution_handoff.ready=true.",
+        "continue_when": "site_policy_verify.ready=true and policy_execution_handoff.ready=true.",
         "stop_when": [
-            "any configured rule_review_fingerprint is missing",
-            "any configured rule_review_fingerprint is a placeholder",
-            "any configured rule_review_fingerprint differs from expected_fingerprints",
+            "site_policy_verify.expected_fingerprints is empty",
+            "site_policy_verify.missing is non-empty",
+            "site_policy_verify.mismatches is non-empty",
             "site_policies still reports missing qBittorrent rate limits or seeding requirements",
         ],
         "safety": {
@@ -6438,13 +6442,13 @@ def _site_policy_rule_review_final_report(
             "preserve_stricter_local_seeding_requirements": True,
             "safe_to_auto_apply": False,
         },
-        "after_edit": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request},
+        "after_edit": verification_bundle.get("verification_call") if isinstance(verification_bundle.get("verification_call"), dict) else {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request},
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_request": next_step.get("request"),
         "read_order": ["rule_review_final_report", "rule_review_package", "review_items", "verification_bundle", "merged_config_patch", "config_patch", "merge_plan", "after_edit", "blockers"],
-        "complete_when": "site_policies.policy_repair_gate.ready=true and site_policies.policy_execution_handoff.ready=true after the merged patch is copied into config.",
+        "complete_when": "site_policy_verify.ready=true after the merged patch is copied into config.",
         "stop_when": [
             "rules_reviewed is not true",
             "reviewer or reviewed_at missing",
@@ -6464,7 +6468,7 @@ def _site_policy_rule_review_final_report(
 
 def _site_policy_rule_review_next_actions(ready: bool, blockers: list[str]) -> list[str]:
     if ready:
-        return ["Copy merged_config_patch.structured_patch into PTCLI.SITE_POLICIES, keep any stricter local limits, then rerun /v1/site-policies with accept_rules=true."]
+        return ["Copy merged_config_patch.structured_patch into PTCLI.SITE_POLICIES, keep any stricter local limits, then call verification_bundle.verification_call."]
     return blockers or ["Provide rules_reviewed=true, reviewer, reviewed_at, source/target trackers, then rerun this rule-review helper."]
 
 
@@ -6477,6 +6481,16 @@ def _site_policy_rule_review_package(
     rerun_request: dict[str, Any],
 ) -> dict[str, Any]:
     rules_urls = {str(item.get("tracker")): item.get("rules_url") for item in reviews if item.get("tracker")}
+    expected_fingerprints = {
+        str(item.get("tracker")): item.get("rule_review_fingerprint")
+        for item in reviews
+        if ready and item.get("tracker") and item.get("rule_review_fingerprint")
+    }
+    after_config_edit = (
+        {"tool": "site_policy_verify", "endpoint": "/v1/site-policies/verify", "method": "POST", "request": {**rerun_request, "expected_fingerprints": expected_fingerprints}}
+        if ready
+        else {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request}
+    )
     submit_template = {
         "source_tracker": request.get("source_tracker") or request.get("from") or request.get("source"),
         "target": request.get("target") or request.get("target_tracker") or request.get("target_trackers") or request.get("to"),
@@ -6511,7 +6525,7 @@ def _site_policy_rule_review_package(
             "continue_when": "config_apply_final_report.ready=true and copyable_config.ready=true",
             "stop_when": "rule_review_final_report.verdict=needs_manual_review or blockers is non-empty",
         },
-        "after_config_edit": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request},
+        "after_config_edit": after_config_edit,
         "read_order": ["rule_review_package", "rules_to_review", "submit_request_template", "after_submit", "after_config_edit", "blockers"],
         "complete_when": "rules are reviewed by a human, submit_request_template is posted with real reviewer/reviewed_at, copyable_config is applied manually, then after_config_edit reports policy ready.",
         "stop_when": [
@@ -6546,8 +6560,8 @@ def _site_policy_rule_review_config_apply_final_report(
     patch_trackers = _string_list((merged_config_patch or {}).get("apply_order")) or _string_list(context.get("trackers"))
     preferred_patch = (merged_config_patch or {}).get("structured_patch") if isinstance((merged_config_patch or {}).get("structured_patch"), dict) else None
     fallback_patch = (merged_config_patch or {}).get("flat_patch") if isinstance((merged_config_patch or {}).get("flat_patch"), dict) else None
-    copyable_config = _site_policy_copyable_config(preferred_patch, fallback_patch, patch_trackers)
-    verification_call = {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request}
+    verification_call = verification_bundle.get("verification_call") if isinstance(verification_bundle.get("verification_call"), dict) else {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": rerun_request}
+    copyable_config = _site_policy_copyable_config(preferred_patch, fallback_patch, patch_trackers, verify_after_apply=verification_call)
     return {
         "kind": "ptcli.site_policy_config_apply_final_report",
         "ready": ready,
@@ -6560,15 +6574,17 @@ def _site_policy_rule_review_config_apply_final_report(
         "fallback_patch": fallback_patch,
         "copyable_config": copyable_config,
         "apply_order": patch_trackers,
-        "manual_steps": _site_policy_rule_review_config_apply_steps(ready, patch_trackers),
+        "manual_steps": _site_policy_rule_review_config_apply_steps(ready, patch_trackers, verification_call),
         "verification": {
-            "tool": "site_policies",
-            "endpoint": "/v1/site-policies",
-            "method": "POST",
-            "request": rerun_request,
-            "read": ["policy_config_apply_handoff", "policy_repair_gate", "policy_execution_handoff", "policy_runtime_contract"],
-            "continue_when": "policy_config_apply_handoff.ready=true and policy_repair_gate.ready=true and policy_execution_handoff.ready=true",
+            "tool": verification_call.get("tool") or "site_policies",
+            "endpoint": verification_call.get("endpoint") or "/v1/site-policies",
+            "method": verification_call.get("method") or "POST",
+            "request": verification_call.get("request") or rerun_request,
+            "read": ["items", "missing", "mismatches", "policy_config_apply_handoff", "policy_repair_gate", "policy_execution_handoff"],
+            "continue_when": "site_policy_verify.ready=true and policy_config_apply_handoff.ready=true and policy_repair_gate.ready=true and policy_execution_handoff.ready=true",
             "stop_when": [
+                "site_policy_verify.ready=false",
+                "site_policy_verify.missing or mismatches is non-empty",
                 "policy_config_apply_handoff.ready=false",
                 "policy_repair_gate.ready=false",
                 "policy_execution_handoff.ready=false",
@@ -6586,14 +6602,15 @@ def _site_policy_rule_review_config_apply_final_report(
         "recommended_request": merged_config_patch if ready else rule_review_final_report.get("recommended_request"),
         "complete_when": [
             "merged_config_patch.structured_patch is copied into PTCLI.SITE_POLICIES",
-            "site_policies.policy_config_apply_handoff.ready=true",
-            "site_policies.policy_repair_gate.ready=true",
-            "site_policies.policy_execution_handoff.ready=true",
+            "site_policy_verify.ready=true",
+            "site_policy_verify.policy_config_apply_handoff.ready=true",
+            "site_policy_verify.policy_repair_gate.ready=true",
+            "site_policy_verify.policy_execution_handoff.ready=true",
         ],
         "stop_when": [
             "rules_reviewed is not true",
             "reviewer or reviewed_at missing",
-            "site_policies still reports missing or placeholder rule_review_fingerprint",
+            "site_policy_verify reports missing or mismatched rule_review_fingerprint",
             "site_policies still reports missing qBittorrent rate limits or seeding requirements",
         ],
         "read_order": ["config_apply_final_report", "copyable_config", "preferred_patch", "manual_steps", "verification_bundle", "verification", "next_step", "blockers"],
@@ -6765,8 +6782,8 @@ def _site_policy_rule_review_manual_apply_handoff(
         else None,
         "live_readiness_call": {
             "tool": "readiness_bundle",
-            "endpoint": "/v1/deployment/check",
-            "method": "GET",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
             "request": verification_call.get("request"),
             "read": ["live_execution_package", "seedbox_live_validation_handoff", "live_validation_sequence"],
         }
@@ -6846,7 +6863,7 @@ def _site_policy_rule_review_manual_apply_handoff(
     }
 
 
-def _site_policy_rule_review_config_apply_steps(ready: bool, trackers: list[str]) -> list[dict[str, Any]]:
+def _site_policy_rule_review_config_apply_steps(ready: bool, trackers: list[str], verification_call: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     if not ready:
         return [
             {
@@ -6871,16 +6888,17 @@ def _site_policy_rule_review_config_apply_steps(ready: bool, trackers: list[str]
         },
         {
             "name": "verify_policy_ready",
-            "tool": "site_policies",
-            "endpoint": "/v1/site-policies",
-            "method": "POST",
-            "read": ["policy_config_apply_handoff.ready", "policy_repair_gate.ready", "policy_execution_handoff.ready"],
-            "continue_when": "policy_config_apply_handoff.ready=true and policy_execution_handoff.ready=true",
+            "tool": (verification_call or {}).get("tool") or "site_policies",
+            "endpoint": (verification_call or {}).get("endpoint") or "/v1/site-policies",
+            "method": (verification_call or {}).get("method") or "POST",
+            "request": (verification_call or {}).get("request"),
+            "read": ["items", "missing", "mismatches", "policy_config_apply_handoff.ready", "policy_repair_gate.ready", "policy_execution_handoff.ready"],
+            "continue_when": "site_policy_verify.ready=true and policy_execution_handoff.ready=true",
         },
     ]
 
 
-def _site_policy_copyable_config(preferred_patch: dict[str, Any] | None, fallback_patch: dict[str, Any] | None, trackers: list[str]) -> dict[str, Any]:
+def _site_policy_copyable_config(preferred_patch: dict[str, Any] | None, fallback_patch: dict[str, Any] | None, trackers: list[str], *, verify_after_apply: dict[str, Any] | None = None) -> dict[str, Any]:
     patch = preferred_patch if isinstance(preferred_patch, dict) else fallback_patch if isinstance(fallback_patch, dict) else {}
     patch_json = json.dumps(patch, ensure_ascii=False, sort_keys=True, indent=2)
     patch_hash = hashlib.sha256(patch_json.encode("utf-8")).hexdigest() if patch else None
@@ -6897,7 +6915,7 @@ def _site_policy_copyable_config(preferred_patch: dict[str, Any] | None, fallbac
         "python_update_snippet": python_update_snippet,
         "json_patch": patch_json,
         "manual_apply_note": "Paste python_update_snippet into data/config.py after the config dict is defined, or merge json_patch into config['PTCLI']['SITE_POLICIES']; keep stricter local limits if already configured.",
-        "verify_after_apply": {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST"},
+        "verify_after_apply": verify_after_apply or {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST"},
         "safety": {"does_not_edit_config": True, "safe_to_auto_apply": False, "requires_human_config_edit": True},
     }
 
