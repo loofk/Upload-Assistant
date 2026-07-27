@@ -23794,6 +23794,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "primary_blocker_group" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "environment_blockers" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "user_review_blockers" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "missing_mounts" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "env_file" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "compose" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "verification_sequence" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "environment_repair_verification_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "critical_path_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "critical_path_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "steps" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_handoff_fields"]
@@ -38283,9 +38288,24 @@ services:
     assert handoff["status"] == "blocked"
     assert handoff["action"] == "create_missing_dirs"
     assert handoff["mkdir_commands"] == [f"mkdir -p {job_dir}", f"mkdir -p {downloads_dir}"]
+    assert [item["name"] for item in handoff["missing_mounts"]] == ["job_dir", "downloads_path"]
+    assert handoff["config_file"]["path"] == str(data_dir / "config.py")
+    assert "PTCLI.SITE_POLICIES" in handoff["config_file"]["manual_edit_required"]
+    assert handoff["env_file"]["copy_command"] == "cp .env.ptcli.example .env"
+    assert handoff["compose"]["file"] == str(tmp_path / "docker-compose.yml")
+    assert handoff["compose"]["api_ready"] is True
+    assert handoff["compose"]["start_api"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} up -d --build ptcli-api"
+    assert handoff["qbit"]["configured"] is True
+    assert handoff["qbit"]["host_hint"] == "http://host.docker.internal"
+    assert handoff["daily_candidates"]["configured"] is False
+    assert [step["endpoint"] for step in handoff["verification_sequence"][:4]] == ["/health", "/openapi.json", "/v1/tools", "/.well-known/ptcli-agent.json"]
+    assert handoff["verification_sequence"][-1]["endpoint"] == "/v1/readiness/bundle"
+    assert handoff["verification_sequence"][-1]["safe_to_call_now"] is True
     assert handoff["requires_user_review"] is True
-    assert "deployment.seedbox_bootstrap_handoff" in handoff["read_order"]
+    assert "verification_sequence" in handoff["read_order"]
     assert handoff["safety"]["shell_commands_require_user_review"] is True
+    assert handoff["safety"]["compose_commands_require_user_review"] is True
+    assert handoff["safety"]["verification_requests_are_read_only"] is True
 
 
 @pytest.mark.asyncio

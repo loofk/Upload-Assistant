@@ -51714,6 +51714,13 @@
           "action",
           "mkdir_commands",
           "configured_paths",
+          "missing_mounts",
+          "config_file",
+          "env_file",
+          "compose",
+          "qbit",
+          "daily_candidates",
+          "verification_sequence",
           "recommended_call",
           "recommended_tool",
           "recommended_endpoint",
@@ -51725,6 +51732,16 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "environment_repair_verification_step_fields": [
+          "index",
+          "tool",
+          "method",
+          "endpoint",
+          "request",
+          "continue_when",
+          "safe_to_call_now",
+          "read_only"
         ],
         "critical_path_compact_handoff_fields": [
           "ready",

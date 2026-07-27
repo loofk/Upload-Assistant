@@ -40514,6 +40514,13 @@ def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dic
     next_step = bootstrap.get("next_step") if isinstance(bootstrap.get("next_step"), dict) else {}
     recommended_call = decision.get("recommended_call") if isinstance(decision.get("recommended_call"), dict) else final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else next_step
     mkdir_commands = _string_list(bootstrap.get("mkdir_commands"))
+    env_file = bootstrap.get("env_file") if isinstance(bootstrap.get("env_file"), dict) else {}
+    compose = bootstrap.get("compose") if isinstance(bootstrap.get("compose"), dict) else {}
+    config_file = bootstrap.get("config_file") if isinstance(bootstrap.get("config_file"), dict) else {}
+    qbit = bootstrap.get("qbit") if isinstance(bootstrap.get("qbit"), dict) else {}
+    daily_candidates = bootstrap.get("daily_candidates") if isinstance(bootstrap.get("daily_candidates"), dict) else {}
+    verification_requests = bootstrap.get("verification_requests") if isinstance(bootstrap.get("verification_requests"), list) else []
+    verification_sequence = _goal_progress_environment_verification_sequence(verification_requests)
     ready = deployment.get("ready") is True and bootstrap.get("ready") is True and not blockers
     return {
         "kind": "ptcli.goal_environment_repair_handoff",
@@ -40522,18 +40529,80 @@ def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dic
         "action": "continue_readiness" if ready else "create_missing_dirs" if mkdir_commands else "repair_deployment",
         "mkdir_commands": mkdir_commands,
         "configured_paths": bootstrap.get("configured_paths") if isinstance(bootstrap.get("configured_paths"), dict) else {},
+        "missing_mounts": bootstrap.get("missing_mounts") if isinstance(bootstrap.get("missing_mounts"), list) else [],
+        "config_file": {
+            "path": config_file.get("path"),
+            "required": config_file.get("required") is not False,
+            "manual_edit_required": _string_list(config_file.get("manual_edit_required")),
+        },
+        "env_file": {
+            "path": env_file.get("path"),
+            "template": env_file.get("template"),
+            "copy_command": env_file.get("copy_command"),
+            "missing_keys": _string_list(env_file.get("missing_keys")),
+            "edit_after_copy": _string_list(env_file.get("edit_after_copy")),
+        },
+        "compose": {
+            "file": compose.get("file"),
+            "api_ready": compose.get("api_ready") is True,
+            "daily_ready": compose.get("daily_ready") is True,
+            "host_path_envs": compose.get("host_path_envs") is True,
+            "start_api": compose.get("start_api"),
+            "start_daily_scheduler": compose.get("start_daily_scheduler"),
+        },
+        "qbit": {
+            "configured": qbit.get("configured") is True,
+            "client": qbit.get("client"),
+            "host_hint": qbit.get("host_hint"),
+            "connectivity_checked": qbit.get("connectivity_checked") is True,
+        },
+        "daily_candidates": {
+            "configured": daily_candidates.get("configured") is True,
+            "schedule_ready": (daily_candidates.get("schedule_handoff") or {}).get("ready") is True if isinstance(daily_candidates.get("schedule_handoff"), dict) else False,
+        },
+        "verification_sequence": verification_sequence,
         "recommended_call": recommended_call if isinstance(recommended_call, dict) else {},
         "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
         "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
         "safe_to_call_now": bool((recommended_call or {}).get("safe_to_call_now")) if isinstance(recommended_call, dict) else False,
         "requires_user_review": bool(mkdir_commands) or (bool((recommended_call or {}).get("requires_user_review")) if isinstance(recommended_call, dict) else False),
-        "read_order": ["environment_repair_handoff", "deployment.seedbox_bootstrap_handoff", "deployment.seedbox_deployment_final_decision", "deployment.deployment_final_report"],
+        "read_order": ["environment_repair_handoff", "mkdir_commands", "env_file", "compose", "verification_sequence", "deployment.seedbox_bootstrap_handoff", "deployment.seedbox_deployment_final_decision", "deployment.deployment_final_report"],
         "continue_when": "deployment_check.ready=true and seedbox_bootstrap_handoff.ready=true",
         "stop_when": ["mkdir_commands cannot be run on the target host", "downloads path is not the qBittorrent save path mount", "deployment_check still reports missing config/cookies/job/downloads paths"],
-        "safety": {"read_only": True, "mutates_state": False, "shell_commands_require_user_review": bool(mkdir_commands), "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "shell_commands_require_user_review": bool(mkdir_commands),
+            "compose_commands_require_user_review": bool(compose.get("start_api")),
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "verification_requests_are_read_only": True,
+        },
         "blockers": blockers,
         "next_actions": _string_list(bootstrap.get("next_actions")) or _string_list(final_report.get("next_actions")),
     }
+
+
+def _goal_progress_environment_verification_sequence(verification_requests: list[Any]) -> list[dict[str, Any]]:
+    sequence: list[dict[str, Any]] = []
+    for index, item in enumerate(verification_requests, start=1):
+        if not isinstance(item, dict):
+            continue
+        method = str(item.get("method") or "GET")
+        endpoint = item.get("endpoint")
+        sequence.append(
+            {
+                "index": index,
+                "tool": "deployment_check" if endpoint == "/v1/deployment/check" else "http_request",
+                "method": method,
+                "endpoint": endpoint,
+                "request": item.get("request") if isinstance(item.get("request"), dict) else None,
+                "continue_when": item.get("continue_when"),
+                "safe_to_call_now": method.upper() in {"GET", "HEAD"} or endpoint in {"/v1/readiness/bundle"},
+                "read_only": True,
+            }
+        )
+    return sequence
 
 
 def _goal_progress_compact_blocker_group(group: dict[str, Any]) -> dict[str, Any]:
@@ -44279,7 +44348,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_focus_fields": ["phase_id", "phase_name", "recommended_step", "blockers"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
-                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "missing_mounts", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_sequence", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "environment_repair_verification_step_fields": ["index", "tool", "method", "endpoint", "request", "continue_when", "safe_to_call_now", "read_only"],
                 "critical_path_compact_handoff_fields": ["ready", "status", "phase_id", "phase_name", "action", "current_step", "steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blocker_owner_order", "blockers", "next_actions"],
                 "critical_path_compact_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "critical_path_compact_safety_fields": ["read_only", "mutates_state", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload", "requires_human_rule_review", "requires_confirm_upload_for_live", "must_not_skip_duplicate_check", "must_not_fabricate_rule_fingerprint"],
