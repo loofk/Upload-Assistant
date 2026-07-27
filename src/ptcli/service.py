@@ -39675,6 +39675,7 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "configured": qbit.get("configured"),
             "policy_limit_ready": qbit.get("policy_limit_ready"),
             "recommended_tool": qbit.get("recommended_tool"),
+            "command_templates": _goal_progress_agent_brief_cli_templates(qbit.get("command_templates") if isinstance(qbit.get("command_templates"), list) else []),
             "missing_inputs": qbit.get("missing_inputs") if isinstance(qbit.get("missing_inputs"), list) else [],
         },
         "tracker_adapters": {
@@ -43222,6 +43223,13 @@ def _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence: dict[str, A
     workflow_steps = _goal_progress_qbit_workflow_steps(action, next_step, policy_limit_progress, qbittorrent_evidence)
     current_step = next((step for step in workflow_steps if step.get("status") == "current"), None)
     recommended_call = current_step.get("recommended_call") if isinstance(current_step, dict) and isinstance(current_step.get("recommended_call"), dict) else _goal_progress_compact_call(next_step)
+    command_templates = _goal_progress_qbit_command_templates(
+        action=action,
+        client=qbittorrent_evidence.get("client") or qbittorrent_evidence.get("torrent_client") or "default",
+        policy_limit_progress=policy_limit_progress,
+        qbittorrent_evidence=qbittorrent_evidence,
+        recommended_call=recommended_call if isinstance(recommended_call, dict) else {},
+    )
     return {
         "kind": "ptcli.goal_qbit_compact_handoff",
         "ready": qbittorrent_evidence.get("ready") is True,
@@ -43251,9 +43259,10 @@ def _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence: dict[str, A
         "recommended_tool": recommended_call.get("tool") if isinstance(recommended_call, dict) else None,
         "recommended_endpoint": recommended_call.get("endpoint") if isinstance(recommended_call, dict) else None,
         "recommended_method": recommended_call.get("method") if isinstance(recommended_call, dict) else None,
+        "command_templates": command_templates,
         "missing_inputs": missing_inputs,
         "workflow_steps": workflow_steps,
-        "read_order": ["qbit_handoff", "policy_limit_progress", "recommended_call", "evidence.qbittorrent.qbit_enforcement_summary", "evidence.qbittorrent.live_user_report_qbit"],
+        "read_order": ["qbit_handoff", "policy_limit_progress", "command_templates", "recommended_call", "evidence.qbittorrent.qbit_enforcement_summary", "evidence.qbittorrent.live_user_report_qbit"],
         "complete_when": qbittorrent_evidence.get("complete_when"),
         "stop_when": qbittorrent_evidence.get("stop_when") if isinstance(qbittorrent_evidence.get("stop_when"), list) else [],
         "safety": {
@@ -43295,6 +43304,131 @@ def _goal_progress_qbit_missing_inputs(configured: bool, policy_limit_progress: 
         elif "evidence" in lower or "enforcement" in lower:
             add("live_qbit_evidence", "ptcli_doctor", blocker)
     return missing
+
+
+def _goal_progress_qbit_command_templates(
+    *,
+    action: str,
+    client: Any,
+    policy_limit_progress: dict[str, Any],
+    qbittorrent_evidence: dict[str, Any],
+    recommended_call: dict[str, Any],
+) -> list[dict[str, Any]]:
+    api_base = "http://127.0.0.1:8080"
+    client_value = str(client or "default")
+    live_hash = qbittorrent_evidence.get("live_torrent_hash") or qbittorrent_evidence.get("source_torrent_hash") or qbittorrent_evidence.get("uploaded_torrent_hash") or "<infohash>"
+    live_job_id = qbittorrent_evidence.get("live_job_id") or "<retorrent_job_id>"
+    missing_roles = _string_list(policy_limit_progress.get("missing_roles"))
+    first_role = missing_roles[0] if missing_roles else "source:U2"
+    role_name, _, tracker_name = first_role.partition(":")
+    role_value = role_name if role_name in {"source", "target", "uploaded"} else "source"
+    tracker_value = tracker_name or "U2"
+    inspect_request = {"client": client_value, "limit": 20}
+    dry_run_request = {
+        "client": client_value,
+        "hash": str(live_hash),
+        "tracker": tracker_value,
+        "role": role_value,
+        "job_id": str(live_job_id),
+        "dry_run": True,
+    }
+    execute_request = {**dry_run_request, "dry_run": False}
+    rule_review_request = (recommended_call.get("request") if isinstance(recommended_call.get("request"), dict) else None) or {
+        "source_tracker": "U2",
+        "target": "MTEAM",
+        "rules_reviewed": False,
+    }
+    templates = [
+        {
+            "name": "cli_qbit_inspect_readonly",
+            "command": shlex.join(["python3", "ptcli.py", "inspect", "--client", client_value, "--limit", "20", "--json"]),
+            "safe_to_run": True,
+            "mutates_state": False,
+            "requires_user_review": False,
+            "reason": "Read-only qBittorrent connectivity and torrent visibility check.",
+        },
+        {
+            "name": "api_qbit_inspect_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/qbit/inspect",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(inspect_request, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": True,
+            "mutates_state": False,
+            "requires_user_review": False,
+            "reason": "Read-only API qBittorrent inspect call for AI tools.",
+        },
+        {
+            "name": "api_site_policy_rule_review_for_qbit_limits_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/site-policies/rule-review",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(rule_review_request, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": False,
+            "mutates_state": False,
+            "requires_user_review": True,
+            "reason": "Collects real tracker-rule review before qBittorrent limits may be trusted for automation.",
+        },
+        {
+            "name": "api_qbit_apply_limits_dry_run_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/qbit/limits",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(dry_run_request, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": str(live_hash) != "<infohash>" and action in {"collect_live_qbit_evidence", "report_qbit_ready"},
+            "mutates_state": False,
+            "requires_user_review": False,
+            "reason": "Dry-run qBittorrent rate-limit resolution for a known torrent hash; does not mutate qBittorrent.",
+        },
+        {
+            "name": "api_qbit_apply_limits_execute_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/qbit/limits",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(execute_request, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": False,
+            "mutates_state": True,
+            "requires_user_review": True,
+            "reason": "Applies qBittorrent limits; run only after dry-run is ready and the user approves the exact torrent hash and limits.",
+        },
+    ]
+    return templates
 
 
 def _goal_progress_qbit_workflow_steps(action: str, next_step: dict[str, Any], policy_limit_progress: dict[str, Any], qbittorrent_evidence: dict[str, Any]) -> list[dict[str, Any]]:
@@ -45405,7 +45539,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_refill_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "running_count", "blocked_count", "no_progress", "should_continue_refill", "should_submit", "should_poll", "should_deliver", "next_call", "after_call", "repeat_until", "read_order", "blockers", "next_actions"],
                 "daily_candidate_refill_final_report_fields": ["ready", "report_allowed", "verdict", "action", "target_count", "ready_count", "safe_to_submit_count", "ready_shortfall_count", "target_met", "candidate_job_count", "automatic_loop", "approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "policy_limit_progress", "policy_limit_ready", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-                "qbit_compact_handoff_fields": ["ready", "configured", "status", "action", "client", "torrent_client", "connectivity_checked", "policy_limit_ready", "policy_limit_progress", "enforcement_ready", "enforcement_status", "live_job_id", "live_job_status", "live_execution_package_qbit_step", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "missing_inputs", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "qbit_compact_handoff_fields": ["ready", "configured", "status", "action", "client", "torrent_client", "connectivity_checked", "policy_limit_ready", "policy_limit_progress", "enforcement_ready", "enforcement_status", "live_job_id", "live_job_status", "live_execution_package_qbit_step", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "command_templates", "missing_inputs", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "qbit_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
                 "qbit_compact_missing_input_fields": ["name", "required", "source", "blockers"],
                 "qbit_compact_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "qbit_policy_limit_progress_fields": ["ready", "status", "role_count", "configured_role_count", "missing_role_count", "roles", "missing_roles", "request_defaults", "request_default_sources", "request_fields", "client_fields", "evidence_required", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],

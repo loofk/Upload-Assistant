@@ -52353,6 +52353,7 @@
           "recommended_tool",
           "recommended_endpoint",
           "recommended_method",
+          "command_templates",
           "missing_inputs",
           "workflow_steps",
           "read_order",
@@ -52361,6 +52362,14 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "qbit_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason"
         ],
         "qbit_compact_missing_input_fields": [
           "name",

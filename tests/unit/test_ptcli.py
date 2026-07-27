@@ -23938,6 +23938,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["qbit_compact_handoff_fields"]
     assert "missing_inputs" in tool_by_name["goal_progress"]["response_contract"]["qbit_compact_handoff_fields"]
+    assert "command_templates" in tool_by_name["goal_progress"]["response_contract"]["qbit_compact_handoff_fields"]
+    assert "qbit_command_template_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "qbit_compact_missing_input_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "qbit_compact_workflow_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "qbit_policy_limit_progress_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -27662,6 +27664,14 @@ services:
     assert qbit_brief["recommended_tool"] == "site_policy_rule_review"
     assert qbit_brief["policy_limit_ready"] is False
     assert qbit_brief["policy_limit_progress"]["missing_roles"] == ["source:U2", "target:MTEAM"]
+    qbit_templates = {item["name"]: item for item in qbit_brief["command_templates"]}
+    assert qbit_templates["cli_qbit_inspect_readonly"]["safe_to_run"] is True
+    assert "inspect --client" in qbit_templates["cli_qbit_inspect_readonly"]["command"]
+    assert qbit_templates["api_site_policy_rule_review_for_qbit_limits_curl"]["requires_user_review"] is True
+    assert qbit_templates["api_qbit_apply_limits_dry_run_curl"]["safe_to_run"] is False
+    assert qbit_templates["api_qbit_apply_limits_dry_run_curl"]["mutates_state"] is False
+    assert qbit_templates["api_qbit_apply_limits_execute_curl"]["safe_to_run"] is False
+    assert qbit_templates["api_qbit_apply_limits_execute_curl"]["mutates_state"] is True
     assert any(item["name"] == "policy_qbit_limits" for item in qbit_brief["missing_inputs"])
     assert [step["name"] for step in qbit_brief["workflow_steps"]] == [
         "configure_qbittorrent",
