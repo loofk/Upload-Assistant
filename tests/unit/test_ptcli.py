@@ -23979,6 +23979,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "verify_call" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
     assert "missing_config_fields" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
     assert "repair_steps" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
+    assert "post_review_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
+    assert "site_policy_post_review_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "site_policy_repair_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "requires_user_review" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_step_fields"]
     assert "site_policy_missing_config_field_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -27508,6 +27510,33 @@ services:
     assert policy_templates["cli_rule_review_after_human_review"]["requires_user_review"] is True
     assert policy_templates["cli_rule_review_after_human_review"]["safe_to_run"] is False
     assert "site-policy-rule-review --from U2 --to MTEAM --rules-reviewed" in policy_templates["cli_rule_review_after_human_review"]["command"]
+    assert policy_templates["api_rule_review_then_read_patch_curl"]["requires_user_review"] is True
+    assert policy_templates["manual_copy_preferred_patch_to_config"]["mutates_state"] is True
+    assert policy_templates["manual_copy_preferred_patch_to_config"]["safe_to_run"] is False
+    assert policy_templates["api_verify_after_config_edit_curl"]["safe_to_run"] is False
+    assert "expected_fingerprints" in policy_templates["api_verify_after_config_edit_curl"]["command"]
+    assert policy_templates["cli_verify_after_config_edit"]["requires_user_review"] is True
+    assert "site-policy-verify" in policy_templates["cli_verify_after_config_edit"]["command"]
+    assert policy_templates["cli_goal_progress_after_policy_verify"]["safe_to_run"] is True
+    assert policy_templates["api_readiness_bundle_after_policy_verify_curl"]["requires_user_review"] is True
+    post_review = payload["progress_summary"]["site_policy_repair_handoff"]["post_review_handoff"]
+    assert post_review["kind"] == "ptcli.goal_site_policy_post_review_handoff"
+    assert post_review["status"] == "waiting_for_rule_review_response"
+    assert post_review["required_response_fields"] == [
+        "rule_review_final_report",
+        "verification_bundle.expected_fingerprints",
+        "config_apply_final_report.copyable_config",
+        "merged_config_patch.structured_patch",
+    ]
+    assert post_review["command_templates"] == [
+        "api_rule_review_then_read_patch_curl",
+        "manual_copy_preferred_patch_to_config",
+        "api_verify_after_config_edit_curl",
+        "cli_verify_after_config_edit",
+        "cli_goal_progress_after_policy_verify",
+        "api_readiness_bundle_after_policy_verify_curl",
+    ]
+    assert post_review["safety"]["must_not_fabricate_fingerprint"] is True
     assert payload["progress_summary"]["site_policy_repair_handoff"]["copyable_config"] is None
     assert "manual_steps" not in payload["progress_summary"]["site_policy_repair_handoff"]["rules_to_review"][0]
     assert payload["progress_summary"]["site_policy_repair_handoff"]["safety"]["must_not_fabricate_fingerprint"] is True
@@ -27567,6 +27596,10 @@ services:
     assert brief_payload["site_policy"]["recommended_tool"] == "site_policy_rule_review"
     assert brief_payload["site_policy"]["command_templates"][0]["name"] == "cli_rule_review_after_human_review"
     assert brief_payload["site_policy"]["command_templates"][0]["requires_user_review"] is True
+    brief_policy_templates = {item["name"]: item for item in brief_payload["site_policy"]["command_templates"]}
+    assert brief_policy_templates["manual_copy_preferred_patch_to_config"]["mutates_state"] is True
+    assert brief_policy_templates["api_verify_after_config_edit_curl"]["safe_to_run"] is False
+    assert brief_policy_templates["cli_goal_progress_after_policy_verify"]["safe_to_run"] is True
     assert brief_payload["manual_retorrent"]["required_inputs"] == manual_entry["required_inputs"]
     assert brief_payload["manual_retorrent"]["cli_templates"][0]["name"] == "api_preflight_curl"
     assert brief_payload["manual_retorrent"]["cli_templates"][2]["requires_user_review"] is True

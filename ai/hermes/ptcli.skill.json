@@ -52489,6 +52489,7 @@
           "rules_to_review",
           "submit_request_template",
           "command_templates",
+          "post_review_handoff",
           "missing_config_fields",
           "copyable_config_ready",
           "copyable_config",
@@ -52508,6 +52509,21 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "site_policy_post_review_handoff_fields": [
+          "ready",
+          "status",
+          "action",
+          "required_response_fields",
+          "preferred_patch_ready",
+          "expected_fingerprints_ready",
+          "verify_call",
+          "goal_progress_call",
+          "live_readiness_call",
+          "command_templates",
+          "continue_when",
+          "stop_when",
+          "safety"
         ],
         "site_policy_repair_step_fields": [
           "name",
