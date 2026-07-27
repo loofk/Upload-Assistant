@@ -23807,6 +23807,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "requires_user_review" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_step_fields"]
     assert "critical_path_compact_safety_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "must_not_fabricate_rule_fingerprint" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_safety_fields"]
+    assert "manual_retorrent_entry_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "manual_retorrent_entry_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "check_and_submit_call" in tool_by_name["goal_progress"]["response_contract"]["manual_retorrent_entry_handoff_fields"]
+    assert "manual_retorrent_entry_step_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "manual_retorrent_entry_safety_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "must_check_duplicates_before_submit" in tool_by_name["goal_progress"]["response_contract"]["manual_retorrent_entry_safety_fields"]
     assert "blocker_breakdown" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "remaining_percent" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
     assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
@@ -27290,6 +27296,37 @@ services:
     assert critical_handoff["steps"][1]["status"] == "current"
     assert critical_handoff["steps"][3]["status"] in {"locked", "pending"}
     assert critical_handoff["steps"][3]["safe_to_call_now"] is False
+    manual_entry = payload["progress_summary"]["manual_retorrent_entry_handoff"]
+    assert manual_entry["kind"] == "ptcli.goal_manual_retorrent_entry_handoff"
+    assert manual_entry["source"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert manual_entry["target"] == "MTEAM"
+    assert manual_entry["preflight_ready"] is True
+    assert manual_entry["policy_ready"] is False
+    assert manual_entry["live_readiness_ready"] is False
+    assert manual_entry["action"] == "repair_site_policy"
+    assert manual_entry["preflight_call"]["tool"] == "source_url_retorrent_preflight"
+    assert manual_entry["preflight_call"]["endpoint"] == "/v1/retorrent/source-url/preflight"
+    assert manual_entry["check_and_submit_call"]["tool"] == "source_url_check_and_submit"
+    assert manual_entry["check_and_submit_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert manual_entry["check_and_submit_call"]["safe_to_call_now"] is False
+    assert manual_entry["check_and_submit_call"]["requires_user_review"] is True
+    assert manual_entry["recommended_call"]["tool"] == "source_url_retorrent_preflight"
+    assert manual_entry["recommended_call"]["safe_to_call_now"] is True
+    assert [step["name"] for step in manual_entry["workflow_steps"]] == [
+        "preflight_source_url",
+        "repair_policy",
+        "repair_live_readiness",
+        "submit_check_and_create_job",
+        "poll_or_resume_job",
+        "read_final_summary",
+    ]
+    assert manual_entry["workflow_steps"][1]["status"] == "current"
+    assert manual_entry["workflow_steps"][3]["safe_to_call_now"] is False
+    assert manual_entry["safety"]["must_check_duplicates_before_submit"] is True
+    assert manual_entry["safety"]["must_not_bypass_site_policy"] is True
+    assert manual_entry["safety"]["live_upload_requires_confirm_upload"] is True
+    assert "duplicate_check.exists=false" in manual_entry["complete_when"]
+    assert "site policy gate is not ready" in manual_entry["stop_when"]
     assert payload["progress_summary"]["daily_candidate_handoff"]["kind"] == "ptcli.goal_daily_candidate_compact_handoff"
     assert payload["progress_summary"]["daily_candidate_handoff"]["action"] == "configure_schedule"
     assert payload["progress_summary"]["daily_candidate_handoff"]["target_count"] == 10

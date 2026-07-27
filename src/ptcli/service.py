@@ -39429,6 +39429,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     tracker_adapter_handoff = _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence)
     site_policy_repair_handoff = _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence)
     live_validation_handoff = _goal_progress_compact_live_validation_handoff(live_validation_evidence, live_validation_preflight)
+    manual_retorrent_entry_handoff = _goal_progress_manual_retorrent_entry_handoff(payload, site_policy_repair_handoff, live_validation_handoff)
     critical_path_handoff = _goal_progress_compact_critical_path_handoff(
         payload=payload,
         current_phase=current_phase,
@@ -39467,6 +39468,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "environment_blockers": _goal_progress_owner_blockers(by_owner, "environment"),
         "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
         "critical_path_handoff": critical_path_handoff,
+        "manual_retorrent_entry_handoff": manual_retorrent_entry_handoff,
         "daily_candidate_handoff": daily_candidate_handoff,
         "qbit_handoff": qbit_handoff,
         "tracker_adapter_handoff": tracker_adapter_handoff,
@@ -39575,6 +39577,235 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "blockers": blockers,
         "next_actions": _string_list(goal_report.get("next_actions")) or _string_list(goal_handoff.get("next_actions")) or _string_list(daily_candidate_evidence.get("next_actions")),
     }
+
+
+def _goal_progress_manual_retorrent_entry_handoff(
+    payload: dict[str, Any],
+    site_policy_repair_handoff: dict[str, Any] | None,
+    live_validation_handoff: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_context = payload.get("source_context") if isinstance(payload.get("source_context"), dict) else {}
+    source_url = source_context.get("source_url")
+    source_tracker = source_context.get("source_tracker") or "U2"
+    source_id = source_context.get("source_id")
+    target = source_context.get("target") or "MTEAM"
+    accept_rules = source_context.get("accept_rules") is True
+    confirm_upload = source_context.get("confirm_upload") is True
+    base_request = {
+        key: value
+        for key, value in {
+            "source_url": source_url,
+            "source_tracker": source_tracker if not source_url else None,
+            "source_id": source_id if not source_url else None,
+            "target": target,
+            "accept_rules": accept_rules,
+            "confirm_upload": confirm_upload,
+        }.items()
+        if value not in (None, "", [])
+    }
+    has_source = bool(source_url or (source_tracker and source_id))
+    has_target = bool(target)
+    policy_ready = (site_policy_repair_handoff or {}).get("ready") is True
+    live_ready = (live_validation_handoff or {}).get("preflight_ready") is True
+    check_submit_ready = has_source and has_target and policy_ready and live_ready and accept_rules and confirm_upload
+    preflight_ready = has_source and has_target
+    preflight_call = {"tool": "source_url_retorrent_preflight", "endpoint": "/v1/retorrent/source-url/preflight", "method": "POST", "request": base_request}
+    check_submit_call = {
+        "tool": "source_url_check_and_submit",
+        "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+        "method": "POST",
+        "request": {**base_request, "accept_rules": True, "confirm_upload": True},
+        "safe_to_call_now": False,
+        "requires_user_review": True,
+        "reason": "call_only_after_preflight_duplicate_policy_and_doctor_gates",
+    }
+    action = (
+        "provide_source_and_target"
+        if not preflight_ready
+        else "repair_site_policy"
+        if not policy_ready
+        else "repair_live_readiness"
+        if not live_ready
+        else "collect_confirmations"
+        if not (accept_rules and confirm_upload)
+        else "submit_check_and_poll"
+    )
+    recommended_call = preflight_call if action in {"provide_source_and_target", "repair_site_policy", "repair_live_readiness", "collect_confirmations"} else check_submit_call
+    blockers = _goal_progress_manual_retorrent_entry_blockers(preflight_ready, policy_ready, live_ready, accept_rules, confirm_upload, site_policy_repair_handoff, live_validation_handoff)
+    return {
+        "kind": "ptcli.goal_manual_retorrent_entry_handoff",
+        "ready": check_submit_ready,
+        "status": "ready_to_submit" if check_submit_ready else "blocked",
+        "action": action,
+        "source": {"source_url": source_url, "source_tracker": source_tracker, "source_id": source_id},
+        "target": target,
+        "preflight_ready": preflight_ready,
+        "policy_ready": policy_ready,
+        "live_readiness_ready": live_ready,
+        "accept_rules": accept_rules,
+        "confirm_upload": confirm_upload,
+        "preflight_call": preflight_call,
+        "check_and_submit_call": check_submit_call,
+        "recommended_call": {**recommended_call, "safe_to_call_now": action != "submit_check_and_poll" and bool(preflight_ready), "requires_user_review": action == "submit_check_and_poll"},
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "workflow_steps": _goal_progress_manual_retorrent_entry_steps(preflight_call, check_submit_call, action),
+        "read_order": ["manual_retorrent_entry_handoff", "preflight_call", "site_policy_repair_handoff", "live_validation_handoff", "check_and_submit_call", "workflow_steps"],
+        "complete_when": [
+            "source_url_retorrent_preflight.ready_to_create_job=true",
+            "duplicate_check.exists=false",
+            "site_policy_repair_handoff.ready=true",
+            "live_validation_handoff.preflight_ready=true",
+            "source_url_check_and_submit returns job_id",
+            "get_job_summary.live_validation_completion_audit.report_allowed=true",
+        ],
+        "stop_when": [
+            "source reference or target is missing",
+            "duplicate_check.exists=true",
+            "site policy gate is not ready",
+            "accept_rules=true or confirm_upload=true is missing for live upload",
+            "doctor_result_handoff.live_safe_to_attempt is not true before mutating submit",
+        ],
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "preflight_does_not_upload": True,
+            "check_and_submit_may_create_live_job": True,
+            "check_and_submit_requires_user_review": True,
+            "must_check_duplicates_before_submit": True,
+            "must_not_bypass_site_policy": True,
+            "live_upload_requires_confirm_upload": True,
+        },
+        "blockers": blockers,
+        "next_actions": _goal_progress_manual_retorrent_entry_next_actions(action, blockers),
+    }
+
+
+def _goal_progress_manual_retorrent_entry_blockers(
+    preflight_ready: bool,
+    policy_ready: bool,
+    live_ready: bool,
+    accept_rules: bool,
+    confirm_upload: bool,
+    site_policy_repair_handoff: dict[str, Any] | None,
+    live_validation_handoff: dict[str, Any] | None,
+) -> list[str]:
+    blockers: list[str] = []
+    if not preflight_ready:
+        blockers.append("source_url or source_tracker/source_id plus target is required.")
+    if not policy_ready:
+        blockers.extend(_string_list((site_policy_repair_handoff or {}).get("blockers")) or ["site_policy_repair_handoff.ready=false"])
+    if not live_ready:
+        blockers.extend(_string_list((live_validation_handoff or {}).get("blockers")) or ["live_validation_handoff.preflight_ready=false"])
+    if not accept_rules:
+        blockers.append("accept_rules=true is required before live upload.")
+    if not confirm_upload:
+        blockers.append("confirm_upload=true is required before live upload.")
+    return list(dict.fromkeys(blockers))[:12]
+
+
+def _goal_progress_manual_retorrent_entry_steps(preflight_call: dict[str, Any], check_submit_call: dict[str, Any], action: str) -> list[dict[str, Any]]:
+    current_seen = False
+
+    def status_for(name: str) -> str:
+        nonlocal current_seen
+        current_name = {
+            "provide_source_and_target": "preflight_source_url",
+            "repair_site_policy": "repair_policy",
+            "repair_live_readiness": "repair_live_readiness",
+            "collect_confirmations": "submit_check_and_create_job",
+            "submit_check_and_poll": "submit_check_and_create_job",
+        }.get(action, "preflight_source_url")
+        if name == current_name and not current_seen:
+            current_seen = True
+            return "current"
+        return "pending" if current_seen else "locked"
+
+    return [
+        {
+            "name": "preflight_source_url",
+            "status": status_for("preflight_source_url"),
+            "tool": "source_url_retorrent_preflight",
+            "endpoint": "/v1/retorrent/source-url/preflight",
+            "method": "POST",
+            "recommended_call": preflight_call,
+            "safe_to_call_now": bool((preflight_call.get("request") or {}).get("target")),
+            "requires_user_review": False,
+            "continue_when": "ready_to_create_job=true and duplicate_check_handoff is available",
+            "stop_when": "source_url/source_id, target, or policy preflight blockers are missing",
+        },
+        {
+            "name": "repair_policy",
+            "status": status_for("repair_policy"),
+            "tool": "site_policy_rule_review",
+            "endpoint": "/v1/site-policies/rule-review",
+            "method": "POST",
+            "safe_to_call_now": False,
+            "requires_user_review": True,
+            "continue_when": "site_policy_repair_handoff.ready=true and site_policy_verify.ready=true",
+            "stop_when": "manual rule review evidence or rate-limit/seeding config is missing",
+        },
+        {
+            "name": "repair_live_readiness",
+            "status": status_for("repair_live_readiness"),
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "continue_when": "live_validation_handoff.preflight_ready=true and doctor handoff is available",
+            "stop_when": "deployment, credentials, qBittorrent, material, or confirmation blockers remain",
+        },
+        {
+            "name": "submit_check_and_create_job",
+            "status": status_for("submit_check_and_create_job"),
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "recommended_call": check_submit_call,
+            "safe_to_call_now": False,
+            "requires_user_review": True,
+            "continue_when": "duplicate_check.exists=false and job_id is returned",
+            "stop_when": "duplicate exists, confirm_upload is missing, or doctor live-safe evidence is absent",
+        },
+        {
+            "name": "poll_or_resume_job",
+            "status": status_for("poll_or_resume_job"),
+            "tool": "get_job_status",
+            "endpoint": "/v1/jobs/{job_id}",
+            "method": "GET",
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "continue_when": "job_handoff.action is not wait, then follow next_call/manual_retorrent_remaining_sequence safely",
+            "stop_when": "next_call.safe_to_call_now=false or next_call.requires_user_review=true without user approval",
+        },
+        {
+            "name": "read_final_summary",
+            "status": status_for("read_final_summary"),
+            "tool": "get_job_summary",
+            "endpoint": "/v1/jobs/{job_id}/summary",
+            "method": "GET",
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "continue_when": "live_validation_completion_audit.report_allowed=true",
+            "stop_when": "summary evidence lacks uploaded torrent injection/seeding hash/path/sha1 fields",
+        },
+    ]
+
+
+def _goal_progress_manual_retorrent_entry_next_actions(action: str, blockers: list[str]) -> list[str]:
+    actions = {
+        "provide_source_and_target": "Provide source_url or source_tracker/source_id plus target, then call manual_retorrent_entry_handoff.preflight_call.",
+        "repair_site_policy": "Resolve site_policy_repair_handoff first; do not submit a live job while policy blockers remain.",
+        "repair_live_readiness": "Run readiness_bundle and doctor preflight before source_url_check_and_submit.",
+        "collect_confirmations": "Collect explicit accept_rules=true and confirm_upload=true before any live upload job.",
+        "submit_check_and_poll": "After user review and doctor live-safe evidence, call check_and_submit_call, then poll/resume/read summary.",
+    }
+    result = [actions.get(action, "Inspect manual_retorrent_entry_handoff.workflow_steps.")]
+    if blockers:
+        result.append("Do not call source_url_check_and_submit while manual_retorrent_entry_handoff.blockers is non-empty.")
+    return result
 
 
 def _goal_progress_compact_critical_path_handoff(
@@ -44335,7 +44566,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "manual_retorrent_entry_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -44353,6 +44584,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_compact_handoff_fields": ["ready", "status", "phase_id", "phase_name", "action", "current_step", "steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blocker_owner_order", "blockers", "next_actions"],
                 "critical_path_compact_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "critical_path_compact_safety_fields": ["read_only", "mutates_state", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload", "requires_human_rule_review", "requires_confirm_upload_for_live", "must_not_skip_duplicate_check", "must_not_fabricate_rule_fingerprint"],
+                "manual_retorrent_entry_handoff_fields": ["ready", "status", "action", "source", "target", "preflight_ready", "policy_ready", "live_readiness_ready", "accept_rules", "confirm_upload", "preflight_call", "check_and_submit_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "manual_retorrent_entry_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "safe_to_call_now", "requires_user_review", "continue_when", "stop_when"],
+                "manual_retorrent_entry_safety_fields": ["read_only", "mutates_state", "preflight_does_not_upload", "check_and_submit_may_create_live_job", "check_and_submit_requires_user_review", "must_check_duplicates_before_submit", "must_not_bypass_site_policy", "live_upload_requires_confirm_upload"],
                 "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "missing_inputs", "schedule_env", "schedule_env_example", "compose", "configure_schedule_call", "create_jobs_call", "run_now_call", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_compact_workflow_step_fields": ["name", "ready", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "daily_candidate_compact_missing_input_fields": ["name", "required", "source", "blockers"],
