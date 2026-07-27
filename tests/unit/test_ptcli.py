@@ -23794,6 +23794,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "primary_blocker_group" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "environment_blockers" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "user_review_blockers" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "critical_path_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "critical_path_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "steps" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_handoff_fields"]
+    assert "current_step" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_handoff_fields"]
+    assert "critical_path_compact_step_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "requires_user_review" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_step_fields"]
+    assert "critical_path_compact_safety_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "must_not_fabricate_rule_fingerprint" in tool_by_name["goal_progress"]["response_contract"]["critical_path_compact_safety_fields"]
     assert "blocker_breakdown" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "remaining_percent" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
     assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
@@ -27251,6 +27259,32 @@ services:
     assert payload["progress_summary"]["environment_repair_handoff"]["kind"] == "ptcli.goal_environment_repair_handoff"
     assert payload["progress_summary"]["environment_repair_handoff"]["mkdir_commands"] == []
     assert payload["evidence"]["deployment"]["environment_repair_handoff"] == payload["progress_summary"]["environment_repair_handoff"]
+    critical_handoff = payload["progress_summary"]["critical_path_handoff"]
+    assert critical_handoff["kind"] == "ptcli.goal_critical_path_compact_handoff"
+    assert critical_handoff["phase_id"] == "manual_live_retorrent_closure"
+    assert critical_handoff["action"] == "repair_site_policy"
+    assert critical_handoff["current_step"]["name"] == "repair_site_policy"
+    assert critical_handoff["current_step"]["tool"] == "site_policy_rule_review"
+    assert critical_handoff["current_step"]["requires_user_review"] is True
+    assert critical_handoff["recommended_tool"] == "site_policy_rule_review"
+    assert critical_handoff["safety"]["requires_human_rule_review"] is True
+    assert critical_handoff["safety"]["requires_confirm_upload_for_live"] is True
+    assert critical_handoff["safety"]["must_not_skip_duplicate_check"] is True
+    assert critical_handoff["safety"]["must_not_fabricate_rule_fingerprint"] is True
+    assert "site_policy_repair_handoff.ready=true" in critical_handoff["complete_when"]
+    assert "live_validation_completion_audit.report_allowed is not true" in critical_handoff["stop_when"]
+    assert [step["name"] for step in critical_handoff["steps"]] == [
+        "repair_environment",
+        "repair_site_policy",
+        "verify_qbittorrent_policy_limits",
+        "run_live_validation",
+        "validate_daily_candidates",
+        "expand_tracker_adapters",
+    ]
+    assert critical_handoff["steps"][0]["status"] == "complete"
+    assert critical_handoff["steps"][1]["status"] == "current"
+    assert critical_handoff["steps"][3]["status"] in {"locked", "pending"}
+    assert critical_handoff["steps"][3]["safe_to_call_now"] is False
     assert payload["progress_summary"]["daily_candidate_handoff"]["kind"] == "ptcli.goal_daily_candidate_compact_handoff"
     assert payload["progress_summary"]["daily_candidate_handoff"]["action"] == "configure_schedule"
     assert payload["progress_summary"]["daily_candidate_handoff"]["target_count"] == 10

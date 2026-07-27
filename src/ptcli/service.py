@@ -39424,6 +39424,23 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     capability_status = {str(item.get("id")): item.get("status") for item in capabilities if isinstance(item, dict) and item.get("id")}
     by_owner = blocker_breakdown.get("by_owner") if isinstance(blocker_breakdown.get("by_owner"), dict) else {}
     primary_blocker_group = _goal_progress_primary_blocker_group(by_owner, recommended_call, first_group)
+    daily_candidate_handoff = _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence)
+    qbit_handoff = _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence)
+    tracker_adapter_handoff = _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence)
+    site_policy_repair_handoff = _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence)
+    live_validation_handoff = _goal_progress_compact_live_validation_handoff(live_validation_evidence, live_validation_preflight)
+    critical_path_handoff = _goal_progress_compact_critical_path_handoff(
+        payload=payload,
+        current_phase=current_phase,
+        blocker_breakdown=blocker_breakdown,
+        recommended_call=recommended_call,
+        deployment_evidence=deployment_evidence,
+        site_policy_repair_handoff=site_policy_repair_handoff,
+        qbit_handoff=qbit_handoff,
+        live_validation_handoff=live_validation_handoff,
+        daily_candidate_handoff=daily_candidate_handoff,
+        tracker_adapter_handoff=tracker_adapter_handoff,
+    )
     return {
         "kind": "ptcli.goal_progress_brief",
         "status": payload.get("status"),
@@ -39449,11 +39466,12 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "blocker_count": len(blockers),
         "environment_blockers": _goal_progress_owner_blockers(by_owner, "environment"),
         "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
-        "daily_candidate_handoff": _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence),
-        "qbit_handoff": _goal_progress_compact_qbittorrent_handoff(qbittorrent_evidence),
-        "tracker_adapter_handoff": _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence),
-        "site_policy_repair_handoff": _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence),
-        "live_validation_handoff": _goal_progress_compact_live_validation_handoff(live_validation_evidence, live_validation_preflight),
+        "critical_path_handoff": critical_path_handoff,
+        "daily_candidate_handoff": daily_candidate_handoff,
+        "qbit_handoff": qbit_handoff,
+        "tracker_adapter_handoff": tracker_adapter_handoff,
+        "site_policy_repair_handoff": site_policy_repair_handoff,
+        "live_validation_handoff": live_validation_handoff,
         "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
         "site_policy_config_blockers": _goal_progress_owner_blockers(by_owner, "site_policy_config"),
         "live_validation_blockers": _goal_progress_owner_blockers(by_owner, "live_validation"),
@@ -39557,6 +39575,215 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "blockers": blockers,
         "next_actions": _string_list(goal_report.get("next_actions")) or _string_list(goal_handoff.get("next_actions")) or _string_list(daily_candidate_evidence.get("next_actions")),
     }
+
+
+def _goal_progress_compact_critical_path_handoff(
+    *,
+    payload: dict[str, Any],
+    current_phase: dict[str, Any],
+    blocker_breakdown: dict[str, Any],
+    recommended_call: dict[str, Any] | None,
+    deployment_evidence: dict[str, Any],
+    site_policy_repair_handoff: dict[str, Any] | None,
+    qbit_handoff: dict[str, Any] | None,
+    live_validation_handoff: dict[str, Any] | None,
+    daily_candidate_handoff: dict[str, Any] | None,
+    tracker_adapter_handoff: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return a single ordered runbook for the next goal-critical work."""
+    phase_id = str(current_phase.get("id") or "")
+    by_owner = blocker_breakdown.get("by_owner") if isinstance(blocker_breakdown.get("by_owner"), dict) else {}
+    blockers = _string_list(payload.get("blockers"))
+    steps = _goal_progress_compact_critical_path_steps(
+        phase_id=phase_id,
+        by_owner=by_owner,
+        deployment_evidence=deployment_evidence,
+        site_policy_repair_handoff=site_policy_repair_handoff,
+        qbit_handoff=qbit_handoff,
+        live_validation_handoff=live_validation_handoff,
+        daily_candidate_handoff=daily_candidate_handoff,
+        tracker_adapter_handoff=tracker_adapter_handoff,
+    )
+    current_step = next((step for step in steps if step.get("status") == "current"), None)
+    first_locked = next((step for step in steps if step.get("status") == "locked"), None)
+    action = str((current_step or first_locked or {}).get("name") or "inspect_goal_progress")
+    call = _goal_progress_compact_call((current_step or {}).get("recommended_call") if isinstance((current_step or {}).get("recommended_call"), dict) else recommended_call or {})
+    return {
+        "kind": "ptcli.goal_critical_path_compact_handoff",
+        "ready": payload.get("status") == "complete" or not steps or all(step.get("status") == "complete" for step in steps),
+        "status": "complete" if payload.get("status") == "complete" else "in_progress",
+        "phase_id": current_phase.get("id"),
+        "phase_name": current_phase.get("name"),
+        "action": action,
+        "current_step": current_step,
+        "steps": steps,
+        "recommended_call": call or None,
+        "recommended_tool": (call or {}).get("tool"),
+        "recommended_endpoint": (call or {}).get("endpoint"),
+        "recommended_method": (call or {}).get("method"),
+        "read_order": [
+            "critical_path_handoff.current_step",
+            "critical_path_handoff.steps",
+            "site_policy_repair_handoff",
+            "qbit_handoff",
+            "live_validation_handoff",
+            "daily_candidate_handoff",
+            "tracker_adapter_handoff",
+        ],
+        "complete_when": [
+            "site_policy_repair_handoff.ready=true",
+            "qbit_handoff.ready=true or qB evidence is produced by the live validation job",
+            "live_validation_handoff.report_allowed=true for a real U2/CHD -> MTEAM run",
+            "daily_candidate_handoff.ready=true before claiming the daily workflow is complete",
+            "tracker_adapter_handoff.ready=true before claiming broad Chinese PT rollout is complete",
+        ],
+        "stop_when": [
+            "a step has requires_user_review=true and the user has not explicitly reviewed/approved it",
+            "a step has safe_to_call_now=false",
+            "site policy fingerprints, rate limits, or seeding requirements are missing",
+            "live upload is requested without accept_rules=true and confirm_upload=true",
+            "live_validation_completion_audit.report_allowed is not true",
+        ],
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "live_upload": False,
+            "requires_human_rule_review": True,
+            "requires_confirm_upload_for_live": True,
+            "must_not_skip_duplicate_check": True,
+            "must_not_fabricate_rule_fingerprint": True,
+        },
+        "blocker_owner_order": list(by_owner.keys()) if isinstance(by_owner, dict) else [],
+        "blockers": blockers[:12],
+        "next_actions": _goal_progress_compact_critical_path_next_actions(action, blockers),
+    }
+
+
+def _goal_progress_compact_critical_path_steps(
+    *,
+    phase_id: str,
+    by_owner: dict[str, Any],
+    deployment_evidence: dict[str, Any],
+    site_policy_repair_handoff: dict[str, Any] | None,
+    qbit_handoff: dict[str, Any] | None,
+    live_validation_handoff: dict[str, Any] | None,
+    daily_candidate_handoff: dict[str, Any] | None,
+    tracker_adapter_handoff: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    current_assigned = False
+
+    def status(ready: bool, blocked: bool) -> str:
+        nonlocal current_assigned
+        if ready:
+            return "complete"
+        if not current_assigned and blocked:
+            current_assigned = True
+            return "current"
+        return "locked" if not current_assigned else "pending"
+
+    environment_blocked = "environment" in by_owner
+    site_policy_blocked = "user_review" in by_owner or "site_policy_config" in by_owner or (site_policy_repair_handoff or {}).get("ready") is not True
+    qbit_blocked = bool((qbit_handoff or {}).get("blockers")) and (qbit_handoff or {}).get("ready") is not True
+    live_blocked = phase_id == "manual_live_retorrent_closure" or "live_validation" in by_owner or (live_validation_handoff or {}).get("report_allowed") is not True
+    daily_blocked = phase_id == "daily_candidate_workflow" or ((daily_candidate_handoff or {}).get("ready") is not True and phase_id not in {"service_control_plane", "manual_live_retorrent_closure"})
+    adapter_blocked = phase_id == "tracker_adapter_rollout" or ((tracker_adapter_handoff or {}).get("ready") is not True and phase_id not in {"service_control_plane", "manual_live_retorrent_closure", "daily_candidate_workflow"})
+    environment_handoff = deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else {}
+    site_call = (site_policy_repair_handoff or {}).get("recommended_call") if isinstance((site_policy_repair_handoff or {}).get("recommended_call"), dict) else {}
+    qbit_call = (qbit_handoff or {}).get("recommended_call") if isinstance((qbit_handoff or {}).get("recommended_call"), dict) else {}
+    live_call = (live_validation_handoff or {}).get("recommended_call") if isinstance((live_validation_handoff or {}).get("recommended_call"), dict) else {}
+    daily_call = (daily_candidate_handoff or {}).get("recommended_call") if isinstance((daily_candidate_handoff or {}).get("recommended_call"), dict) else {}
+    adapter_call = (tracker_adapter_handoff or {}).get("recommended_call") if isinstance((tracker_adapter_handoff or {}).get("recommended_call"), dict) else {}
+    return [
+        {
+            "name": "repair_environment",
+            "status": status(not environment_blocked, environment_blocked),
+            "tool": "deployment_check",
+            "endpoint": "/v1/deployment/check",
+            "method": "GET",
+            "recommended_call": _goal_progress_compact_call(environment_handoff.get("recommended_call") if isinstance(environment_handoff.get("recommended_call"), dict) else {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET"}),
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "deployment_check.ready=true with job_dir/downloads/config/cookies paths mounted on the target host",
+            "stop_when": "required seedbox paths or qBittorrent config are still missing",
+        },
+        {
+            "name": "repair_site_policy",
+            "status": status((site_policy_repair_handoff or {}).get("ready") is True, site_policy_blocked),
+            "tool": (site_call or {}).get("tool") or "site_policy_rule_review",
+            "endpoint": (site_call or {}).get("endpoint") or "/v1/site-policies/rule-review",
+            "method": (site_call or {}).get("method") or "POST",
+            "recommended_call": _goal_progress_compact_call(site_call or {"tool": "site_policy_rule_review", "endpoint": "/v1/site-policies/rule-review", "method": "POST"}),
+            "requires_user_review": True,
+            "safe_to_call_now": (site_call or {}).get("safe_to_call_now") is not False,
+            "continue_when": "manual rule review evidence is submitted, config patch is applied, and site_policy_verify.ready=true",
+            "stop_when": "rule_review_fingerprint is fabricated, placeholder, missing, or rate-limit/seeding fields remain absent",
+        },
+        {
+            "name": "verify_qbittorrent_policy_limits",
+            "status": status((qbit_handoff or {}).get("policy_limit_ready") is True or (qbit_handoff or {}).get("ready") is True, qbit_blocked),
+            "tool": (qbit_call or {}).get("tool") or "site_policies",
+            "endpoint": (qbit_call or {}).get("endpoint") or "/v1/site-policies",
+            "method": (qbit_call or {}).get("method") or "POST",
+            "recommended_call": _goal_progress_compact_call(qbit_call or {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST"}),
+            "requires_user_review": False,
+            "safe_to_call_now": (qbit_call or {}).get("safe_to_call_now") is not False,
+            "continue_when": "policy_limit_progress.ready=true and live jobs include qB limit/default evidence",
+            "stop_when": "upload/download limits or qB client fields are missing for source/target roles",
+        },
+        {
+            "name": "run_live_validation",
+            "status": status((live_validation_handoff or {}).get("report_allowed") is True or (live_validation_handoff or {}).get("ready") is True, live_blocked),
+            "tool": (live_call or {}).get("tool") or "readiness_bundle",
+            "endpoint": (live_call or {}).get("endpoint") or "/v1/readiness/bundle",
+            "method": (live_call or {}).get("method") or "POST",
+            "recommended_call": _goal_progress_compact_call(live_call or {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST"}),
+            "requires_user_review": True,
+            "safe_to_call_now": (live_call or {}).get("safe_to_call_now") is True,
+            "continue_when": "one real seedbox job reaches live_validation_completion_audit.report_allowed=true",
+            "stop_when": "accept_rules/confirm_upload are missing, duplicate check blocks, or live job lacks uploaded-torrent seeding evidence",
+        },
+        {
+            "name": "validate_daily_candidates",
+            "status": status((daily_candidate_handoff or {}).get("ready") is True, daily_blocked),
+            "tool": (daily_call or {}).get("tool") or "daily_candidates_schedule",
+            "endpoint": (daily_call or {}).get("endpoint") or "/v1/candidates/daily/schedule",
+            "method": (daily_call or {}).get("method") or "POST",
+            "recommended_call": _goal_progress_compact_call(daily_call or {"tool": "daily_candidates_schedule", "endpoint": "/v1/candidates/daily/schedule", "method": "POST"}),
+            "requires_user_review": False,
+            "safe_to_call_now": (daily_call or {}).get("safe_to_call_now") is not False,
+            "continue_when": "daily candidate run produces 10 ready candidates or a refill plan and digest delivery evidence",
+            "stop_when": "candidate submission is attempted without explicit user approval and confirm_upload=true",
+        },
+        {
+            "name": "expand_tracker_adapters",
+            "status": status((tracker_adapter_handoff or {}).get("ready") is True, adapter_blocked),
+            "tool": (adapter_call or {}).get("tool") or "site_profiles",
+            "endpoint": (adapter_call or {}).get("endpoint") or "/v1/sites",
+            "method": (adapter_call or {}).get("method") or "GET",
+            "recommended_call": _goal_progress_compact_call(adapter_call or {"tool": "site_profiles", "endpoint": "/v1/sites", "method": "GET"}),
+            "requires_user_review": False,
+            "safe_to_call_now": (adapter_call or {}).get("safe_to_call_now") is not False,
+            "continue_when": "adapter/profile coverage and rule gates are ready for the next allowlisted Chinese PT flow",
+            "stop_when": "new site automation lacks adapter validation or site-specific rule review evidence",
+        },
+    ]
+
+
+def _goal_progress_compact_critical_path_next_actions(action: str, blockers: list[str]) -> list[str]:
+    action_map = {
+        "repair_environment": "Fix seedbox/Docker mount and qBittorrent config blockers, then rerun goal_progress --brief.",
+        "repair_site_policy": "Complete manual tracker rule review, apply the returned PTCLI.SITE_POLICIES patch, then verify fingerprints.",
+        "verify_qbittorrent_policy_limits": "Confirm source/target upload/download limits and seeding requirements are represented before live work.",
+        "run_live_validation": "Run readiness_bundle and a real U2/CHD -> MTEAM job until uploaded torrent seeding evidence is present.",
+        "validate_daily_candidates": "Configure and run a daily candidate schedule until 10 safe candidates or a refill plan is produced.",
+        "expand_tracker_adapters": "Use /v1/sites readiness evidence to add or validate the next Chinese PT adapter/profile.",
+    }
+    actions = [action_map.get(action, "Inspect goal_progress.critical_path_handoff.current_step and follow its recommended_call.")]
+    if blockers:
+        actions.append("Do not mark the goal complete while critical_path_handoff.blockers is non-empty.")
+    return actions
 
 
 def _goal_progress_daily_candidate_missing_inputs(action: str, blockers: list[str], schedule_handoff: dict[str, Any], delivery: dict[str, Any], approval: dict[str, Any]) -> list[dict[str, Any]]:
@@ -44039,7 +44266,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -44053,6 +44280,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
                 "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "critical_path_compact_handoff_fields": ["ready", "status", "phase_id", "phase_name", "action", "current_step", "steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blocker_owner_order", "blockers", "next_actions"],
+                "critical_path_compact_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
+                "critical_path_compact_safety_fields": ["read_only", "mutates_state", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload", "requires_human_rule_review", "requires_confirm_upload_for_live", "must_not_skip_duplicate_check", "must_not_fabricate_rule_fingerprint"],
                 "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "missing_inputs", "schedule_env", "schedule_env_example", "compose", "configure_schedule_call", "create_jobs_call", "run_now_call", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_compact_workflow_step_fields": ["name", "ready", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "daily_candidate_compact_missing_input_fields": ["name", "required", "source", "blockers"],
