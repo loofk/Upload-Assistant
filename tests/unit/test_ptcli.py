@@ -18599,6 +18599,28 @@ def test_daily_candidate_schedule_payload_exposes_env_template_when_missing(monk
     assert "schedule_handoff.env_example.shell" in payload["next_actions"][0]
 
 
+def test_readiness_bundle_daily_schedule_fallback_keeps_final_report(monkeypatch) -> None:
+    def raise_schedule(_request):
+        raise RuntimeError("bad schedule json")
+
+    monkeypatch.setattr(ptcli_service, "daily_candidate_schedule_payload", raise_schedule)
+
+    payload = ptcli_service._readiness_bundle_daily_schedule({})
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert payload["source"] == "error"
+    assert payload["schedule_handoff"]["kind"] == "ptcli.daily_candidate_schedule_handoff"
+    assert payload["schedule_handoff"]["ready"] is False
+    final_report = payload["daily_candidate_schedule_final_report"]
+    assert final_report["kind"] == "ptcli.daily_candidate_schedule_final_report"
+    assert final_report["ready"] is False
+    assert final_report["verdict"] == "schedule_missing"
+    assert final_report["recommended_call"]["tool"] == "daily_candidates_schedule"
+    assert payload["recommended_call"] == final_report["recommended_call"]
+    assert payload["blockers"] == ["bad schedule json"]
+
+
 def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_path) -> None:
     digest = {
         "kind": "ptcli.daily_candidates_digest",
@@ -23957,6 +23979,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_execution_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_call" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "daily_schedule_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "daily_candidate_schedule_final_report" in tool_by_name["readiness_bundle"]["response_contract"]["daily_schedule_fields"]
+    assert "recommended_call" in tool_by_name["readiness_bundle"]["response_contract"]["daily_schedule_fields"]
+    assert "daily_candidate_schedule_final_report_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "recommended_call" in tool_by_name["readiness_bundle"]["response_contract"]["daily_candidate_schedule_final_report_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_setup_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]

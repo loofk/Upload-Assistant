@@ -7583,13 +7583,26 @@ def _readiness_bundle_daily_schedule(request: dict[str, Any]) -> dict[str, Any]:
     try:
         return daily_candidate_schedule_payload(schedule_request)
     except Exception as exc:
+        blockers = [str(exc)]
+        schedule_handoff = _daily_candidate_schedule_handoff([], blockers, "error")
+        final_report = _daily_candidate_schedule_final_report([], schedule_handoff, blockers, "error")
         return {
             "kind": "ptcli.daily_candidate_schedule",
             "status": "blocked",
             "ok": False,
+            "ready": False,
+            "source": "error",
+            "env": DAILY_CANDIDATE_SCHEDULE_ENV,
             "count": 0,
             "schedules": [],
-            "blockers": [str(exc)],
+            "schedule_handoff": schedule_handoff,
+            "daily_candidate_schedule_final_report": final_report,
+            "recommended_call": final_report.get("recommended_call"),
+            "recommended_tool": final_report.get("recommended_tool"),
+            "recommended_endpoint": final_report.get("recommended_endpoint"),
+            "recommended_method": final_report.get("recommended_method"),
+            "recommended_request": final_report.get("recommended_request"),
+            "blockers": blockers,
             "next_actions": [f"Fix {DAILY_CANDIDATE_SCHEDULE_ENV} JSON or POST valid schedules."],
         }
 
@@ -43814,6 +43827,8 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "seedbox_live_validation_start_report", "seedbox_live_post_submit_report", "seedbox_live_validation_decision_plan", "seedbox_live_validation_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_call", "agent_decision", "blockers", "warnings", "next_actions"],
+        "daily_schedule_fields": ["ready", "status", "source", "env", "count", "schedules", "schedule_handoff", "daily_candidate_schedule_final_report", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "blockers", "next_actions"],
+        "daily_candidate_schedule_final_report_fields": ["ready", "report_allowed", "verdict", "action", "source", "env", "configured_count", "enabled_count", "target_count", "schedules", "schedule_handoff", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
