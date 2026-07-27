@@ -5034,15 +5034,23 @@ def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
     if not schedules and not blockers:
         blockers.append(f"No daily candidate schedules configured. Set {DAILY_CANDIDATE_SCHEDULE_ENV} or POST schedules.")
     schedule_handoff = _daily_candidate_schedule_handoff(schedules, blockers, source)
+    daily_candidate_schedule_final_report = _daily_candidate_schedule_final_report(schedules, schedule_handoff, blockers, source)
     return {
         "kind": "ptcli.daily_candidate_schedule",
         "status": "ok" if schedules and not blockers else "partial" if schedules else "blocked",
         "ok": bool(schedules),
+        "ready": daily_candidate_schedule_final_report["ready"],
         "source": source,
         "env": DAILY_CANDIDATE_SCHEDULE_ENV,
         "count": len(schedules),
         "schedules": schedules,
         "schedule_handoff": schedule_handoff,
+        "daily_candidate_schedule_final_report": daily_candidate_schedule_final_report,
+        "recommended_call": daily_candidate_schedule_final_report["recommended_call"],
+        "recommended_tool": daily_candidate_schedule_final_report["recommended_tool"],
+        "recommended_endpoint": daily_candidate_schedule_final_report["recommended_endpoint"],
+        "recommended_method": daily_candidate_schedule_final_report["recommended_method"],
+        "recommended_request": daily_candidate_schedule_final_report["recommended_request"],
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_next_actions(schedules, blockers),
     }
@@ -11888,6 +11896,71 @@ def _daily_candidate_schedule_handoff_next_actions(ready: bool) -> list[str]:
     if ready:
         return ["Create schedule jobs through schedule_handoff.api.create_jobs, then read schedule_digest and delivery_handoff before publishing or submitting candidates."]
     return ["Copy schedule_handoff.env_example.shell into .env or POST schedule_handoff.env_example.json to /v1/candidates/daily/schedule, then rerun the schedule check."]
+
+
+def _daily_candidate_schedule_final_report(schedules: list[dict[str, Any]], schedule_handoff: dict[str, Any], blockers: list[str], source: str) -> dict[str, Any]:
+    ready = schedule_handoff.get("ready") is True and not blockers
+    action = "create_schedule_jobs" if ready else "configure_schedule"
+    api = schedule_handoff.get("api") if isinstance(schedule_handoff.get("api"), dict) else {}
+    create_jobs_call = api.get("create_jobs") if isinstance(api.get("create_jobs"), dict) else {}
+    inspect_call = api.get("inspect_schedule") if isinstance(api.get("inspect_schedule"), dict) else {}
+    recommended_call = create_jobs_call if ready else inspect_call
+    if recommended_call:
+        recommended_call = {
+            "tool": recommended_call.get("tool"),
+            "endpoint": recommended_call.get("endpoint"),
+            "method": recommended_call.get("method") or "POST",
+            "request": recommended_call.get("request"),
+            "safe_to_call_now": True,
+            "requires_user_review": False,
+            "reason": f"daily_candidate_schedule_final_report.{action}",
+        }
+    return {
+        "kind": "ptcli.daily_candidate_schedule_final_report",
+        "ready": ready,
+        "report_allowed": ready,
+        "verdict": "schedule_ready" if ready else "schedule_missing",
+        "action": action,
+        "source": source,
+        "env": DAILY_CANDIDATE_SCHEDULE_ENV,
+        "configured_count": len(schedules),
+        "enabled_count": int(schedule_handoff.get("enabled_count") or 0),
+        "target_count": int(schedule_handoff.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+        "schedules": schedules,
+        "schedule_handoff": schedule_handoff,
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool") if recommended_call else None,
+        "recommended_endpoint": recommended_call.get("endpoint") if recommended_call else None,
+        "recommended_method": recommended_call.get("method") if recommended_call else None,
+        "recommended_request": recommended_call.get("request") if recommended_call else None,
+        "read_order": ["daily_candidate_schedule_final_report", "schedule_handoff", "schedules", "blockers", "next_actions"],
+        "complete_when": "daily_candidate_schedule_final_report.ready=true, then call recommended_call to create daily candidate jobs.",
+        "stop_when": [
+            "daily_candidate_schedule_final_report.ready=false",
+            "schedule_handoff.blockers is non-empty",
+            "candidate submission attempted before explicit user approval",
+            "confirm_upload is not true for a live candidate submit",
+        ],
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "creates_jobs": False,
+            "uploads": False,
+            "submits_candidates": False,
+            "live_upload_requires_confirm_upload": True,
+            "submit_requires_user_approval": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_schedule_final_next_actions(ready, blockers),
+    }
+
+
+def _daily_candidate_schedule_final_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if blockers and not ready:
+        return ["Resolve daily_candidate_schedule_final_report.blockers, then rerun /v1/candidates/daily/schedule."]
+    if ready:
+        return ["Call daily_candidate_schedule_final_report.recommended_call to create daily candidate jobs, then read schedule_digest and daily_candidate_push_final_report."]
+    return ["Copy schedule_handoff.env_example.shell into .env or POST schedule_handoff.env_example.json to /v1/candidates/daily/schedule."]
 
 
 def _daily_candidate_schedule_next_actions(schedules: list[dict[str, Any]], blockers: list[str]) -> list[str]:
@@ -42431,9 +42504,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Validate and normalize daily candidate schedules into job requests that external cron, Docker, OpenClaw, or Hermes can run. This endpoint does not contact trackers or upload.",
             "input_schema": candidate_schedule_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "count", "schedules", "schedule_handoff", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "ready", "count", "schedules", "schedule_handoff", "daily_candidate_schedule_final_report", "recommended_call", "blockers", "next_actions"],
                 "schedule_fields": ["name", "enabled", "schedule", "job_endpoint", "job_request", "push_contract"],
                 "schedule_handoff_fields": ["ready", "action", "env", "configured_count", "enabled_count", "target_count", "env_example", "compose", "api", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_schedule_final_report_fields": ["ready", "report_allowed", "verdict", "action", "source", "env", "configured_count", "enabled_count", "target_count", "schedules", "schedule_handoff", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_schedule_final_safety_fields": ["read_only", "mutates_state", "creates_jobs", "uploads", "submits_candidates", "live_upload_requires_confirm_upload", "submit_requires_user_approval"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -45362,11 +45437,18 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
         "properties": {
             "status": {"type": "string"},
             "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
             "source": {"type": "string"},
             "env": {"type": "string"},
             "count": {"type": "integer"},
             "schedules": {"type": "array", "items": {"type": "object"}},
             "schedule_handoff": {"type": "object"},
+            "daily_candidate_schedule_final_report": {"type": "object"},
+            "recommended_call": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_method": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },

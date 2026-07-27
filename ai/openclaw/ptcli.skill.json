@@ -24212,9 +24212,12 @@
         "required_fields": [
           "status",
           "ok",
+          "ready",
           "count",
           "schedules",
           "schedule_handoff",
+          "daily_candidate_schedule_final_report",
+          "recommended_call",
           "blockers",
           "next_actions"
         ],
@@ -24242,6 +24245,39 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "daily_candidate_schedule_final_report_fields": [
+          "ready",
+          "report_allowed",
+          "verdict",
+          "action",
+          "source",
+          "env",
+          "configured_count",
+          "enabled_count",
+          "target_count",
+          "schedules",
+          "schedule_handoff",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "daily_candidate_schedule_final_safety_fields": [
+          "read_only",
+          "mutates_state",
+          "creates_jobs",
+          "uploads",
+          "submits_candidates",
+          "live_upload_requires_confirm_upload",
+          "submit_requires_user_approval"
         ]
       },
       "safety": {
