@@ -23841,6 +23841,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_verify_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_repair_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_repair_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "live_validation_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "live_validation_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "completion_audit" in tool_by_name["goal_progress"]["response_contract"]["live_validation_compact_handoff_fields"]
+    assert "run_order" in tool_by_name["goal_progress"]["response_contract"]["live_validation_compact_handoff_fields"]
     assert "site_policy_repair_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "manual_apply_ready" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
     assert "verify_call" in tool_by_name["goal_progress"]["response_contract"]["site_policy_repair_handoff_fields"]
@@ -25062,6 +25066,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "daily_candidate_goal_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_goal_final_report_fields" in goal_progress_tool["response_contract"]
     assert "site_policy_repair_handoff" in goal_progress_tool["response_contract"]["progress_summary_fields"]
+    assert "live_validation_handoff" in goal_progress_tool["response_contract"]["progress_summary_fields"]
+    assert "live_validation_compact_handoff_fields" in goal_progress_tool["response_contract"]
     assert "site_policy_repair_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_repair_handoff_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_run_loop_report_fields" in goal_progress_tool["response_contract"]
@@ -25249,6 +25255,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "agent_smoke_live_validation_handoff" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "site_policy_repair_handoff" in tools_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+        assert "live_validation_handoff" in tools_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+        assert "live_validation_compact_handoff_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "site_policy_repair_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "site_policy_repair_handoff_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
@@ -27226,6 +27234,12 @@ services:
     assert payload["progress_summary"]["site_policy_repair_handoff"]["copyable_config"] is None
     assert "manual_steps" not in payload["progress_summary"]["site_policy_repair_handoff"]["rules_to_review"][0]
     assert payload["progress_summary"]["site_policy_repair_handoff"]["safety"]["must_not_fabricate_fingerprint"] is True
+    assert payload["progress_summary"]["live_validation_handoff"]["kind"] == "ptcli.goal_live_validation_handoff"
+    assert payload["progress_summary"]["live_validation_handoff"]["action"] == "repair_readiness"
+    assert payload["progress_summary"]["live_validation_handoff"]["ready"] is False
+    assert payload["progress_summary"]["live_validation_handoff"]["recommended_tool"] == "edit_config"
+    assert "live_validation_completion_audit.report_allowed=true" in payload["progress_summary"]["live_validation_handoff"]["complete_when"]
+    assert payload["progress_summary"]["live_validation_handoff"]["safety"]["must_not_report_complete_until_audit_passes"] is True
     assert "U2: rule_review_fingerprint is required before automation." in payload["progress_summary"]["user_review_blockers"]
     assert "U2: download_rate_limit" in payload["progress_summary"]["site_policy_config_blockers"]
     assert "No current-state job or summary evidence has live_validation_completion_audit.report_allowed=true." in payload["progress_summary"]["live_validation_blockers"]
@@ -27934,6 +27948,13 @@ services:
     assert "agent_smoke_live_validation_handoff" in preflight["read_order"]
     assert preflight["next_step"]["tool"] == "ptcli_doctor"
     assert preflight["next_step"]["request"]["argv"] == preflight["live_execution_package"]["steps"][0]["request"]["argv"]
+    live_handoff = payload["progress_summary"]["live_validation_handoff"]
+    assert live_handoff["kind"] == "ptcli.goal_live_validation_handoff"
+    assert live_handoff["action"] == "run_doctor"
+    assert live_handoff["preflight_ready"] is True
+    assert live_handoff["recommended_tool"] == "ptcli_doctor"
+    assert live_handoff["recommended_call"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
+    assert live_handoff["safety"]["requires_user_review"] is True
     assert adapters["requested_trackers"] == ["U2", "MTEAM"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
     assert adapters["site_adapter_profile_final_report"]["kind"] == "ptcli.site_adapter_profile_final_report"
@@ -28266,6 +28287,12 @@ services:
     assert final_report["recommended_call"]["tool"] == "source_url_check_and_submit"
     assert final_report["recommended_call"]["requires_user_review"] is True
     assert "live_validation_completion_audit.report_allowed=true" in final_report["complete_when"]
+    live_handoff = payload["progress_summary"]["live_validation_handoff"]
+    assert live_handoff["action"] == "submit_live_job"
+    assert live_handoff["submission_ready"] is True
+    assert live_handoff["recommended_tool"] == "source_url_check_and_submit"
+    assert live_handoff["recommended_endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert live_handoff["safety"]["requires_user_review"] is True
     assert payload["evidence"]["live_validation"]["best"]["recommended_tool"] == "source_url_check_and_submit"
     assert payload["evidence"]["live_validation"]["best"]["recommended_request"]["accept_rules"] is True
     assert payload["evidence"]["live_validation"]["best"]["recommended_request"]["confirm_upload"] is True

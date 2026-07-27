@@ -39413,6 +39413,8 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     deployment_evidence = evidence.get("deployment") if isinstance(evidence.get("deployment"), dict) else {}
     daily_candidate_evidence = evidence.get("daily_candidates") if isinstance(evidence.get("daily_candidates"), dict) else {}
     site_policy_evidence = evidence.get("site_policies") if isinstance(evidence.get("site_policies"), dict) else {}
+    live_validation_evidence = evidence.get("live_validation") if isinstance(evidence.get("live_validation"), dict) else {}
+    live_validation_preflight = evidence.get("live_validation_preflight") if isinstance(evidence.get("live_validation_preflight"), dict) else {}
     capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
     capability_status = {str(item.get("id")): item.get("status") for item in capabilities if isinstance(item, dict) and item.get("id")}
     by_owner = blocker_breakdown.get("by_owner") if isinstance(blocker_breakdown.get("by_owner"), dict) else {}
@@ -39444,6 +39446,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
         "daily_candidate_handoff": _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence),
         "site_policy_repair_handoff": _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence),
+        "live_validation_handoff": _goal_progress_compact_live_validation_handoff(live_validation_evidence, live_validation_preflight),
         "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
         "site_policy_config_blockers": _goal_progress_owner_blockers(by_owner, "site_policy_config"),
         "live_validation_blockers": _goal_progress_owner_blockers(by_owner, "live_validation"),
@@ -39641,6 +39644,105 @@ def _goal_progress_rule_review_safe_item(item: dict[str, Any]) -> dict[str, Any]
         "roles": _string_list(item.get("roles")),
         "rules_url": item.get("rules_url"),
         "acknowledged_scopes": _string_list(item.get("acknowledged_scopes")),
+    }
+
+
+def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any] | None:
+    if not live_validation and not preflight:
+        return None
+    final_report = live_validation.get("seedbox_live_validation_final_report") if isinstance(live_validation.get("seedbox_live_validation_final_report"), dict) else {}
+    completion_audit = live_validation.get("live_validation_completion_audit") if isinstance(live_validation.get("live_validation_completion_audit"), dict) else {}
+    execution_handoff = preflight.get("seedbox_live_validation_execution_handoff") if isinstance(preflight.get("seedbox_live_validation_execution_handoff"), dict) else {}
+    decision_plan = preflight.get("seedbox_live_validation_decision_plan") if isinstance(preflight.get("seedbox_live_validation_decision_plan"), dict) else {}
+    start_report = preflight.get("seedbox_live_validation_start_report") if isinstance(preflight.get("seedbox_live_validation_start_report"), dict) else {}
+    repair_plan = preflight.get("live_validation_repair_plan") if isinstance(preflight.get("live_validation_repair_plan"), dict) else {}
+    agent_smoke = preflight.get("agent_smoke_live_validation_handoff") if isinstance(preflight.get("agent_smoke_live_validation_handoff"), dict) else {}
+    best = live_validation.get("best") if isinstance(live_validation.get("best"), dict) else {}
+    completion = final_report.get("completion") if isinstance(final_report.get("completion"), dict) else {}
+    ready = final_report.get("report_allowed") is True or live_validation.get("ready") is True
+    status = str(final_report.get("status") or live_validation.get("status") or preflight.get("status") or "missing")
+    verdict = str(final_report.get("verdict") or ("complete" if ready else "not_started"))
+    if ready:
+        action = "report_complete"
+        recommended_call = final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "request": _goal_progress_seedbox_live_validation_reread_request(live_validation), "safe_to_call_now": True, "reason": "live_validation_complete"}
+    elif verdict in {"doctor_ready_submit_live_job", "submitted_running", "resume_required", "read_summary_before_report"}:
+        action = {
+            "doctor_ready_submit_live_job": "submit_live_job",
+            "submitted_running": "poll_live_job",
+            "resume_required": "resume_live_job",
+            "read_summary_before_report": "read_live_summary",
+        }.get(verdict, "follow_live_job")
+        recommended_call = final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else {}
+    elif preflight.get("ready") is True or execution_handoff.get("ready") is True or start_report.get("start_allowed") is True:
+        action = "run_doctor"
+        recommended_call = (
+            execution_handoff.get("recommended_call")
+            if isinstance(execution_handoff.get("recommended_call"), dict)
+            else decision_plan.get("recommended_call")
+            if isinstance(decision_plan.get("recommended_call"), dict)
+            else start_report.get("doctor_call")
+            if isinstance(start_report.get("doctor_call"), dict)
+            else agent_smoke.get("recommended_call")
+            if isinstance(agent_smoke.get("recommended_call"), dict)
+            else {}
+        )
+    else:
+        action = "repair_readiness"
+        recommended_call = (
+            repair_plan.get("next_step")
+            if isinstance(repair_plan.get("next_step"), dict)
+            else agent_smoke.get("recommended_call")
+            if isinstance(agent_smoke.get("recommended_call"), dict)
+            else preflight.get("next_step")
+            if isinstance(preflight.get("next_step"), dict)
+            else final_report.get("recommended_call")
+            if isinstance(final_report.get("recommended_call"), dict)
+            else {}
+        )
+    blockers = list(dict.fromkeys(_string_list(final_report.get("blockers")) + _string_list(live_validation.get("blockers")) + _string_list(preflight.get("blockers")) + _string_list(repair_plan.get("blockers"))))
+    return {
+        "kind": "ptcli.goal_live_validation_handoff",
+        "ready": ready,
+        "report_allowed": final_report.get("report_allowed") is True,
+        "status": status,
+        "verdict": verdict,
+        "phase": final_report.get("phase") or execution_handoff.get("current_step") or decision_plan.get("current_step"),
+        "action": action,
+        "job_id": final_report.get("job_id") or best.get("job_id"),
+        "summary_file": final_report.get("summary_file") or live_validation.get("requested_summary_file"),
+        "preflight_ready": preflight.get("ready") is True,
+        "submission_ready": live_validation.get("submission_ready") is True or final_report.get("submission_ready") is True,
+        "completion_audit": {
+            "report_allowed": completion_audit.get("report_allowed") if completion_audit.get("report_allowed") is not None else completion.get("report_allowed"),
+            "failed_checks": _string_list(completion_audit.get("failed_checks") or completion.get("failed_checks")),
+            "missing_evidence": _string_list(completion_audit.get("missing_evidence") or completion.get("missing_evidence")),
+            "blockers": _string_list(completion_audit.get("blockers") or completion.get("blockers")),
+        },
+        "recommended_call": _goal_progress_compact_call(recommended_call if isinstance(recommended_call, dict) else {}) or None,
+        "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
+        "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
+        "recommended_method": (recommended_call or {}).get("method") if isinstance(recommended_call, dict) else None,
+        "run_order": execution_handoff.get("run_order") if isinstance(execution_handoff.get("run_order"), list) else start_report.get("run_order") if isinstance(start_report.get("run_order"), list) else ["readiness_bundle", "ptcli_doctor", "summary_check", "source_url_check_and_submit", "get_job_status", "get_job_summary"],
+        "read_order": ["live_validation_handoff", "recommended_call", "completion_audit", "evidence.live_validation.seedbox_live_validation_final_report", "evidence.live_validation_preflight.seedbox_live_validation_execution_handoff", "evidence.live_validation_preflight.seedbox_live_validation_start_report"],
+        "complete_when": ["live_validation_completion_audit.report_allowed=true", "live_validation_completion_audit.failed_checks=[]", "live_validation_completion_audit.missing_evidence=[]", "live_validation_completion_audit.blockers=[]", "seedbox_live_validation_completion_report.ready_for_user_report=true"],
+        "stop_when": [
+            "duplicate_check.exists=true",
+            "site policy gate is not ready",
+            "confirm_upload is not true for live upload",
+            "recommended_call.safe_to_call_now=false without explicit user approval",
+            "live_validation_completion_audit.blockers is non-empty",
+        ],
+        "safety": {
+            "read_only": action in {"repair_readiness", "poll_live_job", "read_live_summary", "report_complete"},
+            "mutates_state": action in {"run_doctor", "submit_live_job", "resume_live_job"},
+            "contacts_trackers": action in {"run_doctor", "submit_live_job", "resume_live_job"},
+            "contacts_qbittorrent": action in {"run_doctor", "submit_live_job", "resume_live_job"},
+            "live_upload_requires_confirm_upload": True,
+            "requires_user_review": action in {"run_doctor", "submit_live_job", "resume_live_job"},
+            "must_not_report_complete_until_audit_passes": True,
+        },
+        "blockers": blockers[:12],
+        "next_actions": _string_list(final_report.get("next_actions")) or _string_list(preflight.get("next_actions")) or _string_list(repair_plan.get("next_actions")),
     }
 
 
@@ -43022,7 +43124,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "site_policy_repair_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -43062,6 +43164,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "site_adapter_profile_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "live_validation_compact_handoff_fields": ["ready", "report_allowed", "status", "verdict", "phase", "action", "job_id", "summary_file", "preflight_ready", "submission_ready", "completion_audit", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "run_order", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "seedbox_live_validation_start_report", "seedbox_live_post_submit_report", "seedbox_live_validation_decision_plan", "seedbox_live_validation_execution_handoff", "agent_smoke_live_validation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
