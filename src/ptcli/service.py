@@ -39732,7 +39732,7 @@ def _goal_progress_agent_brief_bootstrap_commands(commands: list[Any]) -> list[d
 
 def _goal_progress_agent_brief_cli_templates(commands: list[Any]) -> list[dict[str, Any]]:
     compact: list[dict[str, Any]] = []
-    for item in commands[:5]:
+    for item in commands[:8]:
         if not isinstance(item, dict):
             continue
         command = str(item.get("command") or "").strip()
@@ -40016,6 +40016,58 @@ def _goal_progress_daily_candidate_command_templates(
                 "reason": "Start the daily candidate scheduler profile in Docker Compose; submission approval remains separate.",
             }
         )
+    command_templates.extend(
+        [
+            {
+                "name": "api_daily_candidate_batch_status_curl",
+                "command": shlex.join(["curl", "-fsS", f"{api_base}/v1/jobs/candidates/daily/batch"]),
+                "safe_to_run": True,
+                "mutates_state": False,
+                "requires_user_review": False,
+                "reason": "Read the current daily candidate batch, approval queue, publish payload, and per-candidate submit calls.",
+            },
+            {
+                "name": "api_daily_candidate_deliver_digest_curl",
+                "command": shlex.join(
+                    [
+                        "curl",
+                        "-fsS",
+                        "-X",
+                        "POST",
+                        f"{api_base}/v1/candidates/daily/deliver",
+                        "-H",
+                        "Content-Type: application/json",
+                        "-d",
+                        json.dumps({"daily_candidate_batch_publish_payload": "<daily_candidate_batch_publish_payload>", "write_files": True, "use_env_webhook": True}, ensure_ascii=False, separators=(",", ":")),
+                    ]
+                ),
+                "safe_to_run": False,
+                "mutates_state": True,
+                "requires_user_review": False,
+                "reason": "Deliver an already-read candidate digest to files/webhook; does not submit torrents, but requires a real publish payload.",
+            },
+            {
+                "name": "api_submit_approved_daily_candidate_curl",
+                "command": shlex.join(
+                    [
+                        "curl",
+                        "-fsS",
+                        "-X",
+                        "POST",
+                        f"{api_base}/v1/jobs/candidates/<candidate_job_id>/submit",
+                        "-H",
+                        "Content-Type: application/json",
+                        "-d",
+                        json.dumps({"accept_rules": True, "confirm_upload": True, "save_path": "/downloads"}, ensure_ascii=False, separators=(",", ":")),
+                    ]
+                ),
+                "safe_to_run": False,
+                "mutates_state": True,
+                "requires_user_review": True,
+                "reason": "Submit exactly one user-approved candidate; AI must read approval_queue and get explicit approval before replacing the placeholder job id.",
+            },
+        ]
+    )
     return command_templates
 
 

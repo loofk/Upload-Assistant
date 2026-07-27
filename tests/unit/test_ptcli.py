@@ -27567,6 +27567,11 @@ services:
     assert brief_payload["daily_candidates"]["target_count"] == 10
     assert brief_payload["daily_candidates"]["command_templates"][0]["name"] == "shell_export_schedule_env"
     assert brief_payload["daily_candidates"]["command_templates"][2]["mutates_state"] is True
+    daily_brief_templates = {item["name"]: item for item in brief_payload["daily_candidates"]["command_templates"]}
+    assert daily_brief_templates["api_daily_candidate_batch_status_curl"]["safe_to_run"] is True
+    assert daily_brief_templates["api_submit_approved_daily_candidate_curl"]["safe_to_run"] is False
+    assert daily_brief_templates["api_submit_approved_daily_candidate_curl"]["requires_user_review"] is True
+    assert "<candidate_job_id>" in daily_brief_templates["api_submit_approved_daily_candidate_curl"]["command"]
     assert brief_payload["live_validation"]["command_templates"][0]["name"] == "cli_readiness_bundle_live_preflight"
     assert brief_payload["live_validation"]["command_templates"][1]["requires_user_review"] is True
     assert brief_payload["tracker_adapters"]["requested_flow"]["source_tracker"] == "U2"
