@@ -21011,6 +21011,7 @@ def _job_control_summary(job: dict[str, Any], payload: dict[str, Any] | None = N
     ready = action in {"poll", "read_summary", "configure_policy"} or (action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"} and not blockers)
     if action in {"stop", "stop_duplicate", "blocked", "failed", "cancelled"}:
         ready = False
+    poll_sequence = _job_poll_resume_summary_sequence(job_id, status, action, runtime, recommended_call, recovery_handoff, job_handoff)
     return {
         "kind": "ptcli.job_control_summary",
         "job_id": job_id or None,
@@ -21036,7 +21037,8 @@ def _job_control_summary(job: dict[str, Any], payload: dict[str, Any] | None = N
         "summary_endpoint": runtime.get("summary_endpoint"),
         "resume_endpoint": runtime.get("resume_endpoint"),
         "read_order": _job_control_read_order(action),
-        "poll_resume_summary_sequence": _job_poll_resume_summary_sequence(job_id, status, action, runtime, recommended_call, recovery_handoff, job_handoff),
+        "poll_resume_summary_sequence": poll_sequence,
+        "command_templates": _job_control_command_templates(job_id, poll_sequence, recommended_call, recovery_handoff, job_handoff, action),
         "continue_when": _job_control_continue_when(action, recovery_handoff, job_handoff, completion_report),
         "stop_when": _job_control_stop_when(action, recovery_handoff, job_handoff, completion_report, closure_summary),
         "complete_when": _job_control_complete_when(completion_report, closure_summary),
@@ -21065,8 +21067,20 @@ def _job_poll_resume_summary_sequence(
     status_endpoint = str(runtime.get("status_endpoint") or f"/v1/jobs/{job_id}")
     summary_endpoint = str(runtime.get("summary_endpoint") or f"/v1/jobs/{job_id}/summary")
     resume_endpoint = str(runtime.get("resume_endpoint") or f"/v1/jobs/{job_id}/resume")
-    dry_run_request = recovery_handoff.get("dry_run_request") if isinstance(recovery_handoff.get("dry_run_request"), dict) else job_handoff.get("dry_run_request") if isinstance(job_handoff.get("dry_run_request"), dict) else None
-    execute_request = recovery_handoff.get("execute_request") if isinstance(recovery_handoff.get("execute_request"), dict) else job_handoff.get("execute_request") if isinstance(job_handoff.get("execute_request"), dict) else None
+    dry_run_request = (
+        recovery_handoff.get("dry_run_request")
+        if isinstance(recovery_handoff.get("dry_run_request"), dict)
+        else job_handoff.get("dry_run_request")
+        if isinstance(job_handoff.get("dry_run_request"), dict)
+        else None
+    )
+    execute_request = (
+        recovery_handoff.get("execute_request")
+        if isinstance(recovery_handoff.get("execute_request"), dict)
+        else job_handoff.get("execute_request")
+        if isinstance(job_handoff.get("execute_request"), dict)
+        else None
+    )
     recommended_request = (recommended_call or {}).get("request") if isinstance((recommended_call or {}).get("request"), dict) else None
     if dry_run_request is None and action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"}:
         dry_run_request = recommended_request or {"job_id": job_id, "dry_run": True}
@@ -21191,6 +21205,152 @@ def _job_poll_resume_summary_sequence(
         "complete_when": ["terminal status reached", "job_final_report or live_user_report read", "blockers reported or completion evidence reported"],
         "stop_when": ["duplicate_check.exists=true", "recommended_call.safe_to_call_now=false without user review", "resume preview command is not allowlisted"],
     }
+
+
+def _job_control_command_templates(
+    job_id: str,
+    sequence: dict[str, Any],
+    recommended_call: dict[str, Any] | None,
+    recovery_handoff: dict[str, Any],
+    job_handoff: dict[str, Any],
+    action: str,
+) -> list[dict[str, Any]]:
+    templates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(
+        name: str,
+        command: str,
+        *,
+        safe_to_run: bool,
+        mutates_state: bool,
+        requires_user_review: bool,
+        reason: str,
+        continue_when: str,
+        stop_when: str,
+    ) -> None:
+        if not name or not command or name in seen:
+            return
+        seen.add(name)
+        templates.append(
+            {
+                "name": name,
+                "command": command,
+                "safe_to_run": safe_to_run,
+                "mutates_state": mutates_state,
+                "requires_user_review": requires_user_review,
+                "reason": reason,
+                "continue_when": continue_when,
+                "stop_when": stop_when,
+            }
+        )
+
+    status_endpoint = f"/v1/jobs/{job_id}" if job_id else "/v1/jobs/<job_id>"
+    summary_endpoint = f"{status_endpoint}/summary"
+    resume_endpoint = f"{status_endpoint}/resume"
+    add(
+        "api_poll_job_status_curl",
+        f"curl -fsS http://127.0.0.1:8080{status_endpoint}",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="Read current job status and control handoffs.",
+        continue_when="status is queued/running/blocked/failed/cancelled/complete and job_control_summary is present",
+        stop_when="job_id is missing or response does not contain job_control_summary",
+    )
+    add(
+        "api_read_job_summary_curl",
+        f"curl -fsS http://127.0.0.1:8080{summary_endpoint}",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="Read terminal job summary and completion/blocker evidence.",
+        continue_when="job_final_report, live_user_report, or blockers are readable",
+        stop_when="job is still queued/running and summary is not ready",
+    )
+    dry_run_request = recovery_handoff.get("dry_run_request") if isinstance(recovery_handoff.get("dry_run_request"), dict) else job_handoff.get("dry_run_request") if isinstance(job_handoff.get("dry_run_request"), dict) else None
+    execute_request = recovery_handoff.get("execute_request") if isinstance(recovery_handoff.get("execute_request"), dict) else job_handoff.get("execute_request") if isinstance(job_handoff.get("execute_request"), dict) else None
+    for step in sequence.get("steps") if isinstance(sequence.get("steps"), list) else []:
+        if not isinstance(step, dict):
+            continue
+        if step.get("name") == "preview_resume" and isinstance(step.get("request"), dict):
+            dry_run_request = step["request"]
+        if step.get("name") == "execute_resume" and isinstance(step.get("request"), dict):
+            execute_request = step["request"]
+    if dry_run_request:
+        add(
+            "api_resume_job_dry_run_curl",
+            "curl -fsS -X POST http://127.0.0.1:8080"
+            + resume_endpoint
+            + " -H 'Content-Type: application/json' -d "
+            + shlex.quote(json.dumps(dry_run_request, ensure_ascii=False, separators=(",", ":"))),
+            safe_to_run=True,
+            mutates_state=False,
+            requires_user_review=False,
+            reason="Preview a blocked/resumable job without executing live changes.",
+            continue_when="response.dry_run=true or child job preview is returned with command_argv",
+            stop_when="dry-run command is not allowlisted or blockers remain",
+        )
+    if execute_request:
+        add(
+            "api_resume_job_execute_curl",
+            "curl -fsS -X POST http://127.0.0.1:8080"
+            + resume_endpoint
+            + " -H 'Content-Type: application/json' -d "
+            + shlex.quote(json.dumps(execute_request, ensure_ascii=False, separators=(",", ":"))),
+            safe_to_run=action in {"resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"}
+            and not _string_list(recovery_handoff.get("blockers")),
+            mutates_state=True,
+            requires_user_review=True,
+            reason="Execute a reviewed resume request and then poll the returned child job.",
+            continue_when="child job_id is returned; poll child status until terminal",
+            stop_when="dry-run preview was not reviewed or accept_rules/confirm_upload gates are missing",
+        )
+    call = recommended_call if isinstance(recommended_call, dict) else {}
+    if call.get("endpoint"):
+        add(
+            "api_recommended_job_call_curl",
+            _job_control_shell_for_call(call),
+            safe_to_run=bool(call.get("safe_to_call_now")),
+            mutates_state=bool(call.get("mutates_state")),
+            requires_user_review=bool(call.get("requires_user_review")),
+            reason=str(call.get("reason") or "follow_job_control_recommended_call"),
+            continue_when="after_call from next_call/job_control_summary is satisfied",
+            stop_when="recommended_call.safe_to_call_now=false without explicit review",
+        )
+    add(
+        "api_list_jobs_curl",
+        "curl -fsS http://127.0.0.1:8080/v1/jobs",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="List recent ptcli jobs when job_id or child job state is ambiguous.",
+        continue_when="target job appears with status and endpoints",
+        stop_when="job list is unavailable or target job is absent",
+    )
+    add(
+        "api_cancel_job_curl",
+        "curl -fsS -X POST http://127.0.0.1:8080" + status_endpoint + "/cancel -H 'Content-Type: application/json' -d '{}'",
+        safe_to_run=False,
+        mutates_state=True,
+        requires_user_review=True,
+        reason="Cancel a queued/running job only when the user explicitly asks to stop it.",
+        continue_when="status=cancelled or job was already terminal",
+        stop_when="user did not ask to cancel this job",
+    )
+    return templates
+
+
+def _job_control_shell_for_call(call: dict[str, Any]) -> str:
+    endpoint = str(call.get("endpoint") or "")
+    method = str(call.get("method") or "GET").upper()
+    request = call.get("request") if isinstance(call.get("request"), dict) else None
+    if method == "GET":
+        return f"curl -fsS http://127.0.0.1:8080{endpoint}"
+    command = f"curl -fsS -X {method} http://127.0.0.1:8080{endpoint} -H 'Content-Type: application/json'"
+    if request is not None:
+        command += " -d " + shlex.quote(json.dumps(request, ensure_ascii=False, separators=(",", ":")))
+    return command
 
 
 def _job_resume_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -47395,8 +47555,9 @@ def _job_response_contract() -> dict[str, Any]:
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_gap_summary", "material_preparation_final_report", "material_chain_handoff", "material_preparation_final_decision", "target_materials_final_report", "target_upload_final_decision", "site_policy_profile_handoff", "qbit_runtime_handoff", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "qbit_execution_gate", "qbit_final_report", "qbit_policy_final_decision", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
-        "job_control_summary_fields": ["state", "action", "ready", "terminal", "should_poll", "should_resume", "resume_preview_required", "safe_to_call_now", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "poll_after_seconds", "status_endpoint", "summary_endpoint", "resume_endpoint", "read_order", "poll_resume_summary_sequence", "continue_when", "stop_when", "complete_when", "sources", "blockers", "next_actions"],
+        "job_control_summary_fields": ["state", "action", "ready", "terminal", "should_poll", "should_resume", "resume_preview_required", "safe_to_call_now", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "poll_after_seconds", "status_endpoint", "summary_endpoint", "resume_endpoint", "read_order", "poll_resume_summary_sequence", "command_templates", "continue_when", "stop_when", "complete_when", "sources", "blockers", "next_actions"],
         "job_poll_resume_summary_sequence_fields": ["ready", "primary_next_step", "steps", "complete_when", "stop_when"],
+        "job_control_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason", "continue_when", "stop_when"],
         "job_final_report_fields": ["ready", "ready_for_user_report", "report_allowed", "verdict", "status", "job_id", "job_kind", "summary_file", "control", "progress", "source_reference", "target_trackers", "duplicate_check", "manual_retorrent", "live", "closure", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "job_progress_handoff_fields": ["ready", "action", "progress", "current_stage", "stages", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "job_progress_stage_fields": ["name", "label", "ready", "blocked", "recommended_tool", "evidence", "blockers"],

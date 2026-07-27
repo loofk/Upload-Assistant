@@ -2775,6 +2775,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -2787,6 +2788,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -5709,6 +5720,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -5721,6 +5733,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -8510,6 +8532,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -8522,6 +8545,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -11311,6 +11344,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -11323,6 +11357,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -14116,6 +14160,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -14128,6 +14173,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -18017,6 +18072,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -18029,6 +18085,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -21715,6 +21781,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -21727,6 +21794,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -29569,6 +29646,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -29581,6 +29659,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -32332,6 +32420,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -32344,6 +32433,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -35104,6 +35203,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -35116,6 +35216,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -37845,6 +37955,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -37857,6 +37968,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -42025,6 +42146,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -42037,6 +42159,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -45724,6 +45856,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -45736,6 +45869,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [
@@ -48362,6 +48505,7 @@
           "resume_endpoint",
           "read_order",
           "poll_resume_summary_sequence",
+          "command_templates",
           "continue_when",
           "stop_when",
           "complete_when",
@@ -48374,6 +48518,16 @@
           "primary_next_step",
           "steps",
           "complete_when",
+          "stop_when"
+        ],
+        "job_control_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
           "stop_when"
         ],
         "job_final_report_fields": [

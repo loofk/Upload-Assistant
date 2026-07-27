@@ -13550,6 +13550,18 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert [step["name"] for step in job["job_control_summary"]["poll_resume_summary_sequence"]["steps"]] == ["poll_status", "read_summary_when_terminal"]
     assert job["job_control_summary"]["poll_resume_summary_sequence"]["primary_next_step"]["tool"] == "get_job_status"
     assert job["job_control_summary"]["poll_resume_summary_sequence"]["primary_next_step"]["endpoint"] == f"/v1/jobs/{job_id}"
+    control_templates = {item["name"]: item for item in job["job_control_summary"]["command_templates"]}
+    assert control_templates["api_poll_job_status_curl"]["command"] == f"curl -fsS http://127.0.0.1:8080/v1/jobs/{job_id}"
+    assert control_templates["api_poll_job_status_curl"]["safe_to_run"] is True
+    assert control_templates["api_poll_job_status_curl"]["mutates_state"] is False
+    assert control_templates["api_read_job_summary_curl"]["command"] == f"curl -fsS http://127.0.0.1:8080/v1/jobs/{job_id}/summary"
+    assert control_templates["api_recommended_job_call_curl"]["command"] == f"curl -fsS http://127.0.0.1:8080/v1/jobs/{job_id}"
+    assert control_templates["api_recommended_job_call_curl"]["requires_user_review"] is False
+    assert control_templates["api_list_jobs_curl"]["safe_to_run"] is True
+    assert control_templates["api_cancel_job_curl"]["command"] == f"curl -fsS -X POST http://127.0.0.1:8080/v1/jobs/{job_id}/cancel -H 'Content-Type: application/json' -d '{{}}'"
+    assert control_templates["api_cancel_job_curl"]["safe_to_run"] is False
+    assert control_templates["api_cancel_job_curl"]["mutates_state"] is True
+    assert control_templates["api_cancel_job_curl"]["requires_user_review"] is True
     assert job["job_final_report"]["kind"] == "ptcli.job_final_report"
     assert job["job_final_report"]["verdict"] == "poll"
     assert job["job_final_report"]["ready_for_user_report"] is False
@@ -23224,8 +23236,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "read_order" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
     assert "poll_resume_summary_sequence" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+    assert "command_templates" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
     assert "job_poll_resume_summary_sequence_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "primary_next_step" in tool_by_name["get_job_status"]["response_contract"]["job_poll_resume_summary_sequence_fields"]
+    assert "job_control_command_template_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "command" in tool_by_name["get_job_status"]["response_contract"]["job_control_command_template_fields"]
+    assert "mutates_state" in tool_by_name["get_job_status"]["response_contract"]["job_control_command_template_fields"]
+    assert "requires_user_review" in tool_by_name["get_job_status"]["response_contract"]["job_control_command_template_fields"]
     assert "job_control_summary_source_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recommended_call_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recommended_call_gate_fields" in tool_by_name["get_job_status"]["response_contract"]
