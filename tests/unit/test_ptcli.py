@@ -370,6 +370,23 @@ def test_sites_json_exposes_capability_matrix(capsys) -> None:
     assert hds_flow["full_live_closure"] is True
 
 
+def test_sites_cli_accepts_source_target_context(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: READY_REFERENCE_POLICY_CONFIG)
+
+    code = main(["sites", "--from", "CHD", "--to", "MTEAM", "--accept-rules", "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "ptcli.sites"
+    assert payload["sites"] == ["CHD", "MTEAM"]
+    assert payload["request"]["roles"] == {"CHD": ["source"], "MTEAM": ["target"]}
+    assert payload["flow_matrix"][0]["source_tracker"] == "CHD"
+    assert payload["flow_matrix"][0]["target_tracker"] == "MTEAM"
+    assert payload["adapter_profiles"]["CHD"]["source_download_adapter"] == "nexusphp_passkey"
+    assert payload["adapter_profiles"]["MTEAM"]["target_upload_adapter"] == "mteam_api"
+    assert payload["adapter_coverage_summary"]["requested_flow"]["ready"] is True
+
+
 def test_help_surfaces_short_live_closure_commands() -> None:
     help_text = build_parser().format_help()
 

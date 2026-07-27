@@ -105,6 +105,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     sites = subparsers.add_parser("sites", help="List supported tracker codes for the focused CLI.")
+    sites.add_argument("--config", help="Path to config.py, defaults to data/config.py when requesting role-aware profiles.")
+    sites.add_argument("--trackers", help="Optional comma-separated tracker codes to inspect.")
+    sites.add_argument("--from", dest="source_tracker", help="Source tracker code for role-aware adapter/profile readiness.")
+    sites.add_argument("--source-tracker", dest="source_tracker_alias", help="Alias for --from.")
+    sites.add_argument("--to", dest="target_trackers", help="Target tracker code(s), comma-separated, for role-aware adapter/profile readiness.")
+    sites.add_argument("--target", help="Alias for --to.")
+    sites.add_argument("--accept-rules", action="store_true", help="Acknowledge that involved tracker rules have been manually reviewed for readiness scoring.")
     sites.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     serve = subparsers.add_parser("serve", help="Run the local AI-friendly JSON API service.", description="Run the local AI-friendly JSON API service.")
@@ -12517,6 +12524,26 @@ def site_policy_verify_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     return site_policy_verify_payload({key: value for key, value in request.items() if value not in (None, "", [])})
 
 
+def sites_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    source_tracker = args.source_tracker or args.source_tracker_alias
+    target = args.target or args.target_trackers
+    request = {
+        "config": args.config,
+        "trackers": args.trackers,
+        "source_tracker": source_tracker,
+        "target": target,
+    }
+    request = {key: value for key, value in request.items() if value not in (None, "", [])}
+    if args.accept_rules:
+        request["accept_rules"] = True
+    if not request:
+        return build_sites_payload()
+
+    from src.ptcli.service import sites_payload
+
+    return sites_payload(request)
+
+
 def readiness_bundle_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import readiness_bundle_payload
 
@@ -12585,8 +12612,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "sites":
-            _print_payload(build_sites_payload(), json_output)
-            return 0
+            payload = sites_cli_payload(args)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("status") == "ok" else 1
 
         if args.command == "serve":
             from src.ptcli.service import run_service
