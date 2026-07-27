@@ -51938,6 +51938,7 @@
           "configure_schedule_call",
           "create_jobs_call",
           "run_now_call",
+          "command_templates",
           "delivery_delivered",
           "approval_required",
           "can_submit_after_approval",
@@ -51951,6 +51952,14 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "daily_candidate_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason"
         ],
         "daily_candidate_compact_workflow_step_fields": [
           "name",

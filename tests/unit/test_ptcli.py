@@ -25222,6 +25222,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "schedule_env_example" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
     assert "configure_schedule_call" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
     assert "run_now_call" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "command_templates" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "daily_candidate_command_template_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_compact_missing_input_fields" in goal_progress_tool["response_contract"]
     assert "qbittorrent" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "qbittorrent_evidence_fields" in goal_progress_tool["response_contract"]
@@ -27455,6 +27457,16 @@ services:
     assert payload["progress_summary"]["daily_candidate_handoff"]["configure_schedule_call"]["tool"] == "daily_candidates_schedule"
     assert payload["progress_summary"]["daily_candidate_handoff"]["create_jobs_call"]["tool"] == "daily_candidates_schedule_job"
     assert payload["progress_summary"]["daily_candidate_handoff"]["run_now_call"]["tool"] == "daily_candidate_run_and_deliver"
+    daily_templates = {item["name"]: item for item in payload["progress_summary"]["daily_candidate_handoff"]["command_templates"]}
+    assert daily_templates["shell_export_schedule_env"]["safe_to_run"] is True
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in daily_templates["shell_export_schedule_env"]["command"]
+    assert daily_templates["api_configure_daily_schedule_curl"]["mutates_state"] is False
+    assert "/v1/candidates/daily/schedule" in daily_templates["api_configure_daily_schedule_curl"]["command"]
+    assert daily_templates["api_run_and_deliver_daily_candidates_curl"]["mutates_state"] is True
+    assert "/v1/jobs/candidates/daily/run-and-deliver" in daily_templates["api_run_and_deliver_daily_candidates_curl"]["command"]
+    assert daily_templates["cli_daily_scheduler_once"]["safe_to_run"] is True
+    assert "daily-scheduler --once" in daily_templates["cli_daily_scheduler_once"]["command"]
+    assert daily_templates["docker_compose_start_daily_scheduler"]["command"] == "docker compose --profile daily up -d ptcli-daily-scheduler"
     assert any(item["name"] == "daily_candidate_schedule" for item in payload["progress_summary"]["daily_candidate_handoff"]["missing_inputs"])
     compact_steps = payload["progress_summary"]["daily_candidate_handoff"]["workflow_steps"]
     assert [step["name"] for step in compact_steps] == [
@@ -27537,6 +27549,8 @@ services:
     assert brief_payload["manual_retorrent"]["cli_templates"][0]["name"] == "api_preflight_curl"
     assert brief_payload["manual_retorrent"]["cli_templates"][2]["requires_user_review"] is True
     assert brief_payload["daily_candidates"]["target_count"] == 10
+    assert brief_payload["daily_candidates"]["command_templates"][0]["name"] == "shell_export_schedule_env"
+    assert brief_payload["daily_candidates"]["command_templates"][2]["mutates_state"] is True
     assert brief_payload["tracker_adapters"]["requested_flow"]["source_tracker"] == "U2"
     assert brief_payload["full_view_request"] == {"brief": False}
     assert len(json.dumps(brief_payload, ensure_ascii=False)) < len(json.dumps(payload["progress_summary"], ensure_ascii=False))
