@@ -6224,6 +6224,17 @@ def site_policy_verify_payload(request: dict[str, Any] | None = None) -> dict[st
     blockers.extend(f"{item['tracker']}: rule_review_fingerprint does not match expected fingerprint." for item in mismatches)
     blockers.extend(_string_list(policy_payload.get("blockers")))
     ready = bool(expected_fingerprints) and not missing and not mismatches and policy_payload.get("ready") is True
+    next_step = {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": policy_payload.get("recommended_request"), "reason": "policy_fingerprints_verified"} if ready else policy_payload.get("next_step")
+    final_report = _site_policy_verify_final_report(
+        ready=ready,
+        expected_fingerprints=expected_fingerprints,
+        tracker_items=tracker_items,
+        missing=missing,
+        mismatches=mismatches,
+        policy_payload=policy_payload,
+        next_step=next_step if isinstance(next_step, dict) else None,
+        blockers=blockers,
+    )
     return {
         "kind": "ptcli.site_policy_verify",
         "status": "ok" if ready else "blocked",
@@ -6248,6 +6259,7 @@ def site_policy_verify_payload(request: dict[str, Any] | None = None) -> dict[st
         "policy_repair_gate": policy_payload.get("policy_repair_gate"),
         "policy_config_apply_handoff": policy_payload.get("policy_config_apply_handoff"),
         "policy_execution_handoff": policy_payload.get("policy_execution_handoff"),
+        "site_policy_verify_final_report": final_report,
         "verification_call": {
             "tool": "site_policy_verify",
             "endpoint": "/v1/site-policies/verify",
@@ -6261,17 +6273,78 @@ def site_policy_verify_payload(request: dict[str, Any] | None = None) -> dict[st
                 "expected_fingerprints": expected_fingerprints,
             },
         },
-        "next_step": {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": policy_payload.get("recommended_request"), "reason": "policy_fingerprints_verified"} if ready else policy_payload.get("next_step"),
+        "next_step": next_step,
         "recommended_tool": "readiness_bundle" if ready else policy_payload.get("recommended_tool") or "site_policies",
         "recommended_endpoint": "/v1/readiness/bundle" if ready else policy_payload.get("recommended_endpoint") or "/v1/site-policies",
         "recommended_request": policy_payload.get("recommended_request"),
-        "read_order": ["status", "items", "missing", "mismatches", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "blockers"],
+        "read_order": ["site_policy_verify_final_report", "status", "items", "missing", "mismatches", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "blockers"],
         "continue_when": "ready=true; then run readiness_bundle before live retorrent automation.",
         "stop_when": ["expected_fingerprints is empty", "missing or mismatches is non-empty", "policy_ready=false"],
         "safety": {"read_only": True, "does_not_edit_config": True, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
         "blockers": blockers,
         "next_actions": _site_policy_verify_next_actions(ready, missing, mismatches, policy_payload),
     }
+
+
+def _site_policy_verify_final_report(
+    *,
+    ready: bool,
+    expected_fingerprints: dict[str, str],
+    tracker_items: list[dict[str, Any]],
+    missing: list[dict[str, Any]],
+    mismatches: list[dict[str, Any]],
+    policy_payload: dict[str, Any],
+    next_step: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    policy_ready = policy_payload.get("ready") is True
+    policy_config_apply_handoff = policy_payload.get("policy_config_apply_handoff") if isinstance(policy_payload.get("policy_config_apply_handoff"), dict) else {}
+    policy_execution_handoff = policy_payload.get("policy_execution_handoff") if isinstance(policy_payload.get("policy_execution_handoff"), dict) else {}
+    action = "run_readiness_bundle" if ready else "copy_rule_review_patch" if missing or mismatches else "repair_site_policy"
+    return {
+        "kind": "ptcli.site_policy_verify_final_report",
+        "ready": ready,
+        "report_allowed": ready,
+        "verdict": "policy_verified" if ready else "fingerprint_mismatch" if missing or mismatches else "policy_not_ready",
+        "action": action,
+        "expected_fingerprint_count": len(expected_fingerprints),
+        "matched_count": len([item for item in tracker_items if item.get("status") == "match"]),
+        "missing_count": len(missing),
+        "mismatch_count": len(mismatches),
+        "policy_ready": policy_ready,
+        "policy_config_apply_ready": policy_config_apply_handoff.get("ready"),
+        "policy_execution_ready": policy_execution_handoff.get("ready"),
+        "items": tracker_items,
+        "missing": missing,
+        "mismatches": mismatches,
+        "recommended_call": next_step or {
+            "tool": policy_payload.get("recommended_tool") or "site_policies",
+            "endpoint": policy_payload.get("recommended_endpoint") or "/v1/site-policies",
+            "method": "POST",
+            "request": policy_payload.get("recommended_request"),
+            "reason": "site_policy_verify_blocked",
+        },
+        "recommended_tool": (next_step or {}).get("tool") if next_step else policy_payload.get("recommended_tool") or "site_policies",
+        "recommended_endpoint": (next_step or {}).get("endpoint") if next_step else policy_payload.get("recommended_endpoint") or "/v1/site-policies",
+        "recommended_method": (next_step or {}).get("method") if next_step else "POST",
+        "recommended_request": (next_step or {}).get("request") if next_step else policy_payload.get("recommended_request"),
+        "read_order": ["site_policy_verify_final_report", "items", "missing", "mismatches", "policy_config_apply_handoff", "policy_execution_handoff", "policy_repair_gate"],
+        "complete_when": ["ready=true", "missing=[]", "mismatches=[]", "policy_ready=true", "policy_execution_handoff.ready=true"],
+        "stop_when": ["expected_fingerprints is empty", "missing_count>0", "mismatch_count>0", "policy_ready=false"],
+        "safety": {"read_only": True, "does_not_edit_config": True, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+        "blockers": blockers,
+        "next_actions": _site_policy_verify_final_next_actions(action, missing, mismatches, blockers),
+    }
+
+
+def _site_policy_verify_final_next_actions(action: str, missing: list[dict[str, Any]], mismatches: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    if action == "run_readiness_bundle":
+        return ["Run readiness_bundle with the same source/target before live retorrent automation."]
+    if missing or mismatches:
+        return ["Copy the rule_review merged_config_patch into PTCLI.SITE_POLICIES, then rerun site_policy_verify with the same expected_fingerprints."]
+    if blockers:
+        return ["Resolve site_policy_verify_final_report.blockers, then rerun site_policy_verify."]
+    return ["Inspect policy_config_apply_handoff and policy_execution_handoff before live automation."]
 
 
 def _site_policy_verify_expected_fingerprints(request: dict[str, Any]) -> dict[str, str]:
@@ -42772,10 +42845,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Verify that expected manual rule-review fingerprints are present in current PTCLI.SITE_POLICIES and that the site policy gate is ready. This does not contact trackers or edit config.",
             "input_schema": site_policy_verify_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "request", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "items", "policy_ready", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "verification_call", "next_step", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "ready", "request", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "items", "policy_ready", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "site_policy_verify_final_report", "verification_call", "next_step", "blockers", "next_actions"],
                 "item_fields": ["tracker", "expected", "actual", "match", "status"],
+                "site_policy_verify_final_report_fields": ["ready", "report_allowed", "verdict", "action", "expected_fingerprint_count", "matched_count", "missing_count", "mismatch_count", "policy_ready", "policy_config_apply_ready", "policy_execution_ready", "items", "missing", "mismatches", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "status_values": ["match", "missing", "mismatch"],
-                "read_order": ["items", "missing", "mismatches", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "blockers"],
+                "read_order": ["site_policy_verify_final_report", "items", "missing", "mismatches", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "blockers"],
             },
             "workflow_hints": {"after": "copy site_policy_rule_review.merged_config_patch into PTCLI.SITE_POLICIES", "continue_when": "ready=true", "then": "readiness_bundle"},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True, "does_not_edit_config": True},
@@ -45650,6 +45724,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_repair_gate": {"type": ["object", "null"]},
             "policy_config_apply_handoff": {"type": ["object", "null"]},
             "policy_execution_handoff": {"type": ["object", "null"]},
+            "site_policy_verify_final_report": {"type": "object"},
             "verification_call": {"type": "object"},
             "next_step": {"type": ["object", "null"]},
             "recommended_tool": {"type": ["string", "null"]},

@@ -21967,6 +21967,20 @@ def test_site_policy_verify_payload_reports_ready(monkeypatch) -> None:
     assert payload["mismatches"] == []
     assert payload["recommended_tool"] == "readiness_bundle"
     assert payload["verification_call"]["endpoint"] == "/v1/site-policies/verify"
+    final_report = payload["site_policy_verify_final_report"]
+    assert final_report["kind"] == "ptcli.site_policy_verify_final_report"
+    assert final_report["ready"] is True
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "policy_verified"
+    assert final_report["action"] == "run_readiness_bundle"
+    assert final_report["expected_fingerprint_count"] == 2
+    assert final_report["matched_count"] == 2
+    assert final_report["missing_count"] == 0
+    assert final_report["mismatch_count"] == 0
+    assert final_report["policy_ready"] is True
+    assert final_report["policy_execution_ready"] is True
+    assert final_report["recommended_call"]["tool"] == "readiness_bundle"
+    assert final_report["safety"]["does_not_edit_config"] is True
 
 
 def test_site_policy_verify_payload_blocks_missing_and_mismatch(monkeypatch) -> None:
@@ -21988,6 +22002,18 @@ def test_site_policy_verify_payload_blocks_missing_and_mismatch(monkeypatch) -> 
     assert payload["missing"][0]["tracker"] == "TJUPT"
     assert "U2: rule_review_fingerprint does not match expected fingerprint." in payload["blockers"]
     assert "TJUPT: rule_review_fingerprint is missing from current PTCLI.SITE_POLICIES." in payload["blockers"]
+    final_report = payload["site_policy_verify_final_report"]
+    assert final_report["kind"] == "ptcli.site_policy_verify_final_report"
+    assert final_report["ready"] is False
+    assert final_report["report_allowed"] is False
+    assert final_report["verdict"] == "fingerprint_mismatch"
+    assert final_report["action"] == "copy_rule_review_patch"
+    assert final_report["matched_count"] == 0
+    assert final_report["missing_count"] == 1
+    assert final_report["mismatch_count"] == 1
+    assert final_report["missing"] == payload["missing"]
+    assert final_report["mismatches"] == payload["mismatches"]
+    assert final_report["blockers"] == payload["blockers"]
 
 
 def test_site_policy_verify_cli_outputs_json(monkeypatch, capsys) -> None:
@@ -23738,6 +23764,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "rule_review_request" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_verify_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_verify_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "site_policy_verify_final_report" in tool_by_name["site_policy_verify"]["response_contract"]["required_fields"]
+    assert "site_policy_verify_final_report_fields" in tool_by_name["site_policy_verify"]["response_contract"]
+    assert "recommended_call" in tool_by_name["site_policy_verify"]["response_contract"]["site_policy_verify_final_report_fields"]
     assert "config_update_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
@@ -24969,6 +24998,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "rule_review_verification_bundle_fields" in goal_progress_tool["response_contract"]
     assert "site_policy_verify_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_verify_handoff_fields" in goal_progress_tool["response_contract"]
+    verify_tool = next(tool for tool in manifest["tools"] if tool["name"] == "site_policy_verify")
+    assert "site_policy_verify_final_report" in verify_tool["response_contract"]["required_fields"]
+    assert "site_policy_verify_final_report_fields" in verify_tool["response_contract"]
+    assert "recommended_call" in verify_tool["response_contract"]["site_policy_verify_final_report_fields"]
     assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_config_apply_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
