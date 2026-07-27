@@ -52333,6 +52333,7 @@
           "verdict",
           "phase",
           "action",
+          "next_stage",
           "job_id",
           "summary_file",
           "preflight_ready",
@@ -52346,9 +52347,29 @@
           "read_order",
           "complete_when",
           "stop_when",
+          "missing_inputs",
+          "workflow_steps",
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "live_validation_missing_input_fields": [
+          "name",
+          "required",
+          "source",
+          "blockers"
+        ],
+        "live_validation_workflow_step_fields": [
+          "name",
+          "status",
+          "tool",
+          "endpoint",
+          "method",
+          "recommended_call",
+          "requires_user_review",
+          "safe_to_call_now",
+          "continue_when",
+          "stop_when"
         ],
         "seedbox_live_validation_final_report_fields": [
           "ready",

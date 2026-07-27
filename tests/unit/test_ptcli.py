@@ -25081,6 +25081,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_validation_compact_handoff_fields" in goal_progress_tool["response_contract"]
     assert "site_policy_repair_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_repair_handoff_fields" in goal_progress_tool["response_contract"]
+    assert "next_stage" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
+    assert "missing_inputs" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
+    assert "workflow_steps" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
+    assert "live_validation_missing_input_fields" in goal_progress_tool["response_contract"]
+    assert "live_validation_workflow_step_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_run_loop_report_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_run_final_report_fields" in goal_progress_tool["response_contract"]
     assert "refill_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
@@ -27278,6 +27283,27 @@ services:
     assert payload["progress_summary"]["live_validation_handoff"]["action"] == "repair_readiness"
     assert payload["progress_summary"]["live_validation_handoff"]["ready"] is False
     assert payload["progress_summary"]["live_validation_handoff"]["recommended_tool"] == "edit_config"
+    assert payload["progress_summary"]["live_validation_handoff"]["next_stage"] == "verify_site_policy"
+    live_missing_inputs = payload["progress_summary"]["live_validation_handoff"]["missing_inputs"]
+    assert any(item["name"] == "site_policy" for item in live_missing_inputs)
+    live_steps = payload["progress_summary"]["live_validation_handoff"]["workflow_steps"]
+    assert [step["name"] for step in live_steps] == [
+        "repair_environment",
+        "verify_site_policy",
+        "provide_source_and_target",
+        "accept_rules_and_confirm_upload",
+        "run_readiness_bundle",
+        "run_doctor",
+        "submit_live_job",
+        "poll_or_resume_live_job",
+        "read_live_summary",
+        "report_complete",
+    ]
+    assert live_steps[1]["status"] == "current"
+    assert live_steps[5]["tool"] == "ptcli_doctor"
+    assert live_steps[5]["requires_user_review"] is True
+    assert live_steps[6]["tool"] == "source_url_check_and_submit"
+    assert live_steps[6]["safe_to_call_now"] is False
     assert "live_validation_completion_audit.report_allowed=true" in payload["progress_summary"]["live_validation_handoff"]["complete_when"]
     assert payload["progress_summary"]["live_validation_handoff"]["safety"]["must_not_report_complete_until_audit_passes"] is True
     assert "U2: rule_review_fingerprint is required before automation." in payload["progress_summary"]["user_review_blockers"]
@@ -28004,10 +28030,16 @@ services:
     live_handoff = payload["progress_summary"]["live_validation_handoff"]
     assert live_handoff["kind"] == "ptcli.goal_live_validation_handoff"
     assert live_handoff["action"] == "run_doctor"
+    assert live_handoff["next_stage"] == "run_doctor"
     assert live_handoff["preflight_ready"] is True
     assert live_handoff["recommended_tool"] == "ptcli_doctor"
     assert live_handoff["recommended_call"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
     assert live_handoff["safety"]["requires_user_review"] is True
+    doctor_step = next(step for step in live_handoff["workflow_steps"] if step["name"] == "run_doctor")
+    assert doctor_step["status"] == "current"
+    assert doctor_step["recommended_call"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
+    assert doctor_step["requires_user_review"] is True
+    assert doctor_step["safe_to_call_now"] is False
     assert adapters["requested_trackers"] == ["U2", "MTEAM"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
     assert adapters["site_adapter_profile_final_report"]["kind"] == "ptcli.site_adapter_profile_final_report"

@@ -39922,6 +39922,204 @@ def _goal_progress_rule_review_safe_item(item: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _goal_progress_live_validation_missing_inputs(blockers: list[str]) -> list[dict[str, Any]]:
+    missing: list[dict[str, Any]] = []
+
+    def add(name: str, blocker: str, source: str) -> None:
+        for item in missing:
+            if item["name"] == name:
+                item["blockers"].append(blocker)
+                return
+        missing.append({"name": name, "required": True, "source": source, "blockers": [blocker]})
+
+    for blocker in blockers:
+        lower = blocker.lower()
+        if "directory is missing" in lower or "deployment" in lower or "downloads_path" in lower or "job_dir" in lower:
+            add("environment_paths", blocker, "deployment_check")
+        if "rule" in lower or "site policy" in lower or "fingerprint" in lower or "accept_rules" in lower:
+            add("site_policy", blocker, "site_policy_rule_review")
+        if "source_url" in lower or "source/source_id" in lower or "source_tracker" in lower:
+            add("source_reference", blocker, "readiness_bundle")
+        if "target is required" in lower or "source and target" in lower:
+            add("target_tracker", blocker, "readiness_bundle")
+        if "live credentials" in lower or "cookie" in lower or "api" in lower:
+            add("tracker_credentials", blocker, "readiness_bundle")
+        if "confirm_upload" in lower:
+            add("confirm_upload", blocker, "readiness_bundle")
+        if "doctor_template" in lower or "doctor request" in lower:
+            add("doctor_request", blocker, "readiness_bundle")
+        if "manual_job_template" in lower:
+            add("manual_job_request", blocker, "readiness_bundle")
+        if "report_allowed=true" in lower or "real seedbox live validation" in lower or "live content validation" in lower:
+            add("live_completion_evidence", blocker, "get_job_summary")
+    return missing
+
+
+def _goal_progress_live_validation_next_stage(action: str, missing_inputs: list[dict[str, Any]]) -> str:
+    missing_names = {str(item.get("name")) for item in missing_inputs}
+    if "environment_paths" in missing_names:
+        return "repair_environment"
+    if "site_policy" in missing_names:
+        return "verify_site_policy"
+    if "source_reference" in missing_names or "target_tracker" in missing_names or "tracker_credentials" in missing_names:
+        return "provide_source_and_target"
+    if "confirm_upload" in missing_names:
+        return "accept_rules_and_confirm_upload"
+    return {
+        "repair_readiness": "run_readiness_bundle",
+        "run_doctor": "run_doctor",
+        "submit_live_job": "submit_live_job",
+        "poll_live_job": "poll_or_resume_live_job",
+        "resume_live_job": "poll_or_resume_live_job",
+        "read_live_summary": "read_live_summary",
+        "report_complete": "report_complete",
+    }.get(action, "run_readiness_bundle")
+
+
+def _goal_progress_live_validation_workflow_steps(
+    *,
+    action: str,
+    next_stage: str,
+    recommended_call: dict[str, Any],
+    ready: bool,
+    preflight_ready: bool,
+    job_id: Any,
+    summary_file: Any,
+) -> list[dict[str, Any]]:
+    current_found = False
+
+    def status_for(name: str) -> str:
+        nonlocal current_found
+        if ready:
+            return "complete"
+        if name == next_stage and not current_found:
+            current_found = True
+            return "current"
+        return "pending" if current_found else "locked"
+
+    doctor_call = _goal_progress_compact_call(recommended_call) if action == "run_doctor" else None
+    submit_call = _goal_progress_compact_call(recommended_call) if action == "submit_live_job" else None
+    poll_request = {"job_id": job_id or "<live_retorrent_job_id>"}
+    summary_request = {"job_id": job_id or "<live_retorrent_job_id>", "summary_file": summary_file} if summary_file else {"job_id": job_id or "<live_retorrent_job_id>"}
+    steps = [
+        {
+            "name": "repair_environment",
+            "tool": "deployment_check",
+            "endpoint": "/v1/deployment/check",
+            "method": "GET",
+            "recommended_call": {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "deployment_check.ready=true and seedbox paths are mounted to the same qBittorrent save paths",
+            "stop_when": "job/download/config/cookie paths are still missing on the target host",
+        },
+        {
+            "name": "verify_site_policy",
+            "tool": "site_policy_verify",
+            "endpoint": "/v1/site-policies/verify",
+            "method": "POST",
+            "recommended_call": {"tool": "site_policy_verify", "endpoint": "/v1/site-policies/verify", "method": "POST"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "site_policy_verify.ready=true and policy_execution_handoff.ready=true",
+            "stop_when": "rule review fingerprints, qBittorrent limits, or seeding requirements are missing",
+        },
+        {
+            "name": "provide_source_and_target",
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "recommended_call": {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "source_url or source/source_id plus target are present and live credentials can be checked",
+            "stop_when": "source reference, target, cookies, API token, or qBittorrent client config is missing",
+        },
+        {
+            "name": "accept_rules_and_confirm_upload",
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "recommended_call": {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": {"accept_rules": True, "confirm_upload": True}},
+            "requires_user_review": True,
+            "safe_to_call_now": False,
+            "continue_when": "user explicitly accepts tracker rules and confirms live upload for this source/target",
+            "stop_when": "accept_rules=true or confirm_upload=true is missing",
+        },
+        {
+            "name": "run_readiness_bundle",
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "recommended_call": {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "seedbox_live_validation_execution_handoff.ready=true and current_step=run_doctor",
+            "stop_when": "readiness bundle returns blockers or no doctor_call",
+        },
+        {
+            "name": "run_doctor",
+            "tool": "ptcli_doctor",
+            "endpoint": None,
+            "method": "CLI",
+            "recommended_call": doctor_call or {"tool": "ptcli_doctor"},
+            "requires_user_review": True,
+            "safe_to_call_now": False,
+            "continue_when": "ptcli-doctor-summary.json exists and reports live-safe evidence for submit",
+            "stop_when": "doctor reports duplicate, unsafe policy gate, missing material/qBittorrent/source/target evidence, or user has not approved live execution",
+        },
+        {
+            "name": "submit_live_job",
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "recommended_call": submit_call or {"tool": "source_url_check_and_submit", "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit", "method": "POST"},
+            "requires_user_review": True,
+            "safe_to_call_now": False,
+            "continue_when": "job_id is returned and job status can be polled",
+            "stop_when": "duplicate exists, confirm_upload is false, or site policy gate is not ready",
+        },
+        {
+            "name": "poll_or_resume_live_job",
+            "tool": "get_job_status",
+            "endpoint": "/v1/jobs/{job_id}",
+            "method": "GET",
+            "recommended_call": {"tool": "get_job_status", "endpoint": "/v1/jobs/{job_id}", "method": "GET", "request": poll_request},
+            "requires_user_review": False,
+            "safe_to_call_now": bool(job_id),
+            "continue_when": "job status is complete or blocked with recovery_handoff/next_call",
+            "stop_when": "job fails without recovery_handoff or asks for user approval",
+        },
+        {
+            "name": "read_live_summary",
+            "tool": "get_job_summary",
+            "endpoint": "/v1/jobs/{job_id}/summary",
+            "method": "GET",
+            "recommended_call": {"tool": "get_job_summary", "endpoint": "/v1/jobs/{job_id}/summary", "method": "GET", "request": summary_request},
+            "requires_user_review": False,
+            "safe_to_call_now": bool(job_id or summary_file),
+            "continue_when": "summary exposes uploaded torrent, qBittorrent injection, seeding evidence, and live_validation_completion_audit",
+            "stop_when": "summary is missing or live_validation_completion_audit.report_allowed is not true",
+        },
+        {
+            "name": "report_complete",
+            "tool": "goal_progress",
+            "endpoint": "/v1/goal/progress",
+            "method": "GET",
+            "recommended_call": {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET"},
+            "requires_user_review": False,
+            "safe_to_call_now": True,
+            "continue_when": "goal_progress.live_validation_handoff.report_allowed=true and blockers are empty",
+            "stop_when": "any live_validation_completion_audit failed_checks, missing_evidence, or blockers remain",
+        },
+    ]
+    for step in steps:
+        step["status"] = status_for(str(step["name"]))
+        if step["name"] == "run_doctor" and preflight_ready:
+            step["status"] = "current" if next_stage == "run_doctor" else step["status"]
+    return steps
+
+
 def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any] | None:
     if not live_validation and not preflight:
         return None
@@ -39975,6 +40173,11 @@ def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, An
             else {}
         )
     blockers = list(dict.fromkeys(_string_list(final_report.get("blockers")) + _string_list(live_validation.get("blockers")) + _string_list(preflight.get("blockers")) + _string_list(repair_plan.get("blockers"))))
+    missing_inputs = _goal_progress_live_validation_missing_inputs(blockers)
+    next_stage = _goal_progress_live_validation_next_stage(action, missing_inputs)
+    job_id = final_report.get("job_id") or best.get("job_id")
+    summary_file = final_report.get("summary_file") or live_validation.get("requested_summary_file")
+    preflight_ready = preflight.get("ready") is True
     return {
         "kind": "ptcli.goal_live_validation_handoff",
         "ready": ready,
@@ -39983,9 +40186,10 @@ def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, An
         "verdict": verdict,
         "phase": final_report.get("phase") or execution_handoff.get("current_step") or decision_plan.get("current_step"),
         "action": action,
-        "job_id": final_report.get("job_id") or best.get("job_id"),
-        "summary_file": final_report.get("summary_file") or live_validation.get("requested_summary_file"),
-        "preflight_ready": preflight.get("ready") is True,
+        "next_stage": next_stage,
+        "job_id": job_id,
+        "summary_file": summary_file,
+        "preflight_ready": preflight_ready,
         "submission_ready": live_validation.get("submission_ready") is True or final_report.get("submission_ready") is True,
         "completion_audit": {
             "report_allowed": completion_audit.get("report_allowed") if completion_audit.get("report_allowed") is not None else completion.get("report_allowed"),
@@ -40007,6 +40211,16 @@ def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, An
             "recommended_call.safe_to_call_now=false without explicit user approval",
             "live_validation_completion_audit.blockers is non-empty",
         ],
+        "missing_inputs": missing_inputs,
+        "workflow_steps": _goal_progress_live_validation_workflow_steps(
+            action=action,
+            next_stage=next_stage,
+            recommended_call=recommended_call if isinstance(recommended_call, dict) else {},
+            ready=ready,
+            preflight_ready=preflight_ready,
+            job_id=job_id,
+            summary_file=summary_file,
+        ),
         "safety": {
             "read_only": action in {"repair_readiness", "poll_live_job", "read_live_summary", "report_complete"},
             "mutates_state": action in {"run_doctor", "submit_live_job", "resume_live_job"},
@@ -43442,7 +43656,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "site_adapter_profile_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
-                "live_validation_compact_handoff_fields": ["ready", "report_allowed", "status", "verdict", "phase", "action", "job_id", "summary_file", "preflight_ready", "submission_ready", "completion_audit", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "run_order", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "live_validation_compact_handoff_fields": ["ready", "report_allowed", "status", "verdict", "phase", "action", "next_stage", "job_id", "summary_file", "preflight_ready", "submission_ready", "completion_audit", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "run_order", "read_order", "complete_when", "stop_when", "missing_inputs", "workflow_steps", "safety", "blockers", "next_actions"],
+                "live_validation_missing_input_fields": ["name", "required", "source", "blockers"],
+                "live_validation_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "seedbox_live_validation_start_report", "seedbox_live_post_submit_report", "seedbox_live_validation_decision_plan", "seedbox_live_validation_execution_handoff", "agent_smoke_live_validation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
