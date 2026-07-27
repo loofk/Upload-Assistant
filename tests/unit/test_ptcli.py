@@ -25234,6 +25234,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "tracker_adapter_evidence_fields" in goal_progress_tool["response_contract"]
     assert "adapter_extension_final_report" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
     assert "tracker_rollout_handoff" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
+    assert "adapter_code_ready" in goal_progress_tool["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "reference_status" in goal_progress_tool["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "profile_gaps" in goal_progress_tool["response_contract"]["tracker_adapter_compact_handoff_fields"]
+    assert "tracker_adapter_compact_reference_status_fields" in goal_progress_tool["response_contract"]
+    assert "tracker_adapter_compact_profile_gap_fields" in goal_progress_tool["response_contract"]
     assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "seedbox_live_validation_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "seedbox_live_validation_final_report_fields" in goal_progress_tool["response_contract"]
@@ -27563,6 +27568,13 @@ services:
     assert brief_payload["live_validation"]["command_templates"][0]["name"] == "cli_readiness_bundle_live_preflight"
     assert brief_payload["live_validation"]["command_templates"][1]["requires_user_review"] is True
     assert brief_payload["tracker_adapters"]["requested_flow"]["source_tracker"] == "U2"
+    assert brief_payload["tracker_adapters"]["adapter_code_ready"] is True
+    assert brief_payload["tracker_adapters"]["policy_gate_ready"] is False
+    assert brief_payload["tracker_adapters"]["profile_gaps"]["next_gate"] == "site_policy_rule_review"
+    assert brief_payload["tracker_adapters"]["profile_gaps"]["policy_gate_missing_by_tracker"]["U2"] == ["policy_profile", "rule_obligations"]
+    assert brief_payload["tracker_adapters"]["profile_gaps"]["preflight_gate_missing_by_tracker"]["MTEAM"] == ["retorrent_preflight"]
+    assert brief_payload["tracker_adapters"]["profile_gaps"]["adapter_component_missing_by_tracker"] == {}
+    assert brief_payload["tracker_adapters"]["reference_status"]["u2_chd_to_mteam_reference_ready"] == {"U2": True, "CHD": True}
     assert brief_payload["full_view_request"] == {"brief": False}
     assert len(json.dumps(brief_payload, ensure_ascii=False)) < len(json.dumps(payload["progress_summary"], ensure_ascii=False))
     assert "evidence" not in brief_payload

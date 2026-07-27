@@ -52566,9 +52566,13 @@
           "status",
           "verdict",
           "action",
+          "adapter_code_ready",
+          "policy_gate_ready",
           "requested_trackers",
           "requested_flow",
           "coverage",
+          "reference_status",
+          "profile_gaps",
           "rollout",
           "missing_inputs",
           "workflow_steps",
@@ -52591,6 +52595,22 @@
           "live_reference_sources_to_mteam",
           "reference_sources_to_mteam",
           "reference_flows_to_mteam"
+        ],
+        "tracker_adapter_compact_reference_status_fields": [
+          "requested_flow_has_reference",
+          "reference_trackers",
+          "reference_sources_to_mteam",
+          "live_reference_sources_to_mteam",
+          "reference_flows_to_mteam",
+          "u2_chd_to_mteam_reference_ready"
+        ],
+        "tracker_adapter_compact_profile_gap_fields": [
+          "policy_gate_missing_by_tracker",
+          "preflight_gate_missing_by_tracker",
+          "adapter_component_missing_by_tracker",
+          "validation_blocked_trackers",
+          "priority_next",
+          "next_gate"
         ],
         "tracker_adapter_compact_missing_input_fields": [
           "name",
