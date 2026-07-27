@@ -39503,6 +39503,8 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "action": environment.get("action"),
             "blockers": _string_list(environment.get("blockers"))[:4],
             "mkdir_commands": _string_list(environment.get("mkdir_commands"))[:4],
+            "bootstrap_commands": _goal_progress_agent_brief_bootstrap_commands(environment.get("bootstrap_commands") if isinstance(environment.get("bootstrap_commands"), list) else []),
+            "print_bootstrap_commands": environment.get("print_bootstrap_commands"),
         },
         "site_policy": {
             "ready": site_policy.get("ready"),
@@ -39567,6 +39569,25 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
         "read_full_when": summary.get("read_full_when"),
         "full_view_request": {"brief": False},
     }
+
+
+def _goal_progress_agent_brief_bootstrap_commands(commands: list[Any]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for item in commands[:8]:
+        if isinstance(item, dict):
+            command = str(item.get("command") or "").strip()
+            if not command:
+                continue
+            compact.append(
+                {
+                    "name": item.get("name"),
+                    "command": command,
+                    "safe_to_run": item.get("safe_to_run"),
+                }
+            )
+        elif str(item).strip():
+            compact.append({"name": None, "command": str(item).strip(), "safe_to_run": None})
+    return compact
 
 
 def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
@@ -44795,6 +44816,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_agent_brief", "use_for": "first-pass agent routing, status checks, and next-work selection before reading the full evidence tree"},
                 "agent_brief_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "blocker_count", "blocker_owners", "first_blocker", "primary_blocker_group", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "capability_status", "remaining_capability_ids", "current_step", "environment", "site_policy", "manual_retorrent", "daily_candidates", "qbittorrent", "tracker_adapters", "live_validation", "safety", "blockers", "next_actions", "read_full_when", "full_view_request"],
+                "agent_brief_environment_fields": ["ready", "status", "action", "blockers", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands"],
                 "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "manual_retorrent_entry_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],

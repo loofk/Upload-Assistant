@@ -38401,6 +38401,9 @@ services:
 
     assert brief_payload["environment"]["blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
     assert brief_payload["environment"]["mkdir_commands"] == [f"mkdir -p {job_dir}", f"mkdir -p {downloads_dir}"]
+    assert [item["name"] for item in brief_payload["environment"]["bootstrap_commands"][:2]] == [f"mkdir:{job_dir}", f"mkdir:{downloads_dir}"]
+    assert brief_payload["environment"]["bootstrap_commands"][3]["command"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} up -d --build ptcli-api"
+    assert brief_payload["environment"]["print_bootstrap_commands"] == "python3 ptcli.py deployment-check --print-bootstrap-commands"
     handoff = payload["progress_summary"]["environment_repair_handoff"]
     assert payload["progress_summary"]["environment_blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
     assert handoff["kind"] == "ptcli.goal_environment_repair_handoff"
