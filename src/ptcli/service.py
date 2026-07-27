@@ -39393,8 +39393,121 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     }
     payload["progress_summary"] = _goal_progress_brief_summary(payload)
     if _truthy(request.get("brief")) or str(request.get("view") or "").strip().lower() in {"brief", "summary", "compact"}:
-        return payload["progress_summary"]
+        return _goal_progress_agent_brief_summary(payload["progress_summary"])
     return payload
+
+
+def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    """Return a narrow status payload for first-pass agent routing."""
+    critical_path = summary.get("critical_path_handoff") if isinstance(summary.get("critical_path_handoff"), dict) else {}
+    current_step = critical_path.get("current_step") if isinstance(critical_path.get("current_step"), dict) else {}
+    daily = summary.get("daily_candidate_handoff") if isinstance(summary.get("daily_candidate_handoff"), dict) else {}
+    qbit = summary.get("qbit_handoff") if isinstance(summary.get("qbit_handoff"), dict) else {}
+    adapters = summary.get("tracker_adapter_handoff") if isinstance(summary.get("tracker_adapter_handoff"), dict) else {}
+    adapter_coverage = adapters.get("coverage") if isinstance(adapters.get("coverage"), dict) else {}
+    site_policy = summary.get("site_policy_repair_handoff") if isinstance(summary.get("site_policy_repair_handoff"), dict) else {}
+    live = summary.get("live_validation_handoff") if isinstance(summary.get("live_validation_handoff"), dict) else {}
+    environment = summary.get("environment_repair_handoff") if isinstance(summary.get("environment_repair_handoff"), dict) else {}
+    manual = summary.get("manual_retorrent_entry_handoff") if isinstance(summary.get("manual_retorrent_entry_handoff"), dict) else {}
+    return {
+        "kind": "ptcli.goal_progress_agent_brief",
+        "status": summary.get("status"),
+        "ok": summary.get("ok"),
+        "objective": summary.get("objective"),
+        "estimated_percent": summary.get("estimated_percent"),
+        "remaining_percent": summary.get("remaining_percent"),
+        "plain_answer": summary.get("plain_answer"),
+        "current_phase": summary.get("current_phase"),
+        "blocker_count": summary.get("blocker_count"),
+        "blocker_owners": _string_list(summary.get("blocker_owners")),
+        "first_blocker": summary.get("first_blocker"),
+        "primary_blocker_group": summary.get("primary_blocker_group"),
+        "recommended_call": summary.get("recommended_call"),
+        "recommended_tool": summary.get("recommended_tool"),
+        "recommended_endpoint": summary.get("recommended_endpoint"),
+        "recommended_method": summary.get("recommended_method"),
+        "source_context": summary.get("source_context"),
+        "capability_status": summary.get("capability_status") if isinstance(summary.get("capability_status"), dict) else {},
+        "remaining_capability_ids": _string_list(summary.get("remaining_capability_ids")),
+        "current_step": {
+            "name": current_step.get("name"),
+            "tool": current_step.get("tool"),
+            "endpoint": current_step.get("endpoint"),
+            "method": current_step.get("method"),
+            "status": current_step.get("status"),
+            "safe_to_call_now": current_step.get("safe_to_call_now"),
+            "requires_user_review": current_step.get("requires_user_review"),
+        },
+        "environment": {
+            "ready": environment.get("ready"),
+            "status": environment.get("status"),
+            "action": environment.get("action"),
+            "blockers": _string_list(environment.get("blockers"))[:4],
+            "mkdir_commands": _string_list(environment.get("mkdir_commands"))[:4],
+        },
+        "site_policy": {
+            "ready": site_policy.get("ready"),
+            "status": site_policy.get("status"),
+            "action": site_policy.get("action"),
+            "recommended_tool": site_policy.get("recommended_tool"),
+            "recommended_call": _goal_progress_compact_call(site_policy.get("recommended_call") if isinstance(site_policy.get("recommended_call"), dict) else {}),
+            "missing_config_fields": site_policy.get("missing_config_fields") if isinstance(site_policy.get("missing_config_fields"), list) else [],
+            "trackers": _string_list(site_policy.get("trackers")),
+            "blockers": _string_list(site_policy.get("blockers"))[:6],
+        },
+        "manual_retorrent": {
+            "ready": manual.get("ready"),
+            "status": manual.get("status"),
+            "action": manual.get("action"),
+            "recommended_tool": manual.get("recommended_tool"),
+            "recommended_call": _goal_progress_compact_call(manual.get("recommended_call") if isinstance(manual.get("recommended_call"), dict) else {}),
+            "blockers": _string_list(manual.get("blockers"))[:6],
+        },
+        "daily_candidates": {
+            "ready": daily.get("ready"),
+            "status": daily.get("status"),
+            "action": daily.get("action"),
+            "target_count": daily.get("target_count"),
+            "ready_count": daily.get("ready_count"),
+            "shortfall_count": daily.get("shortfall_count"),
+            "delivery_delivered": daily.get("delivery_delivered"),
+            "recommended_tool": daily.get("recommended_tool"),
+            "recommended_call": _goal_progress_compact_call(daily.get("recommended_call") if isinstance(daily.get("recommended_call"), dict) else {}),
+        },
+        "qbittorrent": {
+            "ready": qbit.get("ready"),
+            "status": qbit.get("status"),
+            "action": qbit.get("action"),
+            "configured": qbit.get("configured"),
+            "policy_limit_ready": qbit.get("policy_limit_ready"),
+            "recommended_tool": qbit.get("recommended_tool"),
+            "missing_inputs": qbit.get("missing_inputs") if isinstance(qbit.get("missing_inputs"), list) else [],
+        },
+        "tracker_adapters": {
+            "ready": adapters.get("ready"),
+            "status": adapters.get("status"),
+            "action": adapters.get("action"),
+            "requested_trackers": _string_list(adapters.get("requested_trackers")),
+            "requested_flow": adapters.get("requested_flow") if isinstance(adapters.get("requested_flow"), dict) else None,
+            "reference_sources_to_mteam": _string_list(adapter_coverage.get("reference_sources_to_mteam")),
+            "live_reference_sources_to_mteam": _string_list(adapter_coverage.get("live_reference_sources_to_mteam")),
+            "blockers": _string_list(adapters.get("blockers"))[:6],
+        },
+        "live_validation": {
+            "ready": live.get("ready"),
+            "status": live.get("status"),
+            "action": live.get("action"),
+            "report_allowed": live.get("report_allowed"),
+            "next_stage": live.get("next_stage"),
+            "recommended_tool": live.get("recommended_tool"),
+            "blockers": _string_list(live.get("blockers"))[:6],
+        },
+        "safety": summary.get("safety"),
+        "blockers": _string_list(summary.get("blockers"))[:12],
+        "next_actions": _string_list(summary.get("next_actions"))[:6],
+        "read_full_when": summary.get("read_full_when"),
+        "full_view_request": {"brief": False},
+    }
 
 
 def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
@@ -44618,7 +44731,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": readiness_bundle_request_schema,
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
-                "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
+                "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_agent_brief", "use_for": "first-pass agent routing, status checks, and next-work selection before reading the full evidence tree"},
+                "agent_brief_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "blocker_count", "blocker_owners", "first_blocker", "primary_blocker_group", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "capability_status", "remaining_capability_ids", "current_step", "environment", "site_policy", "manual_retorrent", "daily_candidates", "qbittorrent", "tracker_adapters", "live_validation", "safety", "blockers", "next_actions", "read_full_when", "full_view_request"],
                 "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "manual_retorrent_entry_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],

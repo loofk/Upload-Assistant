@@ -27432,7 +27432,14 @@ services:
     assert payload["progress_summary"]["safety"]["read_only"] is True
     assert payload["progress_summary"]["safety"]["rules_gate_must_be_ready"] is True
     brief_payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM", "brief": True})
-    assert brief_payload == payload["progress_summary"]
+    assert brief_payload["kind"] == "ptcli.goal_progress_agent_brief"
+    assert brief_payload["recommended_tool"] == payload["progress_summary"]["recommended_tool"]
+    assert brief_payload["current_step"]["tool"] == payload["progress_summary"]["critical_path_handoff"]["current_step"]["tool"]
+    assert brief_payload["site_policy"]["recommended_tool"] == "site_policy_rule_review"
+    assert brief_payload["daily_candidates"]["target_count"] == 10
+    assert brief_payload["tracker_adapters"]["requested_flow"]["source_tracker"] == "U2"
+    assert brief_payload["full_view_request"] == {"brief": False}
+    assert len(json.dumps(brief_payload, ensure_ascii=False)) < len(json.dumps(payload["progress_summary"], ensure_ascii=False))
     assert "evidence" not in brief_payload
     assert payload["status"] == "blocked"
     assert payload["completion_estimate"]["estimated_percent"] > 50
