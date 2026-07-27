@@ -51587,6 +51587,17 @@
           "bootstrap_commands",
           "print_bootstrap_commands"
         ],
+        "agent_brief_site_policy_fields": [
+          "ready",
+          "status",
+          "action",
+          "recommended_tool",
+          "recommended_call",
+          "command_templates",
+          "missing_config_fields",
+          "trackers",
+          "blockers"
+        ],
         "agent_brief_manual_retorrent_fields": [
           "ready",
           "status",
@@ -52435,6 +52446,7 @@
           "trackers",
           "rules_to_review",
           "submit_request_template",
+          "command_templates",
           "missing_config_fields",
           "copyable_config_ready",
           "copyable_config",
@@ -52481,6 +52493,7 @@
           "config_apply_final_report",
           "ai_config_apply_plan",
           "manual_apply_handoff",
+          "command_templates",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -54567,6 +54580,7 @@
           "config_apply_final_report",
           "ai_config_apply_plan",
           "manual_apply_handoff",
+          "command_templates",
           "next_step",
           "blockers",
           "next_actions"
@@ -54701,6 +54715,7 @@
           "verify_call",
           "goal_progress_call",
           "live_readiness_call",
+          "command_templates",
           "steps",
           "read_order",
           "complete_when",
@@ -54709,6 +54724,14 @@
           "blockers",
           "next_actions",
           "linked_plan"
+        ],
+        "site_policy_rule_review_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason"
         ],
         "ai_config_apply_step_fields": [
           "step",

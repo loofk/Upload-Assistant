@@ -6178,6 +6178,15 @@ def site_policy_rule_review_payload(request: dict[str, Any] | None = None) -> di
     config_apply_final_report = _site_policy_rule_review_config_apply_final_report(ready, blockers, context, merged_config_patch, final_report, rerun_request, verification_bundle)
     ai_config_apply_plan = _site_policy_rule_review_ai_config_apply_plan(ready, blockers, context, merged_config_patch, config_apply_final_report, verification_bundle)
     manual_apply_handoff = _site_policy_rule_review_manual_apply_handoff(ready, blockers, context, review_package, merged_config_patch, config_apply_final_report, verification_bundle, ai_config_apply_plan)
+    command_templates = _site_policy_rule_review_command_templates(
+        request=request,
+        context=context,
+        review_package=review_package,
+        verification_bundle=verification_bundle,
+        config_apply_final_report=config_apply_final_report,
+        ready=ready,
+    )
+    manual_apply_handoff["command_templates"] = command_templates
     return {
         "kind": "ptcli.site_policy_rule_review",
         "status": "ok" if ready else "blocked",
@@ -6204,16 +6213,136 @@ def site_policy_rule_review_payload(request: dict[str, Any] | None = None) -> di
         "config_apply_final_report": config_apply_final_report,
         "ai_config_apply_plan": ai_config_apply_plan,
         "manual_apply_handoff": manual_apply_handoff,
+        "command_templates": command_templates,
         "next_step": next_step,
         "recommended_tool": "edit_config" if ready else "site_policy_rule_review",
         "recommended_endpoint": None if ready else "/v1/site-policies/rule-review",
         "recommended_request": merged_config_patch if ready else review_package["submit_request_template"],
-        "read_order": ["rule_review_package", "rule_review_final_report", "config_apply_final_report", "manual_apply_handoff", "ai_config_apply_plan", "status", "blockers", "reviews", "merged_config_patch", "config_patch", "next_step"],
+        "read_order": ["rule_review_package", "command_templates", "rule_review_final_report", "config_apply_final_report", "manual_apply_handoff", "ai_config_apply_plan", "status", "blockers", "reviews", "merged_config_patch", "config_patch", "next_step"],
         "continue_when": "merged_config_patch is copied into PTCLI.SITE_POLICIES and site_policies.policy_repair_gate.ready=true",
         "stop_when": ["rules_reviewed is not true", "reviewer or reviewed_at missing", "site_policies still reports missing or placeholder rule_review_fingerprint"],
         "blockers": blockers,
         "next_actions": _site_policy_rule_review_next_actions(ready, blockers),
     }
+
+
+def _site_policy_rule_review_command_templates(
+    *,
+    request: dict[str, Any],
+    context: dict[str, Any],
+    review_package: dict[str, Any],
+    verification_bundle: dict[str, Any],
+    config_apply_final_report: dict[str, Any],
+    ready: bool,
+) -> list[dict[str, Any]]:
+    submit_request = review_package.get("submit_request_template") if isinstance(review_package.get("submit_request_template"), dict) else {}
+    source_url = request.get("source_url") or request.get("source")
+    source_tracker = submit_request.get("source_tracker") or context.get("source_tracker")
+    target = submit_request.get("target") or context.get("target")
+    trackers = _string_list(submit_request.get("trackers") or context.get("trackers"))
+    reviewer = str(submit_request.get("reviewer") or "<reviewer>")
+    reviewed_at = str(submit_request.get("reviewed_at") or "<YYYY-MM-DD>")
+    notes = _string_list(submit_request.get("notes")) or ["Reviewed tracker download, retorrent, upload, and seeding rules."]
+    rules_urls = submit_request.get("rules_urls") if isinstance(submit_request.get("rules_urls"), dict) else {}
+
+    review_argv = ["python3", "ptcli.py", "site-policy-rule-review"]
+    if source_url:
+        review_argv.extend(["--source-url", str(source_url)])
+    elif source_tracker:
+        review_argv.extend(["--from", str(source_tracker)])
+    if target:
+        review_argv.extend(["--to", str(target)])
+    elif trackers:
+        review_argv.extend(["--trackers", ",".join(trackers)])
+    review_argv.extend(["--rules-reviewed", "--reviewer", reviewer, "--reviewed-at", reviewed_at])
+    if rules_urls:
+        review_argv.extend(["--rules-urls-json", json.dumps(rules_urls, ensure_ascii=False, separators=(",", ":"))])
+    for note in notes:
+        review_argv.extend(["--note", note])
+    review_argv.append("--json")
+
+    api_review_payload = dict(submit_request)
+    api_base = "http://127.0.0.1:8080"
+    templates = [
+        {
+            "name": "cli_rule_review_after_human_review",
+            "command": shlex.join(review_argv),
+            "safe_to_run": ready,
+            "mutates_state": False,
+            "requires_user_review": True,
+            "reason": "Generate rule-review fingerprints only after a human reviewed every listed tracker rule page.",
+        },
+        {
+            "name": "api_rule_review_after_human_review_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/site-policies/rule-review",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(api_review_payload, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": ready,
+            "mutates_state": False,
+            "requires_user_review": True,
+            "reason": "HTTP equivalent of the manual rule-review evidence submission.",
+        },
+    ]
+    copyable = config_apply_final_report.get("copyable_config") if isinstance(config_apply_final_report.get("copyable_config"), dict) else {}
+    if copyable.get("ready") is True:
+        templates.append(
+            {
+                "name": "cli_print_python_update_snippet",
+                "command": shlex.join([*review_argv[:-1], "--print-python-update-snippet"]),
+                "safe_to_run": True,
+                "mutates_state": False,
+                "requires_user_review": True,
+                "reason": "Print only the config update snippet after review evidence is ready; still requires manual config edit.",
+            }
+        )
+    verify_call = verification_bundle.get("verification_call") if isinstance(verification_bundle.get("verification_call"), dict) else {}
+    verify_request = verify_call.get("request") if isinstance(verify_call.get("request"), dict) else {}
+    verify_argv = _site_policy_verify_cli_argv(verify_request)
+    if verify_argv:
+        templates.append(
+            {
+                "name": "cli_verify_after_config_edit",
+                "command": shlex.join(verify_argv),
+                "safe_to_run": ready,
+                "mutates_state": False,
+                "requires_user_review": False,
+                "reason": "Run after manually applying the returned SITE_POLICIES patch.",
+            }
+        )
+    return templates
+
+
+def _site_policy_verify_cli_argv(request: dict[str, Any]) -> list[str]:
+    expected = request.get("expected_fingerprints") if isinstance(request.get("expected_fingerprints"), dict) else {}
+    if not expected:
+        return []
+    argv = ["python3", "ptcli.py", "site-policy-verify"]
+    source_tracker = request.get("source_tracker")
+    target = request.get("target")
+    trackers = request.get("trackers")
+    if source_tracker:
+        argv.extend(["--from", str(source_tracker)])
+    if target:
+        argv.extend(["--to", str(target)])
+    elif trackers:
+        argv.extend(["--trackers", ",".join(_string_list(trackers))])
+    if _truthy(request.get("accept_rules")):
+        argv.append("--accept-rules")
+    for tracker, fingerprint in sorted(expected.items()):
+        if fingerprint:
+            argv.extend(["--expected-fingerprint", f"{tracker}={fingerprint}"])
+    argv.append("--json")
+    return argv
 
 
 def site_policy_verify_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -39512,6 +39641,7 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "action": site_policy.get("action"),
             "recommended_tool": site_policy.get("recommended_tool"),
             "recommended_call": _goal_progress_compact_call(site_policy.get("recommended_call") if isinstance(site_policy.get("recommended_call"), dict) else {}),
+            "command_templates": _goal_progress_agent_brief_cli_templates(site_policy.get("command_templates") if isinstance(site_policy.get("command_templates"), list) else []),
             "missing_config_fields": site_policy.get("missing_config_fields") if isinstance(site_policy.get("missing_config_fields"), list) else [],
             "trackers": _string_list(site_policy.get("trackers")),
             "blockers": _string_list(site_policy.get("blockers"))[:6],
@@ -40551,6 +40681,7 @@ def _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence: dict
     policy_execution = site_policy_evidence.get("policy_execution_handoff") if isinstance(site_policy_evidence.get("policy_execution_handoff"), dict) else {}
     config_update = site_policy_evidence.get("config_update_plan") if isinstance(site_policy_evidence.get("config_update_plan"), dict) else {}
     copyable_config = config_apply.get("copyable_config") if isinstance(config_apply.get("copyable_config"), dict) else {}
+    command_templates = manual_apply.get("command_templates") if isinstance(manual_apply.get("command_templates"), list) else preview.get("command_templates") if isinstance(preview.get("command_templates"), list) else []
     manual_apply_ready = manual_apply.get("ready") is True
     verify_ready = verify_handoff.get("ready") is True
     ready = site_policy_evidence.get("ready") is True and verify_ready
@@ -40616,6 +40747,7 @@ def _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence: dict
         "verify_call": manual_apply.get("verify_call") if isinstance(manual_apply.get("verify_call"), dict) else verify_handoff.get("recommended_call") if isinstance(verify_handoff.get("recommended_call"), dict) else None,
         "goal_progress_call": manual_apply.get("goal_progress_call") if isinstance(manual_apply.get("goal_progress_call"), dict) else {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "request": (verify_handoff.get("recommended_call") or {}).get("request") if isinstance(verify_handoff.get("recommended_call"), dict) else None},
         "live_readiness_call": manual_apply.get("live_readiness_call") if isinstance(manual_apply.get("live_readiness_call"), dict) else None,
+        "command_templates": command_templates,
         "recommended_call": recommended_call,
         "recommended_tool": recommended_call.get("tool") if isinstance(recommended_call, dict) else None,
         "recommended_endpoint": recommended_call.get("endpoint") if isinstance(recommended_call, dict) else None,
@@ -40629,7 +40761,7 @@ def _goal_progress_compact_site_policy_repair_handoff(site_policy_evidence: dict
             missing_config_fields=missing_config_fields,
         ),
         "steps": steps,
-        "read_order": ["site_policy_repair_handoff", "rules_to_review", "submit_request_template", "missing_config_fields", "copyable_config", "preferred_patch", "verify_call", "repair_steps", "steps", "blockers"],
+        "read_order": ["site_policy_repair_handoff", "rules_to_review", "submit_request_template", "command_templates", "missing_config_fields", "copyable_config", "preferred_patch", "verify_call", "repair_steps", "steps", "blockers"],
         "continue_when": "manual rule review evidence is submitted, copyable_config is manually applied, site_policy_verify.ready=true, then readiness_bundle is run.",
         "stop_when": [
             "rules_reviewed was not based on human tracker-rule review",
@@ -43881,10 +44013,11 @@ def _goal_progress_rule_review_preview(site_policies: dict[str, Any] | None) -> 
         "config_apply_final_report": preview.get("config_apply_final_report") if isinstance(preview.get("config_apply_final_report"), dict) else None,
         "ai_config_apply_plan": preview.get("ai_config_apply_plan") if isinstance(preview.get("ai_config_apply_plan"), dict) else None,
         "manual_apply_handoff": preview.get("manual_apply_handoff") if isinstance(preview.get("manual_apply_handoff"), dict) else None,
+        "command_templates": preview.get("command_templates") if isinstance(preview.get("command_templates"), list) else [],
         "recommended_tool": preview.get("recommended_tool"),
         "recommended_endpoint": preview.get("recommended_endpoint"),
         "recommended_request": preview.get("recommended_request"),
-        "read_order": ["rule_review_preview.rule_review_package", "rule_review_preview.config_apply_final_report", "rule_review_preview.manual_apply_handoff", "rule_review_preview.verification_bundle", "blockers"],
+        "read_order": ["rule_review_preview.rule_review_package", "rule_review_preview.command_templates", "rule_review_preview.config_apply_final_report", "rule_review_preview.manual_apply_handoff", "rule_review_preview.verification_bundle", "blockers"],
         "continue_when": "site_policy_rule_review.ready=true, then copy merged_config_patch into config and run site_policy_verify_handoff.recommended_call.",
         "stop_when": ["rules_reviewed=false", "reviewer/reviewed_at placeholders remain", "verification_bundle.expected_fingerprints is empty after rule-review submission"],
         "blockers": _string_list(preview.get("blockers")),
@@ -44949,6 +45082,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_agent_brief", "use_for": "first-pass agent routing, status checks, and next-work selection before reading the full evidence tree"},
                 "agent_brief_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "blocker_count", "blocker_owners", "first_blocker", "primary_blocker_group", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "capability_status", "remaining_capability_ids", "current_step", "environment", "site_policy", "manual_retorrent", "daily_candidates", "qbittorrent", "tracker_adapters", "live_validation", "safety", "blockers", "next_actions", "read_full_when", "full_view_request"],
                 "agent_brief_environment_fields": ["ready", "status", "action", "blockers", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands"],
+                "agent_brief_site_policy_fields": ["ready", "status", "action", "recommended_tool", "recommended_call", "command_templates", "missing_config_fields", "trackers", "blockers"],
                 "agent_brief_manual_retorrent_fields": ["ready", "status", "action", "recommended_tool", "recommended_call", "required_inputs", "cli_templates", "blockers"],
                 "manual_retorrent_cli_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
                 "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "manual_retorrent_entry_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
@@ -44997,10 +45131,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "qbit_policy_limit_progress_fields": ["ready", "status", "role_count", "configured_role_count", "missing_role_count", "roles", "missing_roles", "request_defaults", "request_default_sources", "request_fields", "client_fields", "evidence_required", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "qbit_policy_limit_role_fields": ["role", "tracker", "role_key", "ready", "request_fields", "request_field_sources", "qbit_client_fields", "limits_human", "seeding_requirements", "missing_fields", "evidence_required"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "rule_review_preview", "rule_review_verification_bundle", "site_policy_verify_handoff", "site_policy_repair_handoff", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
-                "site_policy_repair_handoff_fields": ["ready", "status", "action", "policy_ready", "rule_review_ready", "rule_review_package_ready", "manual_apply_ready", "verify_ready", "trackers", "rules_to_review", "submit_request_template", "missing_config_fields", "copyable_config_ready", "copyable_config", "preferred_patch", "verify_call", "goal_progress_call", "live_readiness_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "repair_steps", "steps", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "site_policy_repair_handoff_fields": ["ready", "status", "action", "policy_ready", "rule_review_ready", "rule_review_package_ready", "manual_apply_ready", "verify_ready", "trackers", "rules_to_review", "submit_request_template", "command_templates", "missing_config_fields", "copyable_config_ready", "copyable_config", "preferred_patch", "verify_call", "goal_progress_call", "live_readiness_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "repair_steps", "steps", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "site_policy_repair_step_fields": ["name", "status", "tool", "endpoint", "method", "request", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "site_policy_missing_config_field_fields": ["tracker", "field", "category"],
-                "rule_review_preview_fields": ["ready", "status", "request", "rule_review_package", "verification_bundle", "config_apply_final_report", "ai_config_apply_plan", "manual_apply_handoff", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+                "rule_review_preview_fields": ["ready", "status", "request", "rule_review_package", "verification_bundle", "config_apply_final_report", "ai_config_apply_plan", "manual_apply_handoff", "command_templates", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "rule_review_verification_bundle_fields": ["ready", "requested_trackers", "expected_fingerprints", "verification_call", "read", "continue_when", "stop_when", "safety"],
                 "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "site_adapter_profile_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
@@ -45107,7 +45241,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Turn explicit human tracker-rule review evidence into copyable rule_review_fingerprint config patches. This endpoint never contacts trackers and never edits config by itself.",
             "input_schema": site_policy_rule_review_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "mutates_state", "requires_manual_review", "request", "reviews", "rule_review_package", "config_patch", "merged_config_patch", "verification_bundle", "rule_review_final_report", "config_apply_final_report", "ai_config_apply_plan", "manual_apply_handoff", "next_step", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "ready", "mutates_state", "requires_manual_review", "request", "reviews", "rule_review_package", "config_patch", "merged_config_patch", "verification_bundle", "rule_review_final_report", "config_apply_final_report", "ai_config_apply_plan", "manual_apply_handoff", "command_templates", "next_step", "blockers", "next_actions"],
                 "review_fields": ["tracker", "roles", "rules_url", "reviewer", "reviewed_at", "rule_review_fingerprint", "fingerprint_algorithm", "acknowledged_scopes", "structured_patch", "flat_patch", "manual_steps"],
                 "rule_review_package_fields": ["ready", "review_required", "status", "action", "rules_to_review", "submit_request_template", "after_submit", "after_config_edit", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "config_patch_fields": ["config_path", "preferred_shape", "structured_patch", "flat_patch", "safe_to_auto_apply", "mutates_state", "apply_order"],
@@ -45115,7 +45249,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "rule_review_final_report_fields": ["ready", "report_allowed", "verdict", "action", "requested_trackers", "requested_roles", "review_items", "rule_review_package", "config_patch", "merged_config_patch", "verification_bundle", "merge_plan", "after_edit", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "config_apply_final_report_fields": ["ready", "report_allowed", "verdict", "action", "config_path", "patch_source", "preferred_patch", "fallback_patch", "copyable_config", "apply_order", "manual_steps", "verification", "verification_bundle", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "ai_config_apply_plan_fields": ["ready", "status", "action", "trackers", "config_path", "patch_source", "copyable_config_source", "verification_source", "steps", "recommended_call", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-                "manual_apply_handoff_fields": ["ready", "status", "action", "trackers", "config_path", "patch_source", "preferred_patch", "copyable_config", "copyable_config_ready", "submit_request_template", "verify_call", "goal_progress_call", "live_readiness_call", "steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "linked_plan"],
+                "manual_apply_handoff_fields": ["ready", "status", "action", "trackers", "config_path", "patch_source", "preferred_patch", "copyable_config", "copyable_config_ready", "submit_request_template", "verify_call", "goal_progress_call", "live_readiness_call", "command_templates", "steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions", "linked_plan"],
+                "site_policy_rule_review_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
                 "ai_config_apply_step_fields": ["step", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when"],
                 "copyable_config_fields": ["ready", "config_path", "preferred_shape", "trackers", "patch_sha256", "preferred_patch", "python_update_snippet", "json_patch", "manual_apply_note", "verify_after_apply", "safety"],
                 "cli_helpers": ["--print-python-update-snippet", "--print-json-patch", "--print-verify-command"],
@@ -47993,6 +48128,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "config_apply_final_report": {"type": "object"},
             "ai_config_apply_plan": {"type": "object"},
             "manual_apply_handoff": {"type": "object"},
+            "command_templates": {"type": "array", "items": {"type": "object"}},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},

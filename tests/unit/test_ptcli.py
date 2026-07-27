@@ -21955,6 +21955,12 @@ def test_site_policy_rule_review_cli_requires_manual_evidence(monkeypatch, capsy
     assert payload["recommended_tool"] == "site_policy_rule_review"
     assert payload["rule_review_package"]["submit_request_template"]["source_tracker"] == "U2"
     assert payload["rule_review_package"]["submit_request_template"]["target"] == "MTEAM"
+    templates = {item["name"]: item for item in payload["command_templates"]}
+    assert templates["cli_rule_review_after_human_review"]["requires_user_review"] is True
+    assert templates["cli_rule_review_after_human_review"]["safe_to_run"] is False
+    assert "site-policy-rule-review --from U2 --to MTEAM --rules-reviewed" in templates["cli_rule_review_after_human_review"]["command"]
+    assert templates["api_rule_review_after_human_review_curl"]["mutates_state"] is False
+    assert "/v1/site-policies/rule-review" in templates["api_rule_review_after_human_review_curl"]["command"]
     assert "rules_reviewed=true is required" in payload["blockers"][0]
 
 
@@ -21990,6 +21996,15 @@ def test_site_policy_rule_review_cli_generates_patch(monkeypatch, capsys) -> Non
     assert payload["config_apply_final_report"]["safety"]["does_not_edit_config"] is True
     assert payload["manual_apply_handoff"]["verify_call"]["tool"] == "site_policy_verify"
     assert payload["manual_apply_handoff"]["verify_call"]["endpoint"] == "/v1/site-policies/verify"
+    templates = {item["name"]: item for item in payload["command_templates"]}
+    assert templates["cli_rule_review_after_human_review"]["safe_to_run"] is True
+    assert templates["cli_rule_review_after_human_review"]["requires_user_review"] is True
+    assert "--reviewer liuxiang" in templates["cli_rule_review_after_human_review"]["command"]
+    assert templates["cli_print_python_update_snippet"]["safe_to_run"] is True
+    assert "--print-python-update-snippet" in templates["cli_print_python_update_snippet"]["command"]
+    assert templates["cli_verify_after_config_edit"]["safe_to_run"] is True
+    assert "--expected-fingerprint MTEAM=" in templates["cli_verify_after_config_edit"]["command"]
+    assert payload["manual_apply_handoff"]["command_templates"] == payload["command_templates"]
     assert payload["next_step"]["tool"] == "edit_config"
 
 
@@ -25181,9 +25196,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_validation_compact_handoff_fields" in goal_progress_tool["response_contract"]
     assert "agent_brief_manual_retorrent_fields" in goal_progress_tool["response_contract"]
     assert "cli_templates" in goal_progress_tool["response_contract"]["agent_brief_manual_retorrent_fields"]
+    assert "agent_brief_site_policy_fields" in goal_progress_tool["response_contract"]
+    assert "command_templates" in goal_progress_tool["response_contract"]["agent_brief_site_policy_fields"]
     assert "manual_retorrent_cli_template_fields" in goal_progress_tool["response_contract"]
     assert "cli_templates" in goal_progress_tool["response_contract"]["manual_retorrent_entry_handoff_fields"]
     assert "required_inputs" in goal_progress_tool["response_contract"]["manual_retorrent_entry_handoff_fields"]
+    assert "command_templates" in goal_progress_tool["response_contract"]["site_policy_repair_handoff_fields"]
     assert "site_policy_repair_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_repair_handoff_fields" in goal_progress_tool["response_contract"]
     assert "next_stage" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
@@ -27459,6 +27477,10 @@ services:
     assert payload["progress_summary"]["site_policy_repair_handoff"]["action"] == "collect_manual_rule_review"
     assert payload["progress_summary"]["site_policy_repair_handoff"]["recommended_tool"] == "site_policy_rule_review"
     assert payload["progress_summary"]["site_policy_repair_handoff"]["submit_request_template"]["rules_reviewed"] is True
+    policy_templates = {item["name"]: item for item in payload["progress_summary"]["site_policy_repair_handoff"]["command_templates"]}
+    assert policy_templates["cli_rule_review_after_human_review"]["requires_user_review"] is True
+    assert policy_templates["cli_rule_review_after_human_review"]["safe_to_run"] is False
+    assert "site-policy-rule-review --from U2 --to MTEAM --rules-reviewed" in policy_templates["cli_rule_review_after_human_review"]["command"]
     assert payload["progress_summary"]["site_policy_repair_handoff"]["copyable_config"] is None
     assert "manual_steps" not in payload["progress_summary"]["site_policy_repair_handoff"]["rules_to_review"][0]
     assert payload["progress_summary"]["site_policy_repair_handoff"]["safety"]["must_not_fabricate_fingerprint"] is True
@@ -27509,6 +27531,8 @@ services:
     assert brief_payload["recommended_tool"] == payload["progress_summary"]["recommended_tool"]
     assert brief_payload["current_step"]["tool"] == payload["progress_summary"]["critical_path_handoff"]["current_step"]["tool"]
     assert brief_payload["site_policy"]["recommended_tool"] == "site_policy_rule_review"
+    assert brief_payload["site_policy"]["command_templates"][0]["name"] == "cli_rule_review_after_human_review"
+    assert brief_payload["site_policy"]["command_templates"][0]["requires_user_review"] is True
     assert brief_payload["manual_retorrent"]["required_inputs"] == manual_entry["required_inputs"]
     assert brief_payload["manual_retorrent"]["cli_templates"][0]["name"] == "api_preflight_curl"
     assert brief_payload["manual_retorrent"]["cli_templates"][2]["requires_user_review"] is True
