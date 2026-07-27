@@ -25207,6 +25207,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "next_stage" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
     assert "missing_inputs" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
     assert "workflow_steps" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
+    assert "command_templates" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
+    assert "live_validation_command_template_fields" in goal_progress_tool["response_contract"]
     assert "live_validation_missing_input_fields" in goal_progress_tool["response_contract"]
     assert "live_validation_workflow_step_fields" in goal_progress_tool["response_contract"]
     assert "daily_candidate_run_loop_report_fields" in goal_progress_tool["response_contract"]
@@ -27511,6 +27513,13 @@ services:
     assert payload["progress_summary"]["live_validation_handoff"]["ready"] is False
     assert payload["progress_summary"]["live_validation_handoff"]["recommended_tool"] == "edit_config"
     assert payload["progress_summary"]["live_validation_handoff"]["next_stage"] == "verify_site_policy"
+    live_templates = {item["name"]: item for item in payload["progress_summary"]["live_validation_handoff"]["command_templates"]}
+    assert live_templates["cli_readiness_bundle_live_preflight"]["safe_to_run"] is True
+    assert "--accept-rules --confirm-upload" in live_templates["cli_readiness_bundle_live_preflight"]["command"]
+    assert live_templates["cli_doctor_live_validation"]["safe_to_run"] is False
+    assert live_templates["cli_doctor_live_validation"]["requires_user_review"] is True
+    assert live_templates["api_check_and_submit_live_job_curl"]["safe_to_run"] is False
+    assert "/v1/jobs/retorrent/from-url/check-and-submit" in live_templates["api_check_and_submit_live_job_curl"]["command"]
     live_missing_inputs = payload["progress_summary"]["live_validation_handoff"]["missing_inputs"]
     assert any(item["name"] == "site_policy" for item in live_missing_inputs)
     live_steps = payload["progress_summary"]["live_validation_handoff"]["workflow_steps"]
@@ -27551,6 +27560,8 @@ services:
     assert brief_payload["daily_candidates"]["target_count"] == 10
     assert brief_payload["daily_candidates"]["command_templates"][0]["name"] == "shell_export_schedule_env"
     assert brief_payload["daily_candidates"]["command_templates"][2]["mutates_state"] is True
+    assert brief_payload["live_validation"]["command_templates"][0]["name"] == "cli_readiness_bundle_live_preflight"
+    assert brief_payload["live_validation"]["command_templates"][1]["requires_user_review"] is True
     assert brief_payload["tracker_adapters"]["requested_flow"]["source_tracker"] == "U2"
     assert brief_payload["full_view_request"] == {"brief": False}
     assert len(json.dumps(brief_payload, ensure_ascii=False)) < len(json.dumps(payload["progress_summary"], ensure_ascii=False))
@@ -28317,6 +28328,13 @@ services:
     assert live_handoff["recommended_tool"] == "ptcli_doctor"
     assert live_handoff["recommended_call"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
     assert live_handoff["safety"]["requires_user_review"] is True
+    ready_live_templates = {item["name"]: item for item in live_handoff["command_templates"]}
+    assert ready_live_templates["cli_readiness_bundle_live_preflight"]["safe_to_run"] is True
+    assert "--connect-qbit" in ready_live_templates["cli_doctor_live_validation"]["command"]
+    assert ready_live_templates["cli_doctor_live_validation"]["safe_to_run"] is True
+    assert ready_live_templates["cli_doctor_live_validation"]["requires_user_review"] is True
+    assert ready_live_templates["api_check_and_submit_live_job_curl"]["safe_to_run"] is False
+    assert ready_live_templates["api_check_and_submit_live_job_curl"]["requires_user_review"] is True
     doctor_step = next(step for step in live_handoff["workflow_steps"] if step["name"] == "run_doctor")
     assert doctor_step["status"] == "current"
     assert doctor_step["recommended_call"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]

@@ -52658,6 +52658,7 @@
           "recommended_endpoint",
           "recommended_method",
           "run_order",
+          "command_templates",
           "read_order",
           "complete_when",
           "stop_when",
@@ -52666,6 +52667,14 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "live_validation_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason"
         ],
         "live_validation_missing_input_fields": [
           "name",

@@ -39694,6 +39694,7 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "report_allowed": live.get("report_allowed"),
             "next_stage": live.get("next_stage"),
             "recommended_tool": live.get("recommended_tool"),
+            "command_templates": _goal_progress_agent_brief_cli_templates(live.get("command_templates") if isinstance(live.get("command_templates"), list) else []),
             "blockers": _string_list(live.get("blockers"))[:6],
         },
         "safety": summary.get("safety"),
@@ -41225,6 +41226,12 @@ def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, An
     job_id = final_report.get("job_id") or best.get("job_id")
     summary_file = final_report.get("summary_file") or live_validation.get("requested_summary_file")
     preflight_ready = preflight.get("ready") is True
+    command_templates = _goal_progress_live_validation_command_templates(
+        recommended_call=recommended_call if isinstance(recommended_call, dict) else {},
+        action=action,
+        job_id=job_id,
+        summary_file=summary_file,
+    )
     return {
         "kind": "ptcli.goal_live_validation_handoff",
         "ready": ready,
@@ -41249,7 +41256,8 @@ def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, An
         "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
         "recommended_method": (recommended_call or {}).get("method") if isinstance(recommended_call, dict) else None,
         "run_order": execution_handoff.get("run_order") if isinstance(execution_handoff.get("run_order"), list) else start_report.get("run_order") if isinstance(start_report.get("run_order"), list) else ["readiness_bundle", "ptcli_doctor", "summary_check", "source_url_check_and_submit", "get_job_status", "get_job_summary"],
-        "read_order": ["live_validation_handoff", "recommended_call", "completion_audit", "evidence.live_validation.seedbox_live_validation_final_report", "evidence.live_validation_preflight.seedbox_live_validation_execution_handoff", "evidence.live_validation_preflight.seedbox_live_validation_start_report"],
+        "command_templates": command_templates,
+        "read_order": ["live_validation_handoff", "recommended_call", "command_templates", "completion_audit", "evidence.live_validation.seedbox_live_validation_final_report", "evidence.live_validation_preflight.seedbox_live_validation_execution_handoff", "evidence.live_validation_preflight.seedbox_live_validation_start_report"],
         "complete_when": ["live_validation_completion_audit.report_allowed=true", "live_validation_completion_audit.failed_checks=[]", "live_validation_completion_audit.missing_evidence=[]", "live_validation_completion_audit.blockers=[]", "seedbox_live_validation_completion_report.ready_for_user_report=true"],
         "stop_when": [
             "duplicate_check.exists=true",
@@ -41280,6 +41288,126 @@ def _goal_progress_compact_live_validation_handoff(live_validation: dict[str, An
         "blockers": blockers[:12],
         "next_actions": _string_list(final_report.get("next_actions")) or _string_list(preflight.get("next_actions")) or _string_list(repair_plan.get("next_actions")),
     }
+
+
+def _goal_progress_live_validation_command_templates(
+    *,
+    recommended_call: dict[str, Any],
+    action: str,
+    job_id: Any,
+    summary_file: Any,
+) -> list[dict[str, Any]]:
+    request = recommended_call.get("request") if isinstance(recommended_call.get("request"), dict) else {}
+    source_url = request.get("source_url")
+    source_tracker = request.get("source_tracker") or request.get("from") or "U2"
+    source_id = request.get("source_id") or "60635"
+    target = request.get("target") or request.get("to") or "MTEAM"
+    save_path = request.get("save_path") or "/downloads"
+    api_base = "http://127.0.0.1:8080"
+    source_args = ["--source-url", str(source_url)] if source_url else ["--from", str(source_tracker), "--source-id", str(source_id)]
+    readiness_args = ["python3", "ptcli.py", "readiness-bundle", *source_args, "--target", str(target), "--accept-rules", "--confirm-upload", "--json"]
+    doctor_args = [
+        "python3",
+        "ptcli.py",
+        "doctor",
+        "--from",
+        str(source_tracker),
+        "--source-id",
+        str(source_id),
+        "--to",
+        str(target),
+        "--connect-qbit",
+        "--probe-source",
+        "--probe-target",
+        "--accept-rules",
+        "--target-execute",
+        "--confirm-upload",
+        "--save-path",
+        str(save_path),
+        "--write-summary",
+        "--json",
+    ]
+    check_submit_request = {
+        "source_url": str(source_url) if source_url else None,
+        "source_tracker": None if source_url else str(source_tracker),
+        "source_id": None if source_url else str(source_id),
+        "target": str(target),
+        "accept_rules": True,
+        "confirm_upload": True,
+        "save_path": str(save_path),
+    }
+    check_submit_request = {key: value for key, value in check_submit_request.items() if value not in (None, "", [])}
+    templates = [
+        {
+            "name": "cli_readiness_bundle_live_preflight",
+            "command": shlex.join(readiness_args),
+            "safe_to_run": True,
+            "mutates_state": False,
+            "requires_user_review": True,
+            "reason": "Read-only live preflight after explicit accept_rules and confirm_upload have been collected.",
+        },
+        {
+            "name": "cli_doctor_live_validation",
+            "command": shlex.join(doctor_args),
+            "safe_to_run": action == "run_doctor",
+            "mutates_state": True,
+            "requires_user_review": True,
+            "reason": "Runs real source/target/qBittorrent probes and writes doctor summary; use only after policy gate and confirmations are ready.",
+        },
+        {
+            "name": "api_check_and_submit_live_job_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/jobs/retorrent/from-url/check-and-submit",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(check_submit_request, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": action == "submit_live_job",
+            "mutates_state": True,
+            "requires_user_review": True,
+            "reason": "Creates a live retorrent job only after doctor live-safe evidence and duplicate/policy gates pass.",
+        },
+    ]
+    if job_id:
+        templates.extend(
+            [
+                {
+                    "name": "api_poll_live_job_curl",
+                    "command": shlex.join(["curl", "-fsS", f"{api_base}/v1/jobs/{job_id}"]),
+                    "safe_to_run": True,
+                    "mutates_state": False,
+                    "requires_user_review": False,
+                    "reason": "Poll submitted live validation job status.",
+                },
+                {
+                    "name": "api_read_live_summary_curl",
+                    "command": shlex.join(["curl", "-fsS", f"{api_base}/v1/jobs/{job_id}/summary"]),
+                    "safe_to_run": True,
+                    "mutates_state": False,
+                    "requires_user_review": False,
+                    "reason": "Read final live validation summary and audit evidence.",
+                },
+            ]
+        )
+    if summary_file:
+        templates.append(
+            {
+                "name": "cli_goal_progress_with_live_summary",
+                "command": shlex.join(["python3", "ptcli.py", "goal-progress", "--summary-file", str(summary_file), "--brief", "--json"]),
+                "safe_to_run": True,
+                "mutates_state": False,
+                "requires_user_review": False,
+                "reason": "Reread goal progress with a known live summary file before reporting completion.",
+            }
+        )
+    return templates
 
 
 def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dict[str, Any]:
@@ -45232,7 +45360,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "tracker_adapter_compact_missing_input_fields": ["name", "required", "source", "blockers"],
                 "tracker_adapter_compact_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
-                "live_validation_compact_handoff_fields": ["ready", "report_allowed", "status", "verdict", "phase", "action", "next_stage", "job_id", "summary_file", "preflight_ready", "submission_ready", "completion_audit", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "run_order", "read_order", "complete_when", "stop_when", "missing_inputs", "workflow_steps", "safety", "blockers", "next_actions"],
+                "live_validation_compact_handoff_fields": ["ready", "report_allowed", "status", "verdict", "phase", "action", "next_stage", "job_id", "summary_file", "preflight_ready", "submission_ready", "completion_audit", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "run_order", "command_templates", "read_order", "complete_when", "stop_when", "missing_inputs", "workflow_steps", "safety", "blockers", "next_actions"],
+                "live_validation_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
                 "live_validation_missing_input_fields": ["name", "required", "source", "blockers"],
                 "live_validation_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
