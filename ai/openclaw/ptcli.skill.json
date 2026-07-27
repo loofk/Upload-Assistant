@@ -51335,6 +51335,7 @@
           "evidence",
           "next_step",
           "blockers",
+          "blocker_breakdown",
           "next_actions"
         ],
         "estimate_fields": [
@@ -51364,9 +51365,26 @@
           "next_work",
           "recommended_call",
           "completion_gate",
+          "blocker_breakdown",
           "read_order",
           "blockers",
           "next_actions"
+        ],
+        "goal_blocker_breakdown_fields": [
+          "total_count",
+          "owner_count",
+          "first_owner",
+          "by_owner",
+          "groups",
+          "read_order"
+        ],
+        "goal_blocker_group_fields": [
+          "owner",
+          "count",
+          "blockers",
+          "action",
+          "recommended_tool",
+          "safe_to_auto_fix"
         ],
         "goal_distance_next_work_fields": [
           "action",

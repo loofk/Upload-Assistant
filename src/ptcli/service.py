@@ -38118,6 +38118,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     progress_items = _goal_progress_items(deployment, site_policies, tracker_adapters, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
+    blocker_breakdown = _goal_progress_blocker_breakdown(blockers)
     policy_repair_gate = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
     policy_config_handoff = site_policies.get("policy_config_handoff") if isinstance(site_policies.get("policy_config_handoff"), dict) else {}
     policy_execution_handoff = site_policies.get("policy_execution_handoff") if isinstance(site_policies.get("policy_execution_handoff"), dict) else {}
@@ -38146,6 +38147,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
         "critical_path_remaining": _goal_progress_remaining(progress_items),
         "critical_path_plan": critical_path_plan,
         "blockers": blockers,
+        "blocker_breakdown": blocker_breakdown,
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
@@ -40089,6 +40091,7 @@ def _goal_progress_distance_report(
         critical_remaining = remaining_items[:3]
     next_work = _goal_progress_distance_next_work(critical_remaining, next_step, blockers)
     recommended_call = _goal_progress_distance_recommended_call(next_step, blockers, focus_now)
+    blocker_breakdown = _goal_progress_blocker_breakdown(blockers)
     return {
         "kind": "ptcli.goal_distance_report",
         "status": "complete" if estimate.get("critical_path_ready") else "in_progress",
@@ -40119,7 +40122,8 @@ def _goal_progress_distance_report(
             "critical_path_ready": estimate.get("critical_path_ready"),
             "must_not_mark_complete_until": critical_path_plan.get("must_not_mark_complete_until") if isinstance(critical_path_plan.get("must_not_mark_complete_until"), list) else [],
         },
-        "read_order": ["goal_distance_report.plain_answer", "goal_distance_report.current_phase_name", "goal_distance_report.critical_remaining_capabilities", "goal_distance_report.next_work", "goal_distance_report.recommended_call"],
+        "blocker_breakdown": blocker_breakdown,
+        "read_order": ["goal_distance_report.plain_answer", "goal_distance_report.current_phase_name", "goal_distance_report.blocker_breakdown", "goal_distance_report.critical_remaining_capabilities", "goal_distance_report.next_work", "goal_distance_report.recommended_call"],
         "blockers": blockers,
         "next_actions": next_work.get("next_actions") if isinstance(next_work.get("next_actions"), list) else [],
     }
@@ -40191,6 +40195,67 @@ def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, A
         if item.get("id") in {"manual_source_url_retorrent", "metadata_and_materials", "site_policy_config", "qbittorrent_execution", "seedbox_live_validation"}:
             blockers.extend(_string_list(item.get("blockers")))
     return list(dict.fromkeys(blocker for blocker in blockers if blocker))
+
+
+def _goal_progress_blocker_breakdown(blockers: list[str]) -> dict[str, Any]:
+    groups: dict[str, list[str]] = {}
+    for blocker in blockers:
+        owner = _goal_progress_blocker_owner(blocker)
+        groups.setdefault(owner, []).append(blocker)
+    ordered_owners = [owner for owner in ("user_review", "site_policy_config", "environment", "live_validation", "implementation") if groups.get(owner)]
+    group_items = [
+        {
+            "owner": owner,
+            "count": len(groups[owner]),
+            "blockers": groups[owner],
+            "action": _goal_progress_blocker_owner_action(owner),
+            "recommended_tool": _goal_progress_blocker_owner_tool(owner),
+            "safe_to_auto_fix": False,
+        }
+        for owner in ordered_owners
+    ]
+    return {
+        "kind": "ptcli.goal_blocker_breakdown",
+        "total_count": len(blockers),
+        "owner_count": len(group_items),
+        "first_owner": group_items[0]["owner"] if group_items else None,
+        "by_owner": {item["owner"]: item for item in group_items},
+        "groups": group_items,
+        "read_order": ["groups[].owner", "groups[].action", "groups[].blockers", "groups[].recommended_tool"],
+    }
+
+
+def _goal_progress_blocker_owner(blocker: str) -> str:
+    text = blocker.lower()
+    if "rule_review" in text or "manual rule review" in text or "accept_rules" in text or "rules_reviewed" in text or "reviewer" in text or "reviewed_at" in text:
+        return "user_review"
+    if "download_rate_limit" in text or "upload_rate_limit" in text or "min_seed_time" in text or "min_ratio" in text or "policy_profile" in text:
+        return "site_policy_config"
+    if "job_dir" in text or "downloads_path" in text or "directory is missing" in text or "mount" in text or "config.py" in text or "qbit client is not configured" in text:
+        return "environment"
+    if "live_validation" in text or "seedbox" in text or "live content validation" in text or "live evidence" in text:
+        return "live_validation"
+    return "implementation"
+
+
+def _goal_progress_blocker_owner_action(owner: str) -> str:
+    return {
+        "user_review": "complete_manual_tracker_rule_review",
+        "site_policy_config": "edit_ptcli_site_policies",
+        "environment": "fix_local_or_seedbox_mounts",
+        "live_validation": "run_or_resume_real_seedbox_validation",
+        "implementation": "continue_ptcli_implementation",
+    }.get(owner, "inspect_blockers")
+
+
+def _goal_progress_blocker_owner_tool(owner: str) -> str:
+    return {
+        "user_review": "site_policy_rule_review",
+        "site_policy_config": "site_policies",
+        "environment": "deployment_check",
+        "live_validation": "readiness_bundle",
+        "implementation": "goal_progress",
+    }.get(owner, "goal_progress")
 
 
 def _goal_progress_next_step(
@@ -41216,9 +41281,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return a no-network progress audit against the final Chinese PT AI-service objective, including completed, partial, unverified, and remaining critical-path capabilities.",
             "input_schema": readiness_bundle_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
-                "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "read_order", "blockers", "next_actions"],
+                "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
+                "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
+                "goal_blocker_group_fields": ["owner", "count", "blockers", "action", "recommended_tool", "safe_to_auto_fix"],
                 "goal_distance_next_work_fields": ["action", "primary_capability_id", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "expected_result", "next_actions"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
@@ -44310,6 +44377,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "critical_path_remaining": {"type": "array", "items": {"type": "object"}},
             "critical_path_plan": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
+            "blocker_breakdown": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},

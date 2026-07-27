@@ -23294,8 +23294,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["goal_progress"]["method"] == "GET"
     assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "goal_distance_report" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "blocker_breakdown" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "remaining_percent" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
     assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
+    assert "blocker_breakdown" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
+    assert "goal_blocker_breakdown_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "goal_blocker_group_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_plan" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
@@ -23714,6 +23718,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     goal_progress_schema = openapi["paths"]["/v1/goal/progress"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_estimate" in goal_progress_schema["properties"]
     assert "goal_distance_report" in goal_progress_schema["properties"]
+    assert "blocker_breakdown" in goal_progress_schema["properties"]
     assert "critical_path_remaining" in goal_progress_schema["properties"]
     assert "critical_path_plan" in goal_progress_schema["properties"]
     assert "evidence" in goal_progress_schema["properties"]
@@ -26586,6 +26591,15 @@ services:
     assert distance["next_work"]["primary_capability_id"] == "site_policy_config"
     assert distance["recommended_call"]["tool"] == "site_policy_rule_review"
     assert distance["recommended_call"]["after_success"]["verify_with"] == "verification_bundle.verification_call"
+    assert distance["blocker_breakdown"] == payload["blocker_breakdown"]
+    assert distance["blocker_breakdown"]["kind"] == "ptcli.goal_blocker_breakdown"
+    assert distance["blocker_breakdown"]["first_owner"] == "user_review"
+    assert distance["blocker_breakdown"]["by_owner"]["user_review"]["recommended_tool"] == "site_policy_rule_review"
+    assert distance["blocker_breakdown"]["by_owner"]["site_policy_config"]["recommended_tool"] == "site_policies"
+    assert distance["blocker_breakdown"]["by_owner"]["live_validation"]["recommended_tool"] == "readiness_bundle"
+    sample_breakdown = ptcli_service._goal_progress_blocker_breakdown(["downloads_path directory is missing: /downloads"])
+    assert sample_breakdown["by_owner"]["environment"]["recommended_tool"] == "deployment_check"
+    assert "goal_distance_report.blocker_breakdown" in distance["read_order"]
     assert "critical_path_ready=true" in distance["completion_gate"]["must_not_mark_complete_until"]
     plan = payload["critical_path_plan"]
     assert plan["kind"] == "ptcli.goal_critical_path_plan"
