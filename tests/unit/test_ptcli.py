@@ -21973,6 +21973,37 @@ def test_deployment_check_cli_print_mkdir_commands_fails_when_none(monkeypatch, 
     assert capsys.readouterr().out == ""
 
 
+def test_deployment_check_cli_prints_qbit_probe_command(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        ptcli_service,
+        "deployment_check_payload",
+        lambda _request: {
+            "kind": "ptcli.deployment_check",
+            "ready": False,
+            "status": "blocked",
+            "seedbox_qbit_handoff": {"client": "default", "probe": {"request": {"client": "qbittorrent", "limit": 20}}},
+        },
+    )
+
+    code = main(["deployment-check", "--print-qbit-probe-command"])
+
+    assert code == 0
+    assert capsys.readouterr().out == "python3 ptcli.py inspect --client qbittorrent --limit 20 --json\n"
+
+
+def test_deployment_check_cli_print_qbit_probe_fails_when_missing(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        ptcli_service,
+        "deployment_check_payload",
+        lambda _request: {"kind": "ptcli.deployment_check", "ready": True, "status": "ok", "seedbox_qbit_handoff": {"client": "default"}},
+    )
+
+    code = main(["deployment-check", "--print-qbit-probe-command"])
+
+    assert code == 1
+    assert capsys.readouterr().out == ""
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}

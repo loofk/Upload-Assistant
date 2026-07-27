@@ -40,6 +40,7 @@ python3 ptcli.py goal-progress --from U2 --source-id 60635 --target MTEAM --down
 python3 ptcli.py serve --host 127.0.0.1 --port 8080
 python3 ptcli.py deployment-check --downloads-path /downloads --json
 python3 ptcli.py deployment-check --downloads-path /downloads --print-mkdir-commands
+python3 ptcli.py deployment-check --downloads-path /downloads --print-qbit-probe-command
 python3 ptcli.py daily-schedule --write-summary --write-notification --json
 python3 ptcli.py daily-scheduler --once --write-summary --write-notification --json
 python3 ptcli.py rules --trackers MTEAM,TJUPT --json

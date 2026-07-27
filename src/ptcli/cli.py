@@ -176,6 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     deployment_check.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
     deployment_check.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
     deployment_check.add_argument("--print-mkdir-commands", action="store_true", help="Print only seedbox_bootstrap_handoff.mkdir_commands, one per line, when missing directories are reported.")
+    deployment_check.add_argument("--print-qbit-probe-command", action="store_true", help="Print only the qBittorrent inspect command suggested by seedbox_qbit_handoff.probe.")
     deployment_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     readiness_bundle = subparsers.add_parser(
@@ -12409,6 +12410,29 @@ def _deployment_check_print_mkdir_commands(payload: dict[str, Any]) -> int:
     return 0
 
 
+def _deployment_check_print_qbit_probe_command(payload: dict[str, Any]) -> int:
+    handoff = payload.get("seedbox_qbit_handoff") if isinstance(payload.get("seedbox_qbit_handoff"), dict) else {}
+    probe = handoff.get("probe") if isinstance(handoff.get("probe"), dict) else {}
+    request = probe.get("request") if isinstance(probe.get("request"), dict) else {}
+    if not probe and not request:
+        return 1
+
+    client = str(request.get("client") or handoff.get("client") or "default").strip()
+    if not client:
+        return 1
+
+    raw_limit = request.get("limit", 20)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        limit = 20
+    if limit <= 0:
+        limit = 20
+
+    print(shlex.join(["python3", "ptcli.py", "inspect", "--client", client, "--limit", str(limit), "--json"]))
+    return 0
+
+
 def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import site_policies_payload
 
@@ -12546,6 +12570,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = _with_captured_stdout(lambda: deployment_check_cli_payload(args), json_output)
             if args.print_mkdir_commands:
                 return _deployment_check_print_mkdir_commands(payload)
+            if args.print_qbit_probe_command:
+                return _deployment_check_print_qbit_probe_command(payload)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 
