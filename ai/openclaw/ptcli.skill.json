@@ -1783,6 +1783,7 @@
           "recommended_request",
           "next_call",
           "agent_decision",
+          "source_url_preflight_final_report",
           "blockers",
           "warnings",
           "next_actions",
@@ -1898,6 +1899,35 @@
           "continue_when",
           "stop_when",
           "after_submit"
+        ],
+        "source_url_preflight_final_report_fields": [
+          "ready",
+          "report_allowed",
+          "verdict",
+          "action",
+          "source",
+          "target_trackers",
+          "duplicate",
+          "policy",
+          "submission",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "source_url_preflight_final_report_safety_fields": [
+          "preflight_is_read_only",
+          "one_call_checks_duplicates_before_job_creation",
+          "live_upload_requires_accept_rules",
+          "live_upload_requires_confirm_upload",
+          "safe_to_call_now_is_false_until_user_approval"
         ],
         "job_template_fields": [
           "tool",

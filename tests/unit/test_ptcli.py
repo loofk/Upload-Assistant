@@ -23947,6 +23947,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "duplicate_check_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "one_call_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "does_check_duplicates_before_submit" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["one_call_handoff_fields"]
+    assert "source_url_preflight_final_report" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "source_url_preflight_final_report_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "source_url_preflight_final_report_safety_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "safe_to_call_now_is_false_until_user_approval" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["source_url_preflight_final_report_safety_fields"]
     assert "submit_if_clear_handoff" in tool_by_name["retorrent_check"]["response_contract"]["required_fields"]
     assert "submit_if_clear_handoff_fields" in tool_by_name["retorrent_check"]["response_contract"]
     assert "submit_if_clear_handoff" in tool_by_name["retorrent_check_job"]["response_contract"]["required_fields"]
@@ -25158,6 +25162,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "duplicate_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "one_call_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "does_check_duplicates_before_submit" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["one_call_handoff_fields"]
+        assert "source_url_preflight_final_report" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "source_url_preflight_final_report_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "source_url_preflight_final_report_safety_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "safe_to_call_now_is_false_until_user_approval" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["source_url_preflight_final_report_safety_fields"]
         assert "job_creation_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -28904,6 +28912,25 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["next_call"]["contacts_trackers"] is True
     assert payload["next_call"]["approval"]["requires_accept_rules"] is True
     assert payload["next_call"]["safety"]["next_call_runs_duplicate_check_before_job_creation"] is True
+    final_report = payload["source_url_preflight_final_report"]
+    assert final_report["kind"] == "ptcli.source_url_preflight_final_report"
+    assert final_report["ready"] is True
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "ready_for_user_approved_check_and_submit"
+    assert final_report["action"] == "check_and_submit"
+    assert final_report["duplicate"]["ready_to_check"] is True
+    assert final_report["policy"]["ready"] is True
+    assert final_report["policy"]["config_apply_ready"] is True
+    assert final_report["submission"]["one_call_ready"] is True
+    assert final_report["submission"]["tool"] == "source_url_check_and_submit"
+    assert final_report["submission"]["safe_to_call_now"] is False
+    assert final_report["submission"]["requires_user_review"] is True
+    assert final_report["recommended_call"]["request"] == payload["one_call_handoff"]["request"]
+    assert final_report["safety"]["preflight_is_read_only"] is True
+    assert final_report["safety"]["one_call_checks_duplicates_before_job_creation"] is True
+    assert final_report["safety"]["live_upload_requires_confirm_upload"] is True
+    assert final_report["safety"]["safe_to_call_now_is_false_until_user_approval"] is True
+    assert "source_url_check_and_submit returns job_id" in final_report["complete_when"]
     assert payload["agent_decision"]["decision"] == "call_check_and_submit"
     assert payload["agent_decision"]["can_check_and_submit"] is True
     assert payload["agent_decision"]["preferred_tool"] == "source_url_check_and_submit"
@@ -28954,6 +28981,19 @@ def test_source_url_preflight_blocks_on_policy_config(tmp_path, monkeypatch) -> 
     assert payload["next_step"]["policy_execution_handoff"]["recommended_tool"] == "edit_config"
     assert payload["job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert any("policy" in blocker.lower() or "rule" in blocker.lower() for blocker in payload["blockers"])
+    final_report = payload["source_url_preflight_final_report"]
+    assert final_report["kind"] == "ptcli.source_url_preflight_final_report"
+    assert final_report["ready"] is False
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "blocked"
+    assert final_report["action"] == "resolve_preflight_blockers"
+    assert final_report["policy"]["ready"] is False
+    assert final_report["policy"]["config_apply_ready"] is False
+    assert final_report["submission"]["one_call_ready"] is False
+    assert final_report["recommended_call"]["tool"] == "edit_config"
+    assert final_report["safety"]["preflight_is_read_only"] is True
+    assert final_report["safety"]["live_upload_requires_accept_rules"] is True
+    assert final_report["blockers"] == payload["blockers"]
 
 
 def test_readiness_bundle_cli_outputs_ai_handoff(tmp_path, monkeypatch, capsys) -> None:
