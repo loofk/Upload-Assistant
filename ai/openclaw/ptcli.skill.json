@@ -51451,6 +51451,7 @@
           "blocker_owners",
           "blocker_count",
           "environment_blockers",
+          "environment_repair_handoff",
           "user_review_blockers",
           "site_policy_config_blockers",
           "live_validation_blockers",
@@ -51588,6 +51589,35 @@
           "live_validation",
           "live_validation_preflight",
           "tool_count"
+        ],
+        "deployment_evidence_fields": [
+          "ready",
+          "docker_compose_api_ready",
+          "daily_schedule_ready",
+          "qbit_configured",
+          "connectivity_checked",
+          "environment_repair_handoff",
+          "seedbox_bootstrap_handoff",
+          "seedbox_deployment_final_decision",
+          "deployment_final_report"
+        ],
+        "environment_repair_handoff_fields": [
+          "ready",
+          "status",
+          "action",
+          "mkdir_commands",
+          "configured_paths",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "safe_to_call_now",
+          "requires_user_review",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
         ],
         "daily_candidate_evidence_fields": [
           "configured",

@@ -27059,6 +27059,9 @@ services:
     assert payload["progress_summary"]["primary_blocker_group"]["owner"] == "user_review"
     assert payload["progress_summary"]["primary_blocker_group"]["recommended_tool"] == "site_policy_rule_review"
     assert payload["progress_summary"]["environment_blockers"] == []
+    assert payload["progress_summary"]["environment_repair_handoff"]["kind"] == "ptcli.goal_environment_repair_handoff"
+    assert payload["progress_summary"]["environment_repair_handoff"]["mkdir_commands"] == []
+    assert payload["evidence"]["deployment"]["environment_repair_handoff"] == payload["progress_summary"]["environment_repair_handoff"]
     assert "U2: rule_review_fingerprint is required before automation." in payload["progress_summary"]["user_review_blockers"]
     assert "U2: download_rate_limit" in payload["progress_summary"]["site_policy_config_blockers"]
     assert "No current-state job or summary evidence has live_validation_completion_audit.report_allowed=true." in payload["progress_summary"]["live_validation_blockers"]
@@ -27120,7 +27123,7 @@ services:
     assert policy_evidence["rule_review_verification_bundle"]["kind"] == "ptcli.site_policy_rule_review_verification_bundle"
     assert policy_evidence["rule_review_verification_bundle"]["ready"] is False
     assert policy_evidence["rule_review_verification_bundle"]["expected_fingerprints"] == {}
-    assert policy_evidence["rule_review_verification_bundle"]["verification_call"]["endpoint"] == "/v1/site-policies"
+    assert policy_evidence["rule_review_verification_bundle"]["verification_call"]["endpoint"] == "/v1/site-policies/verify"
     assert policy_evidence["site_policy_verify_handoff"]["kind"] == "ptcli.goal_site_policy_verify_handoff"
     assert policy_evidence["site_policy_verify_handoff"]["status"] == "waiting_for_rule_review"
     assert policy_evidence["site_policy_verify_handoff"]["recommended_call"]["endpoint"] == "/v1/site-policies/verify"
@@ -27238,6 +27241,7 @@ services:
     assert daily_goal_report["delivery"]["delivered"] is True
     assert daily_goal_report["recommended_call"]["tool"] == "daily_candidate_refill_job"
     assert daily_evidence["next_step"]["tool"] == "daily_candidate_refill_job"
+
     assert daily_evidence["next_step"]["reason"] == "daily_scheduler_final_report.refill_shortfall"
     run_loop_summary = tmp_path / "ptcli-daily-run-and-deliver-summary.json"
     run_loop_summary.write_text(
@@ -37791,6 +37795,57 @@ def test_find_primary_media_file_prefers_largest_supported_video(tmp_path) -> No
     hidden.write_bytes(b"123456")
 
     assert find_primary_media_file(str(content)) == larger
+
+
+def test_goal_progress_brief_exposes_environment_repair_handoff(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "missing-jobs"
+    downloads_dir = tmp_path / "missing-downloads"
+    for directory in (cookies_dir, tmp_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+
+    payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "brief": True})
+
+    handoff = payload["environment_repair_handoff"]
+    assert payload["environment_blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
+    assert handoff["kind"] == "ptcli.goal_environment_repair_handoff"
+    assert handoff["status"] == "blocked"
+    assert handoff["action"] == "create_missing_dirs"
+    assert handoff["mkdir_commands"] == [f"mkdir -p {job_dir}", f"mkdir -p {downloads_dir}"]
+    assert handoff["requires_user_review"] is True
+    assert "deployment.seedbox_bootstrap_handoff" in handoff["read_order"]
+    assert handoff["safety"]["shell_commands_require_user_review"] is True
 
 
 @pytest.mark.asyncio

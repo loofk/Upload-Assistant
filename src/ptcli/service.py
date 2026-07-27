@@ -38907,6 +38907,10 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 or (deployment.get("docker_compose") or {}).get("daily_schedule_service_ready"),
                 "qbit_configured": (deployment.get("qbit") or {}).get("configured"),
                 "connectivity_checked": deployment.get("connectivity_checked"),
+                "environment_repair_handoff": _goal_progress_environment_repair_handoff(deployment),
+                "seedbox_bootstrap_handoff": deployment.get("seedbox_bootstrap_handoff") if isinstance(deployment.get("seedbox_bootstrap_handoff"), dict) else None,
+                "seedbox_deployment_final_decision": deployment.get("seedbox_deployment_final_decision") if isinstance(deployment.get("seedbox_deployment_final_decision"), dict) else None,
+                "deployment_final_report": deployment.get("deployment_final_report") if isinstance(deployment.get("deployment_final_report"), dict) else None,
             },
             "daily_candidates": _goal_progress_daily_candidate_evidence(daily_candidate_plan, daily_candidate_config_final_report),
             "qbittorrent": _goal_progress_qbittorrent_evidence(deployment, live_validation_evidence, live_validation_preflight, site_policies),
@@ -39006,6 +39010,8 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
     recommended_call = _goal_progress_compact_call(distance.get("recommended_call") if isinstance(distance.get("recommended_call"), dict) else next_step)
     blockers = _string_list(payload.get("blockers"))
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    deployment_evidence = evidence.get("deployment") if isinstance(evidence.get("deployment"), dict) else {}
     capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
     capability_status = {str(item.get("id")): item.get("status") for item in capabilities if isinstance(item, dict) and item.get("id")}
     by_owner = blocker_breakdown.get("by_owner") if isinstance(blocker_breakdown.get("by_owner"), dict) else {}
@@ -39034,6 +39040,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "blocker_owners": list((blocker_breakdown.get("by_owner") or {}).keys()) if isinstance(blocker_breakdown.get("by_owner"), dict) else [],
         "blocker_count": len(blockers),
         "environment_blockers": _goal_progress_owner_blockers(by_owner, "environment"),
+        "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
         "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
         "site_policy_config_blockers": _goal_progress_owner_blockers(by_owner, "site_policy_config"),
         "live_validation_blockers": _goal_progress_owner_blockers(by_owner, "live_validation"),
@@ -39061,6 +39068,36 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "full_read_order": payload.get("read_order"),
         "blockers": blockers[:12],
         "next_actions": _string_list(payload.get("next_actions"))[:6],
+    }
+
+
+def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dict[str, Any]:
+    bootstrap = deployment.get("seedbox_bootstrap_handoff") if isinstance(deployment.get("seedbox_bootstrap_handoff"), dict) else {}
+    decision = deployment.get("seedbox_deployment_final_decision") if isinstance(deployment.get("seedbox_deployment_final_decision"), dict) else {}
+    final_report = deployment.get("deployment_final_report") if isinstance(deployment.get("deployment_final_report"), dict) else {}
+    blockers = list(dict.fromkeys(_string_list(deployment.get("blockers")) + _string_list(bootstrap.get("blockers")) + _string_list(decision.get("blockers"))))
+    next_step = bootstrap.get("next_step") if isinstance(bootstrap.get("next_step"), dict) else {}
+    recommended_call = decision.get("recommended_call") if isinstance(decision.get("recommended_call"), dict) else final_report.get("recommended_call") if isinstance(final_report.get("recommended_call"), dict) else next_step
+    mkdir_commands = _string_list(bootstrap.get("mkdir_commands"))
+    ready = deployment.get("ready") is True and bootstrap.get("ready") is True and not blockers
+    return {
+        "kind": "ptcli.goal_environment_repair_handoff",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "action": "continue_readiness" if ready else "create_missing_dirs" if mkdir_commands else "repair_deployment",
+        "mkdir_commands": mkdir_commands,
+        "configured_paths": bootstrap.get("configured_paths") if isinstance(bootstrap.get("configured_paths"), dict) else {},
+        "recommended_call": recommended_call if isinstance(recommended_call, dict) else {},
+        "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
+        "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
+        "safe_to_call_now": bool((recommended_call or {}).get("safe_to_call_now")) if isinstance(recommended_call, dict) else False,
+        "requires_user_review": bool(mkdir_commands) or (bool((recommended_call or {}).get("requires_user_review")) if isinstance(recommended_call, dict) else False),
+        "read_order": ["environment_repair_handoff", "deployment.seedbox_bootstrap_handoff", "deployment.seedbox_deployment_final_decision", "deployment.deployment_final_report"],
+        "continue_when": "deployment_check.ready=true and seedbox_bootstrap_handoff.ready=true",
+        "stop_when": ["mkdir_commands cannot be run on the target host", "downloads path is not the qBittorrent save path mount", "deployment_check still reports missing config/cookies/job/downloads paths"],
+        "safety": {"read_only": True, "mutates_state": False, "shell_commands_require_user_review": bool(mkdir_commands), "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+        "blockers": blockers,
+        "next_actions": _string_list(bootstrap.get("next_actions")) or _string_list(final_report.get("next_actions")),
     }
 
 
@@ -42406,7 +42443,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -42418,6 +42455,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_phase_fields": ["id", "name", "priority", "ready", "status", "capability_ids", "capabilities", "remaining_capability_ids", "complete_when", "blockers"],
                 "critical_path_focus_fields": ["phase_id", "phase_name", "recommended_step", "blockers"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
+                "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
+                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "daily_candidate_approval_final_report", "daily_candidate_user_approval_package", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_refill_final_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "daily_candidate_target_progress", "daily_candidate_execution_plan", "daily_candidate_goal_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "run_loop", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_progress_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "shortfall_count", "target_met", "ready_target_met", "action", "summary_file", "recommended_call", "continue_when", "stop_when", "safety"],
