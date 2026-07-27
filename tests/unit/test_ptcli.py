@@ -21995,6 +21995,32 @@ def test_site_policy_verify_cli_outputs_json(monkeypatch, capsys) -> None:
     assert payload["request"]["policy_request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
 
 
+def test_goal_progress_site_policy_verify_handoff_checks_rule_review_fingerprints(monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
+    rule_review = ptcli_service.site_policy_rule_review_payload(
+        {
+            "source_tracker": "U2",
+            "target": "MTEAM",
+            "rules_reviewed": True,
+            "reviewer": "liuxiang",
+            "reviewed_at": "2026-07-21",
+        }
+    )
+
+    handoff = ptcli_service._goal_progress_site_policy_verify_handoff(rule_review)
+
+    assert handoff["kind"] == "ptcli.goal_site_policy_verify_handoff"
+    assert handoff["status"] == "blocked"
+    assert handoff["action"] == "verify_config_after_manual_edit"
+    assert handoff["recommended_call"]["tool"] == "site_policy_verify"
+    assert handoff["recommended_call"]["endpoint"] == "/v1/site-policies/verify"
+    assert handoff["recommended_call"]["safe_to_call_now"] is True
+    assert set(handoff["expected_fingerprints"]) == {"U2", "MTEAM"}
+    assert {item["tracker"] for item in handoff["missing"]} == {"U2", "MTEAM"}
+    assert handoff["after_success"]["tool"] == "readiness_bundle"
+    assert handoff["safety"]["does_not_contact_trackers"] is True
+
+
 def test_deployment_check_cli_outputs_json(monkeypatch, capsys) -> None:
     captured_request = {}
 
@@ -23685,6 +23711,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_preflight" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "site_policy_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "rule_review_request" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+    assert "site_policy_verify_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+    assert "site_policy_verify_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "config_update_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
@@ -24909,6 +24937,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "rule_review_verification_bundle" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "rule_review_preview_fields" in goal_progress_tool["response_contract"]
     assert "rule_review_verification_bundle_fields" in goal_progress_tool["response_contract"]
+    assert "site_policy_verify_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "site_policy_verify_handoff_fields" in goal_progress_tool["response_contract"]
     assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_config_apply_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
@@ -25040,6 +25070,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "job_lifecycle_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "rule_review_request" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "site_policy_verify_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "site_policy_verify_handoff_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "config_update_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "policy_config_apply_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "policy_execution_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
@@ -26997,6 +27029,8 @@ services:
     assert payload["progress_summary"]["remaining_percent"] == payload["goal_distance_report"]["remaining_percent"]
     assert payload["progress_summary"]["recommended_tool"] == "site_policy_rule_review"
     assert payload["progress_summary"]["recommended_call"]["tool"] == "site_policy_rule_review"
+    assert payload["progress_summary"]["recommended_call"]["after_success"]["verify_with"] == "site_policy_verify_handoff.recommended_call"
+    assert payload["progress_summary"]["recommended_call"]["after_success"]["verify_tool"] == "site_policy_verify"
     assert payload["progress_summary"]["focus_now"]["recommended_step"]["tool"] == "site_policy_rule_review"
     assert "after_rule_review" not in payload["progress_summary"]["focus_now"]["recommended_step"]
     assert payload["progress_summary"]["primary_blocker_group"]["owner"] == "user_review"
@@ -27021,7 +27055,8 @@ services:
     assert "site_policy_config" in distance["remaining_capability_ids"]
     assert distance["next_work"]["primary_capability_id"] == "site_policy_config"
     assert distance["recommended_call"]["tool"] == "site_policy_rule_review"
-    assert distance["recommended_call"]["after_success"]["verify_with"] == "verification_bundle.verification_call"
+    assert distance["recommended_call"]["after_success"]["verify_with"] == "site_policy_verify_handoff.recommended_call"
+    assert distance["recommended_call"]["after_success"]["verify_endpoint"] == "/v1/site-policies/verify"
     assert distance["blocker_breakdown"] == payload["blocker_breakdown"]
     assert distance["blocker_breakdown"]["kind"] == "ptcli.goal_blocker_breakdown"
     assert distance["blocker_breakdown"]["first_owner"] == "user_review"
@@ -27063,7 +27098,12 @@ services:
     assert policy_evidence["rule_review_verification_bundle"]["ready"] is False
     assert policy_evidence["rule_review_verification_bundle"]["expected_fingerprints"] == {}
     assert policy_evidence["rule_review_verification_bundle"]["verification_call"]["endpoint"] == "/v1/site-policies"
+    assert policy_evidence["site_policy_verify_handoff"]["kind"] == "ptcli.goal_site_policy_verify_handoff"
+    assert policy_evidence["site_policy_verify_handoff"]["status"] == "waiting_for_rule_review"
+    assert policy_evidence["site_policy_verify_handoff"]["recommended_call"]["endpoint"] == "/v1/site-policies/verify"
+    assert policy_evidence["site_policy_verify_handoff"]["recommended_call"]["safe_to_call_now"] is False
     assert "rule_review_verification_bundle" in policy_evidence["read_order"]
+    assert "site_policy_verify_handoff" in policy_evidence["read_order"]
     qbit = payload["evidence"]["qbittorrent"]
     assert qbit["kind"] == "ptcli.goal_qbittorrent_evidence"
     assert qbit["configured"] is True

@@ -38852,6 +38852,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     policy_config_apply_handoff = site_policies.get("policy_config_apply_handoff") if isinstance(site_policies.get("policy_config_apply_handoff"), dict) else {}
     site_policy_config_apply_final_report = site_policies.get("site_policy_config_apply_final_report") if isinstance(site_policies.get("site_policy_config_apply_final_report"), dict) else {}
     rule_review_preview = _goal_progress_rule_review_preview(site_policies)
+    site_policy_verify_handoff = _goal_progress_site_policy_verify_handoff(rule_review_preview)
     daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
     daily_candidate_config_final_report = deployment.get("daily_candidate_config_final_report") if isinstance(deployment.get("daily_candidate_config_final_report"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
@@ -38899,6 +38900,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "rule_review_request": policy_repair_gate.get("rule_review_request") if isinstance(policy_repair_gate.get("rule_review_request"), dict) else None,
                 "rule_review_preview": rule_review_preview or None,
                 "rule_review_verification_bundle": rule_review_preview.get("verification_bundle") if isinstance(rule_review_preview, dict) and isinstance(rule_review_preview.get("verification_bundle"), dict) else None,
+                "site_policy_verify_handoff": site_policy_verify_handoff,
                 "config_update_plan": {
                     "ready": config_update_plan.get("ready"),
                     "preferred_shape": config_update_plan.get("preferred_shape"),
@@ -38954,7 +38956,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 else policy_config_handoff.get("next_step")
                 if isinstance(policy_config_handoff.get("next_step"), dict)
                 else None,
-                "read_order": ["rule_review_preview", "rule_review_verification_bundle", "site_policy_config_apply_final_report", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
+                "read_order": ["rule_review_preview", "rule_review_verification_bundle", "site_policy_verify_handoff", "site_policy_config_apply_final_report", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
                 "blockers": _string_list(site_policies.get("blockers")),
             },
             "tracker_adapters": _goal_progress_tracker_adapter_evidence(tracker_adapters),
@@ -39084,6 +39086,7 @@ def _goal_progress_compact_call(call: dict[str, Any]) -> dict[str, Any] | None:
         "reason": call.get("reason"),
         "safe_to_call_now": call.get("safe_to_call_now"),
         "request": call.get("request") if isinstance(call.get("request"), dict) else None,
+        "after_success": call.get("after_success") if isinstance(call.get("after_success"), dict) else None,
     }
     return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
@@ -41115,9 +41118,11 @@ def _goal_progress_distance_recommended_call(next_step: dict[str, Any], blockers
         call["after_success"] = {
             "read": ["rule_review_final_report", "verification_bundle", "config_apply_final_report", "merged_config_patch"],
             "copy_to_config": "config_apply_final_report.copyable_config.preferred_patch",
-            "verify_with": "verification_bundle.verification_call",
-            "continue_when": "verification_bundle.expected_fingerprints are configured and site_policies.policy_execution_handoff.ready=true",
-            "stop_when": ["verification_bundle.expected_fingerprints is empty", "site_policies still reports placeholder or missing rule_review_fingerprint"],
+            "verify_with": "site_policy_verify_handoff.recommended_call",
+            "verify_tool": "site_policy_verify",
+            "verify_endpoint": "/v1/site-policies/verify",
+            "continue_when": "site_policy_verify_handoff.ready=true and site_policies.policy_execution_handoff.ready=true",
+            "stop_when": ["verification_bundle.expected_fingerprints is empty", "site_policy_verify_handoff.missing or mismatches is non-empty", "site_policies still reports placeholder or missing rule_review_fingerprint"],
         }
     return call
 
@@ -41324,10 +41329,78 @@ def _goal_progress_rule_review_preview(site_policies: dict[str, Any] | None) -> 
         "recommended_endpoint": preview.get("recommended_endpoint"),
         "recommended_request": preview.get("recommended_request"),
         "read_order": ["rule_review_preview.rule_review_package", "rule_review_preview.verification_bundle", "rule_review_preview.config_apply_final_report", "blockers"],
-        "continue_when": "site_policy_rule_review.ready=true, then copy merged_config_patch into config and run verification_bundle.verification_call.",
+        "continue_when": "site_policy_rule_review.ready=true, then copy merged_config_patch into config and run site_policy_verify_handoff.recommended_call.",
         "stop_when": ["rules_reviewed=false", "reviewer/reviewed_at placeholders remain", "verification_bundle.expected_fingerprints is empty after rule-review submission"],
         "blockers": _string_list(preview.get("blockers")),
         "next_actions": _string_list(preview.get("next_actions")),
+    }
+
+
+def _goal_progress_site_policy_verify_handoff(rule_review_preview: dict[str, Any] | None) -> dict[str, Any]:
+    bundle = rule_review_preview.get("verification_bundle") if isinstance(rule_review_preview, dict) and isinstance(rule_review_preview.get("verification_bundle"), dict) else {}
+    expected = bundle.get("expected_fingerprints") if isinstance(bundle.get("expected_fingerprints"), dict) else {}
+    verification_call = bundle.get("verification_call") if isinstance(bundle.get("verification_call"), dict) else {}
+    base_request = verification_call.get("request") if isinstance(verification_call.get("request"), dict) else {}
+    request = {**base_request, "expected_fingerprints": expected}
+    recommended_call = {
+        "tool": "site_policy_verify",
+        "endpoint": "/v1/site-policies/verify",
+        "method": "POST",
+        "request": request,
+        "reason": "verify_rule_review_fingerprints_after_config_edit",
+        "safe_to_call_now": bool(expected),
+    }
+    if not expected:
+        return {
+            "kind": "ptcli.goal_site_policy_verify_handoff",
+            "ready": False,
+            "status": "waiting_for_rule_review",
+            "action": "run_site_policy_rule_review_first",
+            "expected_fingerprints": {},
+            "recommended_call": recommended_call,
+            "read_order": ["rule_review_preview", "rule_review_verification_bundle", "site_policy_verify_handoff"],
+            "continue_when": "site_policy_rule_review.verification_bundle.expected_fingerprints is non-empty",
+            "stop_when": ["rules_reviewed/reviewer/reviewed_at are missing"],
+            "safety": {"read_only": True, "does_not_edit_config": True, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+            "blockers": ["rule_review_verification_bundle.expected_fingerprints is empty."],
+            "next_actions": ["Call site_policy_rule_review after human rule review, copy its config patch, then run site_policy_verify with the expected fingerprints."],
+        }
+    try:
+        verify_payload = site_policy_verify_payload(request)
+    except ServiceError as exc:
+        return {
+            "kind": "ptcli.goal_site_policy_verify_handoff",
+            "ready": False,
+            "status": "blocked",
+            "action": "fix_site_policy_verify_request",
+            "expected_fingerprints": expected,
+            "recommended_call": recommended_call,
+            "read_order": ["rule_review_verification_bundle", "site_policy_verify_handoff.blockers"],
+            "continue_when": "site_policy_verify.ready=true",
+            "stop_when": ["site_policy_verify request is invalid"],
+            "safety": {"read_only": True, "does_not_edit_config": True, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+            "blockers": [str(exc)],
+            "next_actions": ["Fix site_policy_verify_handoff.recommended_call.request and rerun goal_progress."],
+        }
+    return {
+        "kind": "ptcli.goal_site_policy_verify_handoff",
+        "ready": verify_payload.get("ready") is True,
+        "status": verify_payload.get("status"),
+        "action": "continue_to_readiness_bundle" if verify_payload.get("ready") is True else "verify_config_after_manual_edit",
+        "expected_fingerprints": expected,
+        "actual_fingerprints": verify_payload.get("actual_fingerprints") if isinstance(verify_payload.get("actual_fingerprints"), dict) else {},
+        "matches": verify_payload.get("matches") if isinstance(verify_payload.get("matches"), list) else [],
+        "missing": verify_payload.get("missing") if isinstance(verify_payload.get("missing"), list) else [],
+        "mismatches": verify_payload.get("mismatches") if isinstance(verify_payload.get("mismatches"), list) else [],
+        "policy_ready": verify_payload.get("policy_ready") is True,
+        "recommended_call": recommended_call,
+        "after_success": {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": base_request, "reason": "site_policy_verify_ready"},
+        "read_order": ["site_policy_verify_handoff.items", "site_policy_verify_handoff.missing", "site_policy_verify_handoff.mismatches", "policy_execution_handoff", "blockers"],
+        "continue_when": "site_policy_verify.ready=true and policy_execution_handoff.ready=true",
+        "stop_when": ["site_policy_verify.missing is non-empty", "site_policy_verify.mismatches is non-empty", "policy_ready=false"],
+        "safety": {"read_only": True, "does_not_edit_config": True, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+        "blockers": _string_list(verify_payload.get("blockers")),
+        "next_actions": _string_list(verify_payload.get("next_actions")),
     }
 
 
@@ -42344,9 +42417,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "policy_limit_progress", "policy_limit_ready", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "qbit_policy_limit_progress_fields": ["ready", "status", "role_count", "configured_role_count", "missing_role_count", "roles", "missing_roles", "request_defaults", "request_default_sources", "request_fields", "client_fields", "evidence_required", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "qbit_policy_limit_role_fields": ["role", "tracker", "role_key", "ready", "request_fields", "request_field_sources", "qbit_client_fields", "limits_human", "seeding_requirements", "missing_fields", "evidence_required"],
-                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "rule_review_preview", "rule_review_verification_bundle", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
+                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "rule_review_preview", "rule_review_verification_bundle", "site_policy_verify_handoff", "config_update_plan", "policy_config_handoff", "policy_config_repair_handoff", "policy_config_apply_handoff", "site_policy_config_apply_final_report", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
                 "rule_review_preview_fields": ["ready", "status", "request", "rule_review_package", "verification_bundle", "config_apply_final_report", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "rule_review_verification_bundle_fields": ["ready", "requested_trackers", "expected_fingerprints", "verification_call", "read", "continue_when", "stop_when", "safety"],
+                "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "seedbox_live_validation_final_report_fields": ["ready", "report_allowed", "verdict", "status", "phase", "job_id", "summary_file", "source", "submission_ready", "completion", "submission", "submitted_job", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
