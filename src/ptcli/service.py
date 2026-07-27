@@ -39012,6 +39012,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     blockers = _string_list(payload.get("blockers"))
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
     deployment_evidence = evidence.get("deployment") if isinstance(evidence.get("deployment"), dict) else {}
+    daily_candidate_evidence = evidence.get("daily_candidates") if isinstance(evidence.get("daily_candidates"), dict) else {}
     capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
     capability_status = {str(item.get("id")): item.get("status") for item in capabilities if isinstance(item, dict) and item.get("id")}
     by_owner = blocker_breakdown.get("by_owner") if isinstance(blocker_breakdown.get("by_owner"), dict) else {}
@@ -39041,6 +39042,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "blocker_count": len(blockers),
         "environment_blockers": _goal_progress_owner_blockers(by_owner, "environment"),
         "environment_repair_handoff": deployment_evidence.get("environment_repair_handoff") if isinstance(deployment_evidence.get("environment_repair_handoff"), dict) else None,
+        "daily_candidate_handoff": _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence),
         "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
         "site_policy_config_blockers": _goal_progress_owner_blockers(by_owner, "site_policy_config"),
         "live_validation_blockers": _goal_progress_owner_blockers(by_owner, "live_validation"),
@@ -39068,6 +39070,64 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "full_read_order": payload.get("read_order"),
         "blockers": blockers[:12],
         "next_actions": _string_list(payload.get("next_actions"))[:6],
+    }
+
+
+def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dict[str, Any]) -> dict[str, Any] | None:
+    if not daily_candidate_evidence:
+        return None
+    goal_handoff = daily_candidate_evidence.get("goal_handoff") if isinstance(daily_candidate_evidence.get("goal_handoff"), dict) else {}
+    target_progress = daily_candidate_evidence.get("daily_candidate_target_progress") if isinstance(daily_candidate_evidence.get("daily_candidate_target_progress"), dict) else {}
+    execution_plan = daily_candidate_evidence.get("daily_candidate_execution_plan") if isinstance(daily_candidate_evidence.get("daily_candidate_execution_plan"), dict) else {}
+    goal_report = daily_candidate_evidence.get("daily_candidate_goal_final_report") if isinstance(daily_candidate_evidence.get("daily_candidate_goal_final_report"), dict) else {}
+    approval_report = daily_candidate_evidence.get("daily_candidate_approval_final_report") if isinstance(daily_candidate_evidence.get("daily_candidate_approval_final_report"), dict) else {}
+    next_step = daily_candidate_evidence.get("next_step") if isinstance(daily_candidate_evidence.get("next_step"), dict) else goal_handoff.get("next_step") if isinstance(goal_handoff.get("next_step"), dict) else {}
+    target = goal_report.get("target") if isinstance(goal_report.get("target"), dict) else {}
+    delivery = goal_report.get("delivery") if isinstance(goal_report.get("delivery"), dict) else {}
+    approval = goal_report.get("approval") if isinstance(goal_report.get("approval"), dict) else {}
+    action = str(goal_report.get("action") or goal_handoff.get("action") or target_progress.get("action") or execution_plan.get("current_step") or "inspect_daily_candidates")
+    approval_call = approval_report.get("recommended_call") if isinstance(approval_report.get("recommended_call"), dict) else {}
+    recommended_call = approval_call if action in {"request_user_approval", "ask_user_approval", "submit_available"} and approval_call else goal_report.get("recommended_call") if isinstance(goal_report.get("recommended_call"), dict) else next_step
+    blockers = list(dict.fromkeys(_string_list(goal_report.get("blockers")) + _string_list(goal_handoff.get("blockers")) + _string_list(daily_candidate_evidence.get("blockers"))))
+    ready_count = _first_int(target.get("ready_count"), target_progress.get("ready_count"))
+    target_count = _first_int(target.get("target_count"), target_progress.get("target_count"), goal_handoff.get("target_count"), DEFAULT_CANDIDATE_LIMIT)
+    shortfall_count = _first_int(target.get("shortfall_count"), target_progress.get("shortfall_count"), max(0, target_count - ready_count))
+    return {
+        "kind": "ptcli.goal_daily_candidate_compact_handoff",
+        "ready": goal_report.get("ready") is True or target_progress.get("ready") is True,
+        "status": goal_report.get("verdict") or daily_candidate_evidence.get("status"),
+        "action": action,
+        "configured": bool(daily_candidate_evidence.get("configured") or goal_handoff.get("configured")),
+        "summary_file": daily_candidate_evidence.get("summary_file"),
+        "target_count": target_count,
+        "ready_count": ready_count,
+        "safe_to_submit_count": _first_int(target.get("safe_to_submit_count"), target_progress.get("safe_to_submit_count")),
+        "shortfall_count": shortfall_count,
+        "current_step": execution_plan.get("current_step"),
+        "delivery_delivered": delivery.get("delivered"),
+        "approval_required": approval.get("required_before_submit", True),
+        "can_submit_after_approval": approval.get("can_submit_after_approval"),
+        "recommended_call": _goal_progress_compact_call(recommended_call if isinstance(recommended_call, dict) else {}),
+        "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
+        "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
+        "recommended_method": (recommended_call or {}).get("method") if isinstance(recommended_call, dict) else None,
+        "read_order": ["daily_candidate_handoff", "evidence.daily_candidates.daily_candidate_execution_plan", "evidence.daily_candidates.daily_candidate_goal_final_report", "evidence.daily_candidates.goal_handoff"],
+        "continue_when": "ready_count>=target_count, digest delivered, and user explicitly approves one candidate before submit.",
+        "stop_when": [
+            "site policy gate is not ready",
+            "shortfall_count>0 and no refill recommended_call exists",
+            "candidate submit attempted without explicit user approval",
+            "confirm_upload is not true for a live submit",
+        ],
+        "safety": {
+            "read_only": True,
+            "uploads": False,
+            "submits_candidates": False,
+            "submit_requires_user_approval": True,
+            "confirm_upload_required_for_submit": True,
+        },
+        "blockers": blockers,
+        "next_actions": _string_list(goal_report.get("next_actions")) or _string_list(goal_handoff.get("next_actions")) or _string_list(daily_candidate_evidence.get("next_actions")),
     }
 
 
@@ -42443,7 +42503,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "daily_candidate_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -42457,6 +42517,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
                 "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_compact_handoff_safety_fields": ["read_only", "uploads", "submits_candidates", "submit_requires_user_approval", "confirm_upload_required_for_submit"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "daily_candidate_approval_final_report", "daily_candidate_user_approval_package", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_refill_final_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "daily_candidate_target_progress", "daily_candidate_execution_plan", "daily_candidate_goal_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "run_loop", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_progress_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "shortfall_count", "target_met", "ready_target_met", "action", "summary_file", "recommended_call", "continue_when", "stop_when", "safety"],

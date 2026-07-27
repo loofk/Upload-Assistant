@@ -22363,6 +22363,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "should_continue_refill" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["refill_loop_control_fields"]
     assert "daily_candidate_refill_final_report_fields" in tool_by_name["daily_candidate_refill_job"]["response_contract"]
     assert "automatic_loop" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["daily_candidate_refill_final_report_fields"]
+    assert "daily_candidate_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "daily_candidate_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "daily_candidate_compact_handoff_safety_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "confirm_upload_required_for_submit" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_safety_fields"]
     assert "daily_candidate_refill_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_refill_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert tool_by_name["daily_candidate_delivery"]["path"] == "/v1/candidates/daily/deliver"
@@ -27062,6 +27066,13 @@ services:
     assert payload["progress_summary"]["environment_repair_handoff"]["kind"] == "ptcli.goal_environment_repair_handoff"
     assert payload["progress_summary"]["environment_repair_handoff"]["mkdir_commands"] == []
     assert payload["evidence"]["deployment"]["environment_repair_handoff"] == payload["progress_summary"]["environment_repair_handoff"]
+    assert payload["progress_summary"]["daily_candidate_handoff"]["kind"] == "ptcli.goal_daily_candidate_compact_handoff"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["action"] == "configure_schedule"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["target_count"] == 10
+    assert payload["progress_summary"]["daily_candidate_handoff"]["ready_count"] == 0
+    assert payload["progress_summary"]["daily_candidate_handoff"]["shortfall_count"] == 10
+    assert payload["progress_summary"]["daily_candidate_handoff"]["recommended_call"]["tool"] == "daily_candidates_schedule"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["safety"]["submit_requires_user_approval"] is True
     assert "U2: rule_review_fingerprint is required before automation." in payload["progress_summary"]["user_review_blockers"]
     assert "U2: download_rate_limit" in payload["progress_summary"]["site_policy_config_blockers"]
     assert "No current-state job or summary evidence has live_validation_completion_audit.report_allowed=true." in payload["progress_summary"]["live_validation_blockers"]
@@ -27241,6 +27252,15 @@ services:
     assert daily_goal_report["delivery"]["delivered"] is True
     assert daily_goal_report["recommended_call"]["tool"] == "daily_candidate_refill_job"
     assert daily_evidence["next_step"]["tool"] == "daily_candidate_refill_job"
+    daily_brief = daily_payload["progress_summary"]["daily_candidate_handoff"]
+    assert daily_brief["kind"] == "ptcli.goal_daily_candidate_compact_handoff"
+    assert daily_brief["action"] == "refill_shortfall"
+    assert daily_brief["summary_file"] == str(daily_summary)
+    assert daily_brief["ready_count"] == 1
+    assert daily_brief["shortfall_count"] == 9
+    assert daily_brief["delivery_delivered"] is True
+    assert daily_brief["recommended_tool"] == "daily_candidate_refill_job"
+    assert daily_brief["recommended_call"]["endpoint"] == "/v1/jobs/candidates/daily/refill"
 
     assert daily_evidence["next_step"]["reason"] == "daily_scheduler_final_report.refill_shortfall"
     run_loop_summary = tmp_path / "ptcli-daily-run-and-deliver-summary.json"
@@ -27345,6 +27365,12 @@ services:
     assert run_loop_evidence["next_step"]["request"]["excluded_source_ids"] == ["60635", "60636"]
     assert run_loop_evidence["goal_handoff"]["run_loop"]["loop_call"]["tool"] == "daily_candidate_refill_job"
     assert run_loop_evidence["goal_handoff"]["run_loop"]["requires_user_approval_before_submit"] is True
+    run_loop_brief = run_loop_payload["progress_summary"]["daily_candidate_handoff"]
+    assert run_loop_brief["action"] == "auto_refill_next"
+    assert run_loop_brief["ready_count"] == 2
+    assert run_loop_brief["shortfall_count"] == 8
+    assert run_loop_brief["recommended_call"]["request"]["excluded_source_ids"] == ["60635", "60636"]
+    assert run_loop_brief["safety"]["confirm_upload_required_for_submit"] is True
     refill_summary = tmp_path / "ptcli-daily-refill-summary.json"
     refill_summary.write_text(
         json.dumps(
@@ -27460,6 +27486,12 @@ services:
     assert refill_evidence["goal_handoff"]["refill"]["final_action"] == "auto_refill_next"
     assert refill_evidence["goal_handoff"]["refill"]["requires_user_approval_before_submit"] is True
     assert refill_evidence["goal_handoff"]["next_actions"][0].startswith("Call refill.loop_call")
+    refill_brief = refill_payload["progress_summary"]["daily_candidate_handoff"]
+    assert refill_brief["action"] == "auto_refill_next"
+    assert refill_brief["ready_count"] == 2
+    assert refill_brief["shortfall_count"] == 8
+    assert refill_brief["recommended_tool"] == "daily_candidate_refill_job"
+    assert refill_brief["recommended_call"]["request"]["excluded_source_ids"] == ["60635"]
     complete_daily_summary = tmp_path / "ptcli-daily-complete-summary.json"
     complete_daily_summary.write_text(
         json.dumps(
@@ -27540,6 +27572,14 @@ services:
     assert complete_goal_report["approval"]["can_submit_after_approval"] is True
     assert complete_goal_report["approval_final_report"]["candidate"]["source_id"] == "60635"
     assert complete_goal_report["missing_evidence"] == []
+    complete_brief = complete_daily_payload["progress_summary"]["daily_candidate_handoff"]
+    assert complete_brief["ready"] is True
+    assert complete_brief["action"] == "request_user_approval"
+    assert complete_brief["ready_count"] == 10
+    assert complete_brief["shortfall_count"] == 0
+    assert complete_brief["can_submit_after_approval"] is True
+    assert complete_brief["recommended_tool"] == "submit_daily_candidate_job"
+    assert complete_brief["recommended_call"]["safe_to_call_now"] is False
     assert [item["name"] for item in complete_goal_report["completion_evidence"]] == [
         "schedule_or_summary_evidence",
         "ready_target_met",
