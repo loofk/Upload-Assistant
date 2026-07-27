@@ -52040,6 +52040,7 @@
           "seedbox_live_validation_start_report",
           "seedbox_live_post_submit_report",
           "seedbox_live_validation_decision_plan",
+          "seedbox_live_validation_execution_handoff",
           "agent_smoke_live_validation_handoff",
           "next_step",
           "recommended_tool",

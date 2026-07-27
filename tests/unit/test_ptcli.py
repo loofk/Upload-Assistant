@@ -23450,6 +23450,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_start_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "seedbox_live_post_submit_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "seedbox_live_validation_decision_plan" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+    assert "seedbox_live_validation_execution_handoff" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "agent_smoke_live_validation_handoff" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "recommended_request" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "request" in tool_by_name["goal_progress"]["response_contract"]["next_step_fields"]
@@ -24654,6 +24655,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "first_live_validation_handoff" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "seedbox_live_validation_start_report" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "seedbox_live_post_submit_report" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
+    assert "seedbox_live_validation_execution_handoff" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "agent_smoke_live_validation_handoff" in goal_progress_tool["response_contract"]["live_validation_preflight_fields"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
@@ -24785,6 +24787,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_validation_start_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "seedbox_live_post_submit_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "seedbox_live_validation_decision_plan" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
+        assert "seedbox_live_validation_execution_handoff" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "agent_smoke_live_validation_handoff" in tools_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
@@ -27369,6 +27372,15 @@ services:
     assert preflight["seedbox_live_validation_decision_plan"]["current_step"] == "run_doctor"
     assert preflight["seedbox_live_validation_decision_plan"]["recommended_call"]["tool"] == "ptcli_doctor"
     assert preflight["seedbox_live_validation_decision_plan"]["safe_to_call_now"] is False
+    assert preflight["seedbox_live_validation_execution_handoff"]["kind"] == "ptcli.seedbox_live_validation_execution_handoff"
+    assert preflight["seedbox_live_validation_execution_handoff"]["ready"] is True
+    assert preflight["seedbox_live_validation_execution_handoff"]["current_step"] == "run_doctor"
+    assert preflight["seedbox_live_validation_execution_handoff"]["safe_to_call_now"] is False
+    assert preflight["seedbox_live_validation_execution_handoff"]["requires_user_review"] is True
+    assert preflight["seedbox_live_validation_execution_handoff"]["doctor_call"] == preflight["seedbox_live_validation_start_report"]["doctor_call"]
+    assert "live_validation_completion_audit.report_allowed=true" in preflight["seedbox_live_validation_execution_handoff"]["must_not_report_complete_until"]
+    assert preflight["seedbox_live_validation_execution_handoff"]["safety"]["submit_requires_summary_check"] is True
+    assert "seedbox_live_validation_execution_handoff" in preflight["read_order"]
     assert "seedbox_live_validation_decision_plan" in preflight["read_order"]
     assert "seedbox_live_post_submit_report" in preflight["read_order"]
     assert "seedbox_live_validation_start_report" in preflight["read_order"]
