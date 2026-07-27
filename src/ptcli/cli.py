@@ -231,6 +231,34 @@ def build_parser() -> argparse.ArgumentParser:
     site_policies.add_argument("--accept-rules", action="store_true", help="Acknowledge that involved tracker rules have been manually reviewed.")
     site_policies.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    site_policy_rule_review = subparsers.add_parser(
+        "site-policy-rule-review",
+        help="Generate manual rule-review fingerprints and copyable site-policy patches.",
+        description=(
+            "Build the same no-mutation rule-review helper exposed at /v1/site-policies/rule-review. "
+            "This command never edits config.py; it returns the patch and verification calls to apply after a real human rules review."
+        ),
+    )
+    site_policy_rule_review.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    site_policy_rule_review.add_argument("--trackers", help="Optional comma-separated tracker codes.")
+    site_policy_rule_review.add_argument("--source-url", help="Source tracker details URL; source tracker is inferred when --from is omitted.")
+    site_policy_rule_review.add_argument("--source", help="Alias for --source-url.")
+    site_policy_rule_review.add_argument("--from", dest="source_tracker", help="Source tracker code for role-aware rule review.")
+    site_policy_rule_review.add_argument("--source-tracker", dest="source_tracker_alias", help="Alias for --from.")
+    site_policy_rule_review.add_argument("--to", dest="target_trackers", help="Target tracker codes, comma-separated, for role-aware rule review.")
+    site_policy_rule_review.add_argument("--target", help="Alias for --to.")
+    site_policy_rule_review.add_argument("--rules-reviewed", action="store_true", help="Set only after manually reading each involved tracker rule page.")
+    site_policy_rule_review.add_argument("--acknowledge-rules", action="store_true", help="Alias for --rules-reviewed.")
+    site_policy_rule_review.add_argument("--reviewer", help="Human or local account name that performed the rule review.")
+    site_policy_rule_review.add_argument("--reviewed-by", help="Alias for --reviewer.")
+    site_policy_rule_review.add_argument("--reviewed-at", help="Review date/time or audit marker, e.g. 2026-07-21.")
+    site_policy_rule_review.add_argument("--date", help="Alias for --reviewed-at.")
+    site_policy_rule_review.add_argument("--rules-url", help="Optional single tracker rules URL override when reviewing one tracker.")
+    site_policy_rule_review.add_argument("--rules-urls-json", help='Optional per-tracker rules URL JSON, e.g. {"U2":"...","MTEAM":"..."}.')
+    site_policy_rule_review.add_argument("--note", dest="notes", action="append", help="Manual review note. Can be repeated.")
+    site_policy_rule_review.add_argument("--review-note", dest="review_notes", action="append", help="Alias for --note. Can be repeated.")
+    site_policy_rule_review.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rule_check = subparsers.add_parser("rule-check", help="Run executable rule gates for a source/target workflow.")
     rule_check.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
     rule_check.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
@@ -12334,6 +12362,30 @@ def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     return site_policies_payload({key: value for key, value in request.items() if value not in (None, "")})
 
 
+def site_policy_rule_review_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import site_policy_rule_review_payload
+
+    source = args.source_url or args.source
+    source_tracker = args.source_tracker or args.source_tracker_alias
+    target = args.target or args.target_trackers
+    notes = [*list(args.notes or []), *list(args.review_notes or [])]
+    rules_urls = json.loads(args.rules_urls_json) if args.rules_urls_json else None
+    request = {
+        "config": args.config,
+        "trackers": args.trackers,
+        "source_url": source,
+        "source_tracker": source_tracker,
+        "target": target,
+        "rules_reviewed": args.rules_reviewed or args.acknowledge_rules,
+        "reviewer": args.reviewer or args.reviewed_by,
+        "reviewed_at": args.reviewed_at or args.date,
+        "rules_url": args.rules_url,
+        "rules_urls": rules_urls,
+        "notes": notes,
+    }
+    return site_policy_rule_review_payload({key: value for key, value in request.items() if value not in (None, "", [])})
+
+
 def readiness_bundle_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import readiness_bundle_payload
 
@@ -12425,6 +12477,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "site-policies":
             payload = _with_captured_stdout(lambda: site_policies_cli_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
+
+        if args.command == "site-policy-rule-review":
+            payload = _with_captured_stdout(lambda: site_policy_rule_review_cli_payload(args), json_output)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 

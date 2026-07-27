@@ -21836,6 +21836,56 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert "merged_config_patch" in payload["read_order"]
 
 
+def test_site_policy_rule_review_cli_requires_manual_evidence(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
+
+    code = main(["site-policy-rule-review", "--from", "U2", "--to", "MTEAM", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert payload["kind"] == "ptcli.site_policy_rule_review"
+    assert payload["status"] == "blocked"
+    assert payload["mutates_state"] is False
+    assert payload["recommended_tool"] == "site_policy_rule_review"
+    assert payload["rule_review_package"]["submit_request_template"]["source_tracker"] == "U2"
+    assert payload["rule_review_package"]["submit_request_template"]["target"] == "MTEAM"
+    assert "rules_reviewed=true is required" in payload["blockers"][0]
+
+
+def test_site_policy_rule_review_cli_generates_patch(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
+
+    code = main(
+        [
+            "site-policy-rule-review",
+            "--source-url",
+            "https://u2.dmhy.org/details.php?id=60635",
+            "--to",
+            "MTEAM",
+            "--rules-reviewed",
+            "--reviewer",
+            "liuxiang",
+            "--reviewed-at",
+            "2026-07-21",
+            "--note",
+            "Checked download, retorrent, upload, and seeding rules.",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["mutates_filesystem"] is False
+    assert payload["request"]["reviewer"] == "liuxiang"
+    assert payload["request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
+    assert payload["config_apply_final_report"]["copyable_config"]["ready"] is True
+    assert payload["config_apply_final_report"]["safety"]["does_not_edit_config"] is True
+    assert payload["manual_apply_handoff"]["verify_call"]["tool"] == "site_policies"
+    assert payload["next_step"]["tool"] == "edit_config"
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}
