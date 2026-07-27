@@ -51053,6 +51053,8 @@
           "configured_paths",
           "missing_mounts",
           "mkdir_commands",
+          "bootstrap_commands",
+          "print_bootstrap_commands",
           "config_file",
           "env_file",
           "compose",
@@ -51068,6 +51070,12 @@
           "blockers",
           "warnings",
           "next_actions"
+        ],
+        "seedbox_bootstrap_command_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "reason"
         ],
         "seedbox_live_trial_handoff_fields": [
           "ready",
@@ -51533,9 +51541,70 @@
           "request": {
             "brief": true
           },
-          "response_kind": "ptcli.goal_progress_brief",
-          "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"
+          "response_kind": "ptcli.goal_progress_agent_brief",
+          "use_for": "first-pass agent routing, status checks, and next-work selection before reading the full evidence tree"
         },
+        "agent_brief_fields": [
+          "kind",
+          "status",
+          "ok",
+          "objective",
+          "estimated_percent",
+          "remaining_percent",
+          "plain_answer",
+          "current_phase",
+          "blocker_count",
+          "blocker_owners",
+          "first_blocker",
+          "primary_blocker_group",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "source_context",
+          "capability_status",
+          "remaining_capability_ids",
+          "current_step",
+          "environment",
+          "site_policy",
+          "manual_retorrent",
+          "daily_candidates",
+          "qbittorrent",
+          "tracker_adapters",
+          "live_validation",
+          "safety",
+          "blockers",
+          "next_actions",
+          "read_full_when",
+          "full_view_request"
+        ],
+        "agent_brief_environment_fields": [
+          "ready",
+          "status",
+          "action",
+          "blockers",
+          "mkdir_commands",
+          "bootstrap_commands",
+          "print_bootstrap_commands"
+        ],
+        "agent_brief_manual_retorrent_fields": [
+          "ready",
+          "status",
+          "action",
+          "recommended_tool",
+          "recommended_call",
+          "required_inputs",
+          "cli_templates",
+          "blockers"
+        ],
+        "manual_retorrent_cli_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason"
+        ],
         "progress_summary_fields": [
           "kind",
           "status",
@@ -51714,6 +51783,8 @@
           "status",
           "action",
           "mkdir_commands",
+          "bootstrap_commands",
+          "print_bootstrap_commands",
           "configured_paths",
           "missing_mounts",
           "config_file",
@@ -51804,6 +51875,8 @@
           "recommended_tool",
           "recommended_endpoint",
           "recommended_method",
+          "required_inputs",
+          "cli_templates",
           "workflow_steps",
           "read_order",
           "complete_when",
@@ -54659,6 +54732,11 @@
           "manual_apply_note",
           "verify_after_apply",
           "safety"
+        ],
+        "cli_helpers": [
+          "--print-python-update-snippet",
+          "--print-json-patch",
+          "--print-verify-command"
         ],
         "config_apply_verification_fields": [
           "tool",

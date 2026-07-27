@@ -25179,6 +25179,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "site_policy_repair_handoff" in goal_progress_tool["response_contract"]["progress_summary_fields"]
     assert "live_validation_handoff" in goal_progress_tool["response_contract"]["progress_summary_fields"]
     assert "live_validation_compact_handoff_fields" in goal_progress_tool["response_contract"]
+    assert "agent_brief_manual_retorrent_fields" in goal_progress_tool["response_contract"]
+    assert "cli_templates" in goal_progress_tool["response_contract"]["agent_brief_manual_retorrent_fields"]
+    assert "manual_retorrent_cli_template_fields" in goal_progress_tool["response_contract"]
+    assert "cli_templates" in goal_progress_tool["response_contract"]["manual_retorrent_entry_handoff_fields"]
+    assert "required_inputs" in goal_progress_tool["response_contract"]["manual_retorrent_entry_handoff_fields"]
     assert "site_policy_repair_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "site_policy_repair_handoff_fields" in goal_progress_tool["response_contract"]
     assert "next_stage" in goal_progress_tool["response_contract"]["live_validation_compact_handoff_fields"]
@@ -27381,6 +27386,24 @@ services:
     assert manual_entry["check_and_submit_call"]["requires_user_review"] is True
     assert manual_entry["recommended_call"]["tool"] == "source_url_retorrent_preflight"
     assert manual_entry["recommended_call"]["safe_to_call_now"] is True
+    assert manual_entry["required_inputs"] == [
+        "source_url or source_tracker+source_id",
+        "target",
+        "accept_rules=true after manual tracker-rule review",
+        "confirm_upload=true before live upload",
+    ]
+    templates = {item["name"]: item for item in manual_entry["cli_templates"]}
+    assert templates["api_preflight_curl"]["safe_to_run"] is True
+    assert templates["api_preflight_curl"]["mutates_state"] is False
+    assert "/v1/retorrent/source-url/preflight" in templates["api_preflight_curl"]["command"]
+    assert "https://u2.dmhy.org/details.php?id=60635" in templates["api_preflight_curl"]["command"]
+    assert templates["cli_readiness_bundle"]["safe_to_run"] is True
+    assert "readiness-bundle" in templates["cli_readiness_bundle"]["command"]
+    assert templates["api_check_and_submit_curl"]["safe_to_run"] is False
+    assert templates["api_check_and_submit_curl"]["mutates_state"] is True
+    assert templates["api_check_and_submit_curl"]["requires_user_review"] is True
+    assert "/v1/jobs/retorrent/from-url/check-and-submit" in templates["api_check_and_submit_curl"]["command"]
+    assert templates["cli_retorrent_dry_run"]["mutates_state"] is False
     assert [step["name"] for step in manual_entry["workflow_steps"]] == [
         "preflight_source_url",
         "repair_policy",
@@ -27486,6 +27509,9 @@ services:
     assert brief_payload["recommended_tool"] == payload["progress_summary"]["recommended_tool"]
     assert brief_payload["current_step"]["tool"] == payload["progress_summary"]["critical_path_handoff"]["current_step"]["tool"]
     assert brief_payload["site_policy"]["recommended_tool"] == "site_policy_rule_review"
+    assert brief_payload["manual_retorrent"]["required_inputs"] == manual_entry["required_inputs"]
+    assert brief_payload["manual_retorrent"]["cli_templates"][0]["name"] == "api_preflight_curl"
+    assert brief_payload["manual_retorrent"]["cli_templates"][2]["requires_user_review"] is True
     assert brief_payload["daily_candidates"]["target_count"] == 10
     assert brief_payload["tracker_adapters"]["requested_flow"]["source_tracker"] == "U2"
     assert brief_payload["full_view_request"] == {"brief": False}

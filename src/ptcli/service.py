@@ -39522,6 +39522,8 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "action": manual.get("action"),
             "recommended_tool": manual.get("recommended_tool"),
             "recommended_call": _goal_progress_compact_call(manual.get("recommended_call") if isinstance(manual.get("recommended_call"), dict) else {}),
+            "required_inputs": manual.get("required_inputs") if isinstance(manual.get("required_inputs"), list) else [],
+            "cli_templates": _goal_progress_agent_brief_cli_templates(manual.get("cli_templates") if isinstance(manual.get("cli_templates"), list) else []),
             "blockers": _string_list(manual.get("blockers"))[:6],
         },
         "daily_candidates": {
@@ -39587,6 +39589,26 @@ def _goal_progress_agent_brief_bootstrap_commands(commands: list[Any]) -> list[d
             )
         elif str(item).strip():
             compact.append({"name": None, "command": str(item).strip(), "safe_to_run": None})
+    return compact
+
+
+def _goal_progress_agent_brief_cli_templates(commands: list[Any]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for item in commands[:5]:
+        if not isinstance(item, dict):
+            continue
+        command = str(item.get("command") or "").strip()
+        if not command:
+            continue
+        compact.append(
+            {
+                "name": item.get("name"),
+                "command": command,
+                "safe_to_run": item.get("safe_to_run"),
+                "mutates_state": item.get("mutates_state"),
+                "requires_user_review": item.get("requires_user_review"),
+            }
+        )
     return compact
 
 
@@ -39825,6 +39847,20 @@ def _goal_progress_manual_retorrent_entry_handoff(
     )
     recommended_call = preflight_call if action in {"provide_source_and_target", "repair_site_policy", "repair_live_readiness", "collect_confirmations"} else check_submit_call
     blockers = _goal_progress_manual_retorrent_entry_blockers(preflight_ready, policy_ready, live_ready, accept_rules, confirm_upload, site_policy_repair_handoff, live_validation_handoff)
+    required_inputs = [
+        "source_url or source_tracker+source_id",
+        "target",
+        "accept_rules=true after manual tracker-rule review",
+        "confirm_upload=true before live upload",
+    ]
+    cli_templates = _goal_progress_manual_retorrent_cli_templates(
+        source_url=source_url,
+        source_tracker=source_tracker,
+        source_id=source_id,
+        target=target,
+        accept_rules=accept_rules,
+        confirm_upload=confirm_upload,
+    )
     return {
         "kind": "ptcli.goal_manual_retorrent_entry_handoff",
         "ready": check_submit_ready,
@@ -39843,8 +39879,10 @@ def _goal_progress_manual_retorrent_entry_handoff(
         "recommended_tool": recommended_call.get("tool"),
         "recommended_endpoint": recommended_call.get("endpoint"),
         "recommended_method": recommended_call.get("method"),
+        "required_inputs": required_inputs,
+        "cli_templates": cli_templates,
         "workflow_steps": _goal_progress_manual_retorrent_entry_steps(preflight_call, check_submit_call, action),
-        "read_order": ["manual_retorrent_entry_handoff", "preflight_call", "site_policy_repair_handoff", "live_validation_handoff", "check_and_submit_call", "workflow_steps"],
+        "read_order": ["manual_retorrent_entry_handoff", "required_inputs", "cli_templates", "preflight_call", "site_policy_repair_handoff", "live_validation_handoff", "check_and_submit_call", "workflow_steps"],
         "complete_when": [
             "source_url_retorrent_preflight.ready_to_create_job=true",
             "duplicate_check.exists=false",
@@ -39873,6 +39911,100 @@ def _goal_progress_manual_retorrent_entry_handoff(
         "blockers": blockers,
         "next_actions": _goal_progress_manual_retorrent_entry_next_actions(action, blockers),
     }
+
+
+def _goal_progress_manual_retorrent_cli_templates(
+    *,
+    source_url: Any,
+    source_tracker: Any,
+    source_id: Any,
+    target: Any,
+    accept_rules: bool,
+    confirm_upload: bool,
+) -> list[dict[str, Any]]:
+    source_url_value = str(source_url or "https://u2.dmhy.org/details.php?id=60635")
+    source_tracker_value = str(source_tracker or "U2")
+    source_id_value = str(source_id or "60635")
+    target_value = str(target or "MTEAM")
+    api_base = "http://127.0.0.1:8080"
+    preflight_payload = {"source_url": source_url_value, "target": target_value, "accept_rules": bool(accept_rules), "confirm_upload": bool(confirm_upload)}
+    check_submit_payload = {"source_url": source_url_value, "target": target_value, "accept_rules": True, "confirm_upload": True}
+    readiness_args = [
+        "python3",
+        "ptcli.py",
+        "readiness-bundle",
+        "--source-url",
+        source_url_value,
+        "--target",
+        target_value,
+        "--json",
+    ]
+    if accept_rules:
+        readiness_args.append("--accept-rules")
+    if confirm_upload:
+        readiness_args.append("--confirm-upload")
+    templates = [
+        {
+            "name": "api_preflight_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/retorrent/source-url/preflight",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(preflight_payload, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": True,
+            "mutates_state": False,
+            "requires_user_review": False,
+            "reason": "Read-only source-link preflight; checks parser, duplicate/policy handoff, and job creation readiness.",
+        },
+        {
+            "name": "cli_readiness_bundle",
+            "command": shlex.join(readiness_args),
+            "safe_to_run": True,
+            "mutates_state": False,
+            "requires_user_review": False,
+            "reason": "Read-only CLI readiness bundle before any live submit.",
+        },
+        {
+            "name": "api_check_and_submit_curl",
+            "command": shlex.join(
+                [
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "POST",
+                    f"{api_base}/v1/jobs/retorrent/from-url/check-and-submit",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(check_submit_payload, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ),
+            "safe_to_run": False,
+            "mutates_state": True,
+            "requires_user_review": True,
+            "reason": "Creates a live-capable retorrent job only after duplicate, policy, doctor, accept_rules, and confirm_upload gates are satisfied.",
+        },
+    ]
+    if source_tracker_value and source_id_value:
+        templates.append(
+            {
+                "name": "cli_retorrent_dry_run",
+                "command": shlex.join(["python3", "ptcli.py", "retorrent", "--from", source_tracker_value, "--source-id", source_id_value, "--to", target_value, "--dry-run", "--json"]),
+                "safe_to_run": True,
+                "mutates_state": False,
+                "requires_user_review": False,
+                "reason": "Read-only legacy-compatible dry-run when tracker and torrent id are known.",
+            }
+        )
+    return templates
 
 
 def _goal_progress_manual_retorrent_entry_blockers(
@@ -44817,6 +44949,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_agent_brief", "use_for": "first-pass agent routing, status checks, and next-work selection before reading the full evidence tree"},
                 "agent_brief_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "blocker_count", "blocker_owners", "first_blocker", "primary_blocker_group", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "capability_status", "remaining_capability_ids", "current_step", "environment", "site_policy", "manual_retorrent", "daily_candidates", "qbittorrent", "tracker_adapters", "live_validation", "safety", "blockers", "next_actions", "read_full_when", "full_view_request"],
                 "agent_brief_environment_fields": ["ready", "status", "action", "blockers", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands"],
+                "agent_brief_manual_retorrent_fields": ["ready", "status", "action", "recommended_tool", "recommended_call", "required_inputs", "cli_templates", "blockers"],
+                "manual_retorrent_cli_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
                 "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "environment_repair_handoff", "critical_path_handoff", "manual_retorrent_entry_handoff", "daily_candidate_handoff", "qbit_handoff", "tracker_adapter_handoff", "site_policy_repair_handoff", "live_validation_handoff", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
@@ -44835,7 +44969,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_compact_handoff_fields": ["ready", "status", "phase_id", "phase_name", "action", "current_step", "steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blocker_owner_order", "blockers", "next_actions"],
                 "critical_path_compact_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "critical_path_compact_safety_fields": ["read_only", "mutates_state", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload", "requires_human_rule_review", "requires_confirm_upload_for_live", "must_not_skip_duplicate_check", "must_not_fabricate_rule_fingerprint"],
-                "manual_retorrent_entry_handoff_fields": ["ready", "status", "action", "source", "target", "preflight_ready", "policy_ready", "live_readiness_ready", "accept_rules", "confirm_upload", "preflight_call", "check_and_submit_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "manual_retorrent_entry_handoff_fields": ["ready", "status", "action", "source", "target", "preflight_ready", "policy_ready", "live_readiness_ready", "accept_rules", "confirm_upload", "preflight_call", "check_and_submit_call", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "required_inputs", "cli_templates", "workflow_steps", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "manual_retorrent_entry_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "safe_to_call_now", "requires_user_review", "continue_when", "stop_when"],
                 "manual_retorrent_entry_safety_fields": ["read_only", "mutates_state", "preflight_does_not_upload", "check_and_submit_may_create_live_job", "check_and_submit_requires_user_review", "must_check_duplicates_before_submit", "must_not_bypass_site_policy", "live_upload_requires_confirm_upload"],
                 "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "missing_inputs", "schedule_env", "schedule_env_example", "compose", "configure_schedule_call", "create_jobs_call", "run_now_call", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
