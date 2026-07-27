@@ -42722,6 +42722,8 @@ def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) ->
             "source_ready_trackers": _string_list(coverage.get("source_ready_trackers")),
             "target_ready_trackers": _string_list(coverage.get("target_ready_trackers")),
             "live_reference_sources_to_mteam": _string_list(coverage.get("live_reference_sources_to_mteam")),
+            "reference_flows_to_mteam": _goal_progress_reference_flows_to_mteam(profile_final_report, coverage),
+            "reference_sources_to_mteam": _goal_progress_reference_sources_to_mteam(profile_final_report, coverage),
         }
         if coverage
         else None,
@@ -42749,6 +42751,54 @@ def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) ->
         "blockers": _string_list(readiness_final_report.get("blockers")) or _string_list(final_report.get("blockers")) or _string_list(tracker_adapters.get("blockers")),
         "next_actions": _string_list(readiness_final_report.get("next_actions")) or _string_list(final_report.get("next_actions")) or _string_list(tracker_adapters.get("next_actions")),
     }
+
+
+def _goal_progress_reference_flows_to_mteam(profile_final_report: dict[str, Any], coverage: dict[str, Any]) -> list[dict[str, Any]]:
+    flows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    report = profile_final_report.get("reference_adapter_report") if isinstance(profile_final_report.get("reference_adapter_report"), dict) else {}
+    raw_flows = report.get("reference_flows_to_mteam") if isinstance(report.get("reference_flows_to_mteam"), list) else []
+    raw_flows = [*raw_flows, *(coverage.get("reference_flows") if isinstance(coverage.get("reference_flows"), list) else [])]
+    for flow in raw_flows:
+        if not isinstance(flow, dict):
+            continue
+        source = str(flow.get("source_tracker") or "")
+        target = str(flow.get("target_tracker") or "")
+        if source not in {"U2", "CHD"} or target != "MTEAM":
+            continue
+        key = (source, target)
+        if key in seen:
+            continue
+        flows.append(flow)
+        seen.add(key)
+    live_sources = _string_list(coverage.get("live_reference_sources_to_mteam"))
+    if any(source in live_sources for source in ("U2", "CHD")):
+        for source in ("CHD", "U2"):
+            key = (source, "MTEAM")
+            if key in seen or source not in CHINESE_PT_TRACKERS:
+                continue
+            flows.append(
+                {
+                    "source_tracker": source,
+                    "target_tracker": "MTEAM",
+                    "role": "reference_baseline",
+                    "source_adapter_family": "nexusphp",
+                    "target_adapter_family": "mteam_api",
+                    "requires_live_validation": True,
+                }
+            )
+            seen.add(key)
+    return sorted(flows, key=lambda item: str(item.get("source_tracker")))
+
+
+def _goal_progress_reference_sources_to_mteam(profile_final_report: dict[str, Any], coverage: dict[str, Any]) -> list[str]:
+    sources = [str(flow.get("source_tracker")) for flow in _goal_progress_reference_flows_to_mteam(profile_final_report, coverage) if flow.get("source_tracker")]
+    if sources:
+        return sources
+    live_sources = _string_list(coverage.get("live_reference_sources_to_mteam"))
+    if any(source in live_sources for source in ("U2", "CHD")):
+        return [source for source in ("CHD", "U2") if source in CHINESE_PT_TRACKERS]
+    return live_sources
 
 
 def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dict[str, Any]) -> dict[str, Any] | None:
@@ -42786,6 +42836,8 @@ def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dic
             "source_ready_trackers": _string_list(coverage.get("source_ready_trackers")),
             "target_ready_trackers": _string_list(coverage.get("target_ready_trackers")),
             "live_reference_sources_to_mteam": _string_list(coverage.get("live_reference_sources_to_mteam")),
+            "reference_sources_to_mteam": _string_list(coverage.get("reference_sources_to_mteam")),
+            "reference_flows_to_mteam": coverage.get("reference_flows_to_mteam") if isinstance(coverage.get("reference_flows_to_mteam"), list) else [],
         },
         "rollout": {
             "ready": rollout.get("ready"),
@@ -42795,6 +42847,7 @@ def _goal_progress_compact_tracker_adapter_handoff(tracker_adapter_evidence: dic
             "validation_ready_trackers": _string_list(rollout.get("validation_ready_trackers")),
             "validation_blocked_trackers": _string_list(rollout.get("validation_blocked_trackers")),
             "live_reference_sources_to_mteam": _string_list(rollout.get("live_reference_sources_to_mteam")),
+            "reference_sources_to_mteam": _string_list(coverage.get("reference_sources_to_mteam")),
         },
         "missing_inputs": _goal_progress_tracker_adapter_missing_inputs(readiness_report, profile_report, rollout, tracker_adapter_evidence),
         "workflow_steps": _goal_progress_tracker_adapter_workflow_steps(action, current_call, requested_flow),
@@ -44620,6 +44673,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "site_policy_verify_handoff_fields": ["ready", "status", "action", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "policy_ready", "recommended_call", "after_success", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "site_extension_readiness_final_report", "site_adapter_profile_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "tracker_adapter_compact_handoff_fields": ["ready", "status", "verdict", "action", "requested_trackers", "requested_flow", "coverage", "rollout", "missing_inputs", "workflow_steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "tracker_adapter_compact_coverage_fields": ["ready", "priority_next", "source_ready_trackers", "target_ready_trackers", "live_reference_sources_to_mteam", "reference_sources_to_mteam", "reference_flows_to_mteam"],
                 "tracker_adapter_compact_missing_input_fields": ["name", "required", "source", "blockers"],
                 "tracker_adapter_compact_workflow_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "seedbox_live_validation_final_report", "live_validation_completion_audit", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "live_recovery_final_report", "resume_final_report", "job_lifecycle_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],

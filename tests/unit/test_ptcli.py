@@ -23867,6 +23867,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "tracker_rollout_handoff" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
     assert "tracker_adapter_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "tracker_adapter_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "tracker_adapter_compact_coverage_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "reference_sources_to_mteam" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_coverage_fields"]
     assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
     assert "missing_inputs" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_compact_handoff_fields"]
     assert "tracker_adapter_compact_missing_input_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -27558,6 +27560,9 @@ services:
     assert adapter_brief["action"] in {"validate_requested_flow", "repair_site_profiles"}
     assert adapter_brief["rollout"]["action"] == "validate_requested_flow"
     assert "U2" in adapter_brief["coverage"]["live_reference_sources_to_mteam"]
+    assert adapter_brief["coverage"]["reference_sources_to_mteam"] == ["CHD", "U2"]
+    assert [flow["source_tracker"] for flow in adapter_brief["coverage"]["reference_flows_to_mteam"]] == ["CHD", "U2"]
+    assert adapter_brief["rollout"]["reference_sources_to_mteam"] == ["CHD", "U2"]
     assert any(item["name"] in {"site_profile", "adapter_validation"} for item in adapter_brief["missing_inputs"])
     assert [step["name"] for step in adapter_brief["workflow_steps"]] == [
         "inspect_site_profiles",

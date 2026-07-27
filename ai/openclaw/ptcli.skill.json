@@ -52488,6 +52488,15 @@
           "blockers",
           "next_actions"
         ],
+        "tracker_adapter_compact_coverage_fields": [
+          "ready",
+          "priority_next",
+          "source_ready_trackers",
+          "target_ready_trackers",
+          "live_reference_sources_to_mteam",
+          "reference_sources_to_mteam",
+          "reference_flows_to_mteam"
+        ],
         "tracker_adapter_compact_missing_input_fields": [
           "name",
           "required",
