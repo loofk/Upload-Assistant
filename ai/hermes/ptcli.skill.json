@@ -51978,6 +51978,7 @@
           "seedbox_live_runbook_final_report",
           "seedbox_live_validation_start_report",
           "seedbox_live_post_submit_report",
+          "seedbox_live_validation_decision_plan",
           "agent_smoke_live_validation_handoff",
           "next_step",
           "recommended_tool",
@@ -52323,6 +52324,7 @@
           "seedbox_live_runbook_final_report",
           "seedbox_live_validation_start_report",
           "seedbox_live_post_submit_report",
+          "seedbox_live_validation_decision_plan",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
@@ -52646,6 +52648,32 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "seedbox_live_validation_decision_plan_fields": [
+          "ready",
+          "status",
+          "action",
+          "current_step",
+          "recommended_call",
+          "safe_to_call_now",
+          "requires_user_review",
+          "steps",
+          "run_order",
+          "report_contract",
+          "read_order",
+          "complete_when",
+          "must_not_report_complete_until",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "seedbox_live_validation_decision_step_fields": [
+          "name",
+          "status",
+          "call",
+          "continue_when",
+          "stop_when"
         ],
         "next_call_fields": [
           "ready",
