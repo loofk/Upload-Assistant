@@ -21908,6 +21908,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recommended_call" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_post_submit_report_fields"]
     assert "seedbox_live_validation_decision_plan" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "seedbox_live_validation_decision_plan_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "seedbox_live_validation_execution_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "seedbox_live_validation_execution_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "must_not_submit_until" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_execution_handoff_fields"]
+    assert "must_not_report_complete_until" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_execution_handoff_fields"]
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
     assert tool_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
@@ -23553,6 +23557,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "first_live_validation_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "seedbox_live_runbook_final_report" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "seedbox_live_validation_start_report" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "seedbox_live_validation_execution_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_call" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -23595,6 +23600,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_start_report_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "must_not_submit_until" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_start_report_fields"]
     assert "final_audit_contract" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_start_report_fields"]
+    assert "seedbox_live_validation_execution_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "must_not_submit_until" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_execution_handoff_fields"]
+    assert "must_not_report_complete_until" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_execution_handoff_fields"]
     assert "next_call_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "safe_to_call_now" in tool_by_name["readiness_bundle"]["response_contract"]["next_call_fields"]
     assert "requires_user_review" in tool_by_name["readiness_bundle"]["response_contract"]["next_call_fields"]
@@ -24242,6 +24250,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "deployment_final_report" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
     assert "agent_handoff" in deployment_schema["properties"]
+    readiness_schema = openapi["paths"]["/v1/readiness/bundle"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "seedbox_live_validation_execution_handoff" in readiness_schema["properties"]
     source_url_preflight_schema = openapi["paths"]["/v1/retorrent/source-url/preflight"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_execution_handoff" in source_url_preflight_schema["properties"]
     assert "policy_config_apply_handoff" in source_url_preflight_schema["properties"]
@@ -24745,6 +24755,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "finish" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_post_submit_report_fields"]
         assert "seedbox_live_validation_decision_plan" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "seedbox_live_validation_decision_plan_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "seedbox_live_validation_execution_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "seedbox_live_validation_execution_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "must_not_submit_until" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_execution_handoff_fields"]
         assert "qbittorrent" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "qbittorrent_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "qbit_enforcement_summary" in tools_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
@@ -24891,6 +24904,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "first_live_validation_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "seedbox_live_runbook_final_report" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "seedbox_live_validation_start_report" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "seedbox_live_validation_execution_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_call" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -24927,6 +24941,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "must_not_report_complete_until" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_runbook_final_report_fields"]
         assert "seedbox_live_validation_start_report_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "must_not_submit_until" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_start_report_fields"]
+        assert "seedbox_live_validation_execution_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "must_not_report_complete_until" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_execution_handoff_fields"]
         assert "steps" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_decision_plan_fields"]
         assert "next_call_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "safe_to_call_now" in tools_by_name["readiness_bundle"]["response_contract"]["next_call_fields"]
@@ -28272,6 +28288,25 @@ services:
     assert decision_plan["steps"][1]["status"] == "current"
     assert "live_validation_completion_audit.report_allowed=true" in decision_plan["must_not_report_complete_until"]
     assert decision_plan["safety"]["must_not_report_complete_from_job_status_alone"] is True
+    execution_handoff = payload["seedbox_live_validation_execution_handoff"]
+    assert execution_handoff["kind"] == "ptcli.seedbox_live_validation_execution_handoff"
+    assert execution_handoff["ready"] is True
+    assert execution_handoff["status"] == "ready_for_doctor"
+    assert execution_handoff["current_step"] == "run_doctor"
+    assert execution_handoff["safe_to_call_now"] is False
+    assert execution_handoff["requires_user_review"] is True
+    assert execution_handoff["doctor_call"] == start_report["doctor_call"]
+    assert execution_handoff["summary_check_call"] == start_report["summary_check_call"]
+    assert execution_handoff["submit_call_template"] == start_report["submit_call_template"]
+    assert execution_handoff["recommended_call"] == decision_plan["recommended_call"]
+    assert execution_handoff["steps"][0]["step"] == "run_doctor"
+    assert execution_handoff["steps"][1]["step"] == "check_doctor_summary"
+    assert execution_handoff["steps"][2]["step"] == "submit_check_and_submit"
+    assert execution_handoff["steps"][3]["step"] == "poll_resume_finish"
+    assert "summary_check.live_submission_final_report.ready=true" in execution_handoff["must_not_submit_until"]
+    assert "live_validation_completion_audit.report_allowed=true" in execution_handoff["must_not_report_complete_until"]
+    assert execution_handoff["safety"]["submit_requires_summary_check"] is True
+    assert execution_handoff["safety"]["must_read_final_summary_before_success"] is True
     assert payload["live_validation_repair_plan"]["kind"] == "ptcli.live_validation_repair_plan"
     assert payload["live_validation_repair_plan"]["ready"] is True
     assert payload["live_validation_repair_plan"]["status"] == "ready_for_doctor"
