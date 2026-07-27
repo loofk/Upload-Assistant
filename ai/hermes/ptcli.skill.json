@@ -53819,6 +53819,7 @@
           "rule_review_final_report",
           "config_apply_final_report",
           "ai_config_apply_plan",
+          "manual_apply_handoff",
           "next_step",
           "blockers",
           "next_actions"
@@ -53938,6 +53939,29 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "manual_apply_handoff_fields": [
+          "ready",
+          "status",
+          "action",
+          "trackers",
+          "config_path",
+          "patch_source",
+          "preferred_patch",
+          "copyable_config",
+          "copyable_config_ready",
+          "submit_request_template",
+          "verify_call",
+          "goal_progress_call",
+          "live_readiness_call",
+          "steps",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions",
+          "linked_plan"
         ],
         "ai_config_apply_step_fields": [
           "step",
