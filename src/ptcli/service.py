@@ -39633,6 +39633,8 @@ def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any
             "blockers": _string_list(environment.get("blockers"))[:4],
             "mkdir_commands": _string_list(environment.get("mkdir_commands"))[:4],
             "bootstrap_commands": _goal_progress_agent_brief_bootstrap_commands(environment.get("bootstrap_commands") if isinstance(environment.get("bootstrap_commands"), list) else []),
+            "command_templates": _goal_progress_agent_brief_cli_templates(environment.get("command_templates") if isinstance(environment.get("command_templates"), list) else []),
+            "verification_steps": _goal_progress_agent_brief_verification_steps(environment.get("verification_steps") if isinstance(environment.get("verification_steps"), list) else []),
             "print_bootstrap_commands": environment.get("print_bootstrap_commands"),
         },
         "site_policy": {
@@ -39745,6 +39747,23 @@ def _goal_progress_agent_brief_cli_templates(commands: list[Any]) -> list[dict[s
                 "safe_to_run": item.get("safe_to_run"),
                 "mutates_state": item.get("mutates_state"),
                 "requires_user_review": item.get("requires_user_review"),
+            }
+        )
+    return compact
+
+
+def _goal_progress_agent_brief_verification_steps(steps: list[Any]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for item in steps[:8]:
+        if not isinstance(item, dict):
+            continue
+        compact.append(
+            {
+                "name": item.get("name"),
+                "status": item.get("status"),
+                "command_templates": _string_list(item.get("command_templates"))[:4],
+                "continue_when": item.get("continue_when"),
+                "stop_when": _string_list(item.get("stop_when"))[:3],
             }
         )
     return compact
@@ -41483,6 +41502,21 @@ def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dic
     daily_candidates = bootstrap.get("daily_candidates") if isinstance(bootstrap.get("daily_candidates"), dict) else {}
     verification_requests = bootstrap.get("verification_requests") if isinstance(bootstrap.get("verification_requests"), list) else []
     verification_sequence = _goal_progress_environment_verification_sequence(verification_requests)
+    bootstrap_commands = bootstrap.get("bootstrap_commands") if isinstance(bootstrap.get("bootstrap_commands"), list) else []
+    command_templates = _goal_progress_environment_command_templates(
+        bootstrap_commands=bootstrap_commands,
+        print_bootstrap_commands=str(bootstrap.get("print_bootstrap_commands") or ""),
+        compose=compose,
+        qbit=qbit,
+    )
+    verification_steps = _goal_progress_environment_verification_steps(
+        mkdir_commands=mkdir_commands,
+        env_file=env_file,
+        compose=compose,
+        qbit=qbit,
+        blockers=blockers,
+        command_templates=command_templates,
+    )
     ready = deployment.get("ready") is True and bootstrap.get("ready") is True and not blockers
     return {
         "kind": "ptcli.goal_environment_repair_handoff",
@@ -41522,15 +41556,17 @@ def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dic
             "configured": daily_candidates.get("configured") is True,
             "schedule_ready": (daily_candidates.get("schedule_handoff") or {}).get("ready") is True if isinstance(daily_candidates.get("schedule_handoff"), dict) else False,
         },
-        "bootstrap_commands": bootstrap.get("bootstrap_commands") if isinstance(bootstrap.get("bootstrap_commands"), list) else [],
+        "bootstrap_commands": bootstrap_commands,
+        "command_templates": command_templates,
         "print_bootstrap_commands": bootstrap.get("print_bootstrap_commands"),
+        "verification_steps": verification_steps,
         "verification_sequence": verification_sequence,
         "recommended_call": recommended_call if isinstance(recommended_call, dict) else {},
         "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
         "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
         "safe_to_call_now": bool((recommended_call or {}).get("safe_to_call_now")) if isinstance(recommended_call, dict) else False,
         "requires_user_review": bool(mkdir_commands) or (bool((recommended_call or {}).get("requires_user_review")) if isinstance(recommended_call, dict) else False),
-        "read_order": ["environment_repair_handoff", "mkdir_commands", "env_file", "compose", "verification_sequence", "deployment.seedbox_bootstrap_handoff", "deployment.seedbox_deployment_final_decision", "deployment.deployment_final_report"],
+        "read_order": ["environment_repair_handoff", "command_templates", "verification_steps", "mkdir_commands", "env_file", "compose", "verification_sequence", "deployment.seedbox_bootstrap_handoff", "deployment.seedbox_deployment_final_decision", "deployment.deployment_final_report"],
         "continue_when": "deployment_check.ready=true and seedbox_bootstrap_handoff.ready=true",
         "stop_when": ["mkdir_commands cannot be run on the target host", "downloads path is not the qBittorrent save path mount", "deployment_check still reports missing config/cookies/job/downloads paths"],
         "safety": {
@@ -41567,6 +41603,266 @@ def _goal_progress_environment_verification_sequence(verification_requests: list
             }
         )
     return sequence
+
+
+def _goal_progress_environment_command_templates(
+    *,
+    bootstrap_commands: list[Any],
+    print_bootstrap_commands: str,
+    compose: dict[str, Any],
+    qbit: dict[str, Any],
+) -> list[dict[str, Any]]:
+    templates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(
+        name: str,
+        command: str,
+        *,
+        safe_to_run: bool,
+        mutates_state: bool,
+        requires_user_review: bool,
+        reason: str,
+        continue_when: str,
+        evidence: list[str] | None = None,
+        contacts_qbittorrent: bool = False,
+        contacts_trackers: bool = False,
+    ) -> None:
+        command = command.strip()
+        if not name or not command or name in seen:
+            return
+        seen.add(name)
+        templates.append(
+            {
+                "name": name,
+                "command": command,
+                "safe_to_run": safe_to_run,
+                "mutates_state": mutates_state,
+                "requires_user_review": requires_user_review,
+                "reason": reason,
+                "continue_when": continue_when,
+                "evidence": evidence or [],
+                "contacts_qbittorrent": contacts_qbittorrent,
+                "contacts_trackers": contacts_trackers,
+            }
+        )
+
+    add(
+        "cli_print_bootstrap_commands",
+        print_bootstrap_commands or "python3 ptcli.py deployment-check --print-bootstrap-commands",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="show_seedbox_bootstrap_commands_without_running_them",
+        continue_when="commands are understood and target host paths are correct",
+        evidence=["stdout contains mkdir/copy/docker/curl commands when repairs are needed"],
+    )
+    for item in bootstrap_commands:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        command = str(item.get("command") or "").strip()
+        if not name or not command:
+            continue
+        mutates_state = name.startswith("mkdir:") or name in {"copy_env_template", "start_ptcli_api"}
+        add(
+            name,
+            command,
+            safe_to_run=bool(item.get("safe_to_run")),
+            mutates_state=mutates_state,
+            requires_user_review=mutates_state,
+            reason=str(item.get("reason") or "seedbox_bootstrap_step"),
+            continue_when=_goal_progress_environment_command_continue_when(name),
+            evidence=_goal_progress_environment_command_evidence(name),
+            contacts_qbittorrent=name == "probe_qbittorrent_readonly",
+        )
+
+    public_base = "http://127.0.0.1:8080"
+    add(
+        "api_health_curl",
+        f"curl -fsS {public_base}/health",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="verify_ptcli_api_health_after_compose_start",
+        continue_when="response.status=ok",
+        evidence=["HTTP 200", "status=ok"],
+    )
+    add(
+        "api_openapi_curl",
+        f"curl -fsS {public_base}/openapi.json",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="verify_openapi_contract_is_served",
+        continue_when="response contains /v1/tools and job endpoints",
+        evidence=["HTTP 200", "openapi paths include /v1/tools"],
+    )
+    add(
+        "api_tools_curl",
+        f"curl -fsS {public_base}/v1/tools",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="verify_ai_tool_catalog_is_served",
+        continue_when="response contains deployment_check, readiness_bundle, source_url_check_and_submit, daily_candidate_run_and_deliver",
+        evidence=["HTTP 200", "tool names include deployment_check"],
+    )
+    add(
+        "api_agent_manifest_curl",
+        f"curl -fsS {public_base}/.well-known/ptcli-agent.json",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="verify_agent_manifest_for_openclaw_hermes_style_callers",
+        continue_when="schema_version=ptcli.agent_manifest.v1 and tools are present",
+        evidence=["HTTP 200", "schema_version=ptcli.agent_manifest.v1"],
+    )
+    client = str(qbit.get("client") or "default").strip() or "default"
+    add(
+        "cli_qbit_inspect_readonly",
+        shlex.join(["python3", "ptcli.py", "inspect", "--client", client, "--limit", "20", "--json"]),
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="read_only_qbittorrent_connectivity_probe_after_deploy",
+        continue_when="response.ok=true or blockers identify qBittorrent config/connectivity repair",
+        evidence=["qBittorrent client, URL, torrent list or explicit connection blocker"],
+        contacts_qbittorrent=True,
+    )
+    compose_file = str(compose.get("file") or "docker-compose.yml")
+    add(
+        "docker_compose_ps_api",
+        f"docker compose -f {compose_file} ps ptcli-api",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="inspect_ptcli_api_container_status",
+        continue_when="ptcli-api is Up or health status is healthy",
+        evidence=["ptcli-api container status"],
+    )
+    add(
+        "cli_deployment_check_json",
+        "python3 ptcli.py deployment-check --json",
+        safe_to_run=True,
+        mutates_state=False,
+        requires_user_review=False,
+        reason="reread_deployment_readiness_after_bootstrap",
+        continue_when="ready=true or remaining blockers are site_policy/live_validation rather than environment",
+        evidence=["deployment_check.ready", "seedbox_bootstrap_handoff.ready", "blockers"],
+    )
+    return templates
+
+
+def _goal_progress_environment_command_continue_when(name: str) -> str:
+    if name.startswith("mkdir:"):
+        return "path exists and is writable on the Docker/seedbox host"
+    if name == "copy_env_template":
+        return ".env exists and required PTCLI_* values are reviewed"
+    if name == "start_ptcli_api":
+        return "ptcli-api container is running and healthcheck can be queried"
+    if name == "verify_contracts":
+        return "/health, /openapi.json, and /v1/tools return successfully"
+    if name == "probe_qbittorrent_readonly":
+        return "qBittorrent inspect returns status or explicit connectivity blockers"
+    if name == "rerun_deployment_check":
+        return "deployment_check.ready=true or blockers no longer include missing environment paths"
+    return "command completes successfully and reported evidence matches the next step"
+
+
+def _goal_progress_environment_command_evidence(name: str) -> list[str]:
+    if name.startswith("mkdir:"):
+        return ["path exists", "path writable by Docker/ptcli process"]
+    if name == "copy_env_template":
+        return [".env exists", "PTCLI_API_TOKEN/PTCLI_PUBLIC_BASE_URL/download paths reviewed"]
+    if name == "start_ptcli_api":
+        return ["docker compose ps ptcli-api", "healthcheck status"]
+    if name == "verify_contracts":
+        return ["HTTP 200 /health", "HTTP 200 /openapi.json", "HTTP 200 /v1/tools"]
+    if name == "probe_qbittorrent_readonly":
+        return ["inspect response", "configured qBittorrent client", "connection blocker if not reachable"]
+    if name == "rerun_deployment_check":
+        return ["deployment_check.ready", "seedbox_bootstrap_handoff.ready", "remaining blockers"]
+    return []
+
+
+def _goal_progress_environment_verification_steps(
+    *,
+    mkdir_commands: list[str],
+    env_file: dict[str, Any],
+    compose: dict[str, Any],
+    qbit: dict[str, Any],
+    blockers: list[str],
+    command_templates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    available = {str(item.get("name")) for item in command_templates if isinstance(item, dict)}
+    mkdir_template_names = [name for name in available if name.startswith("mkdir:")]
+    env_missing = bool(env_file.get("copy_command") or env_file.get("missing_keys") or env_file.get("edit_after_copy"))
+    qbit_configured = qbit.get("configured") is True
+
+    def status(current: bool, complete: bool = False) -> str:
+        if complete:
+            return "complete"
+        return "current" if current else "pending"
+
+    return [
+        {
+            "name": "print_bootstrap_commands",
+            "status": "current" if blockers else "complete",
+            "command_templates": ["cli_print_bootstrap_commands"],
+            "continue_when": "operator confirms commands target the intended local/seedbox paths",
+            "stop_when": ["commands reference the wrong downloads/job/tmp/config paths"],
+            "evidence": ["printed bootstrap commands"],
+        },
+        {
+            "name": "create_missing_paths",
+            "status": status(bool(mkdir_commands), complete=not bool(mkdir_commands)),
+            "command_templates": sorted(mkdir_template_names),
+            "continue_when": "all missing job/download/tmp paths exist and are writable",
+            "stop_when": ["host path cannot be created", "Docker mount path does not match qBittorrent save path"],
+            "evidence": ["path existence", "path writable"],
+        },
+        {
+            "name": "prepare_env_file",
+            "status": status(env_missing, complete=not env_missing),
+            "command_templates": ["copy_env_template"] if "copy_env_template" in available else [],
+            "continue_when": ".env exists and PTCLI_API_TOKEN/PTCLI_PUBLIC_BASE_URL/path envs are reviewed",
+            "stop_when": [".env is missing", "required env values point to wrong host paths"],
+            "evidence": [".env path", "missing_keys cleared or explicitly accepted"],
+        },
+        {
+            "name": "start_ptcli_api",
+            "status": status(bool(compose.get("start_api")), complete=compose.get("api_ready") is True and not blockers),
+            "command_templates": [name for name in ["start_ptcli_api", "docker_compose_ps_api"] if name in available],
+            "continue_when": "ptcli-api container is running and health endpoint is reachable",
+            "stop_when": ["docker compose service is absent", "container exits", "healthcheck fails"],
+            "evidence": ["docker compose ps ptcli-api", "HTTP 200 /health"],
+        },
+        {
+            "name": "verify_ai_contracts",
+            "status": "pending" if blockers else "complete",
+            "command_templates": [name for name in ["api_health_curl", "api_openapi_curl", "api_tools_curl", "api_agent_manifest_curl"] if name in available],
+            "continue_when": "health, OpenAPI, tools catalog, and agent manifest are served",
+            "stop_when": ["OpenAPI/tools/manifest missing required endpoints or schemas"],
+            "evidence": ["/health", "/openapi.json", "/v1/tools", "/.well-known/ptcli-agent.json"],
+        },
+        {
+            "name": "probe_qbittorrent_readonly",
+            "status": "pending" if qbit_configured else "blocked",
+            "command_templates": ["cli_qbit_inspect_readonly"] if "cli_qbit_inspect_readonly" in available else [],
+            "continue_when": "inspect returns qBittorrent status or an explicit actionable blocker",
+            "stop_when": ["qBittorrent config is missing", "qBittorrent cannot be reached from the deployed service host"],
+            "evidence": ["qBittorrent URL/client", "torrent status list or connection blocker"],
+        },
+        {
+            "name": "rerun_deployment_check",
+            "status": "pending" if blockers else "complete",
+            "command_templates": ["cli_deployment_check_json"] if "cli_deployment_check_json" in available else [],
+            "continue_when": "deployment_check.ready=true and environment blockers are gone",
+            "stop_when": ["deployment_check still reports missing environment paths or missing service contracts"],
+            "evidence": ["deployment_check.ready", "environment_repair_handoff.ready", "remaining blockers"],
+        },
+    ]
 
 
 def _goal_progress_compact_blocker_group(group: dict[str, Any]) -> dict[str, Any]:
@@ -45546,7 +45842,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_agent_brief", "use_for": "first-pass agent routing, status checks, and next-work selection before reading the full evidence tree"},
                 "agent_brief_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "blocker_count", "blocker_owners", "first_blocker", "primary_blocker_group", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "capability_status", "remaining_capability_ids", "current_step", "environment", "site_policy", "manual_retorrent", "daily_candidates", "qbittorrent", "tracker_adapters", "live_validation", "safety", "blockers", "next_actions", "read_full_when", "full_view_request"],
-                "agent_brief_environment_fields": ["ready", "status", "action", "blockers", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands"],
+                "agent_brief_environment_fields": ["ready", "status", "action", "blockers", "mkdir_commands", "bootstrap_commands", "command_templates", "verification_steps", "print_bootstrap_commands"],
+                "environment_command_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason", "continue_when", "evidence", "contacts_qbittorrent", "contacts_trackers"],
+                "environment_verification_step_fields": ["name", "status", "command_templates", "continue_when", "stop_when", "evidence"],
                 "agent_brief_site_policy_fields": ["ready", "status", "action", "recommended_tool", "recommended_call", "command_templates", "missing_config_fields", "trackers", "blockers"],
                 "agent_brief_manual_retorrent_fields": ["ready", "status", "action", "recommended_tool", "recommended_call", "required_inputs", "cli_templates", "blockers"],
                 "manual_retorrent_cli_template_fields": ["name", "command", "safe_to_run", "mutates_state", "requires_user_review", "reason"],
@@ -45563,7 +45861,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_focus_fields": ["phase_id", "phase_name", "recommended_step", "blockers"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
-                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands", "configured_paths", "missing_mounts", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_sequence", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "bootstrap_commands", "command_templates", "print_bootstrap_commands", "configured_paths", "missing_mounts", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_steps", "verification_sequence", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "environment_repair_verification_step_fields": ["index", "tool", "method", "endpoint", "request", "continue_when", "safe_to_call_now", "read_only"],
                 "critical_path_compact_handoff_fields": ["ready", "status", "phase_id", "phase_name", "action", "current_step", "steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blocker_owner_order", "blockers", "next_actions"],
                 "critical_path_compact_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],

@@ -51585,7 +51585,29 @@
           "blockers",
           "mkdir_commands",
           "bootstrap_commands",
+          "command_templates",
+          "verification_steps",
           "print_bootstrap_commands"
+        ],
+        "environment_command_template_fields": [
+          "name",
+          "command",
+          "safe_to_run",
+          "mutates_state",
+          "requires_user_review",
+          "reason",
+          "continue_when",
+          "evidence",
+          "contacts_qbittorrent",
+          "contacts_trackers"
+        ],
+        "environment_verification_step_fields": [
+          "name",
+          "status",
+          "command_templates",
+          "continue_when",
+          "stop_when",
+          "evidence"
         ],
         "agent_brief_site_policy_fields": [
           "ready",
@@ -51795,6 +51817,7 @@
           "action",
           "mkdir_commands",
           "bootstrap_commands",
+          "command_templates",
           "print_bootstrap_commands",
           "configured_paths",
           "missing_mounts",
@@ -51803,6 +51826,7 @@
           "compose",
           "qbit",
           "daily_candidates",
+          "verification_steps",
           "verification_sequence",
           "recommended_call",
           "recommended_tool",

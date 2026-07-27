@@ -23879,7 +23879,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_mounts" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
     assert "env_file" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
     assert "compose" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "command_templates" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "verification_steps" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
     assert "verification_sequence" in tool_by_name["goal_progress"]["response_contract"]["environment_repair_handoff_fields"]
+    assert "command_templates" in tool_by_name["goal_progress"]["response_contract"]["agent_brief_environment_fields"]
+    assert "verification_steps" in tool_by_name["goal_progress"]["response_contract"]["agent_brief_environment_fields"]
+    assert "mutates_state" in tool_by_name["goal_progress"]["response_contract"]["environment_command_template_fields"]
+    assert "continue_when" in tool_by_name["goal_progress"]["response_contract"]["environment_verification_step_fields"]
     assert "environment_repair_verification_step_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "critical_path_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "critical_path_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -38512,6 +38518,11 @@ services:
     assert brief_payload["environment"]["mkdir_commands"] == [f"mkdir -p {job_dir}", f"mkdir -p {downloads_dir}"]
     assert [item["name"] for item in brief_payload["environment"]["bootstrap_commands"][:2]] == [f"mkdir:{job_dir}", f"mkdir:{downloads_dir}"]
     assert brief_payload["environment"]["bootstrap_commands"][3]["command"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} up -d --build ptcli-api"
+    brief_command_templates = {item["name"]: item for item in brief_payload["environment"]["command_templates"]}
+    assert brief_command_templates["cli_print_bootstrap_commands"]["mutates_state"] is False
+    assert brief_command_templates[f"mkdir:{job_dir}"]["mutates_state"] is True
+    assert brief_payload["environment"]["verification_steps"][0]["name"] == "print_bootstrap_commands"
+    assert brief_payload["environment"]["verification_steps"][0]["command_templates"] == ["cli_print_bootstrap_commands"]
     assert brief_payload["environment"]["print_bootstrap_commands"] == "python3 ptcli.py deployment-check --print-bootstrap-commands"
     handoff = payload["progress_summary"]["environment_repair_handoff"]
     assert payload["progress_summary"]["environment_blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
@@ -38532,11 +38543,30 @@ services:
     assert [item["name"] for item in handoff["bootstrap_commands"][:2]] == [f"mkdir:{job_dir}", f"mkdir:{downloads_dir}"]
     assert handoff["bootstrap_commands"][2]["name"] == "copy_env_template"
     assert handoff["bootstrap_commands"][3]["command"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} up -d --build ptcli-api"
+    command_templates = {item["name"]: item for item in handoff["command_templates"]}
+    assert command_templates["cli_print_bootstrap_commands"]["safe_to_run"] is True
+    assert command_templates["cli_print_bootstrap_commands"]["mutates_state"] is False
+    assert command_templates[f"mkdir:{job_dir}"]["mutates_state"] is True
+    assert command_templates[f"mkdir:{job_dir}"]["requires_user_review"] is True
+    assert command_templates["start_ptcli_api"]["command"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} up -d --build ptcli-api"
+    assert command_templates["api_health_curl"]["contacts_qbittorrent"] is False
+    assert command_templates["api_openapi_curl"]["mutates_state"] is False
+    assert command_templates["api_tools_curl"]["continue_when"].startswith("response contains deployment_check")
+    assert command_templates["cli_qbit_inspect_readonly"]["contacts_qbittorrent"] is True
+    assert command_templates["cli_deployment_check_json"]["evidence"] == ["deployment_check.ready", "seedbox_bootstrap_handoff.ready", "blockers"]
     assert handoff["print_bootstrap_commands"] == "python3 ptcli.py deployment-check --print-bootstrap-commands"
+    steps = {item["name"]: item for item in handoff["verification_steps"]}
+    assert steps["create_missing_paths"]["status"] == "current"
+    assert steps["create_missing_paths"]["command_templates"] == [f"mkdir:{downloads_dir}", f"mkdir:{job_dir}"]
+    assert steps["verify_ai_contracts"]["command_templates"] == ["api_health_curl", "api_openapi_curl", "api_tools_curl", "api_agent_manifest_curl"]
+    assert steps["probe_qbittorrent_readonly"]["command_templates"] == ["cli_qbit_inspect_readonly"]
+    assert steps["rerun_deployment_check"]["continue_when"] == "deployment_check.ready=true and environment blockers are gone"
     assert [step["endpoint"] for step in handoff["verification_sequence"][:4]] == ["/health", "/openapi.json", "/v1/tools", "/.well-known/ptcli-agent.json"]
     assert handoff["verification_sequence"][-1]["endpoint"] == "/v1/readiness/bundle"
     assert handoff["verification_sequence"][-1]["safe_to_call_now"] is True
     assert handoff["requires_user_review"] is True
+    assert "command_templates" in handoff["read_order"]
+    assert "verification_steps" in handoff["read_order"]
     assert "verification_sequence" in handoff["read_order"]
     assert handoff["safety"]["shell_commands_require_user_review"] is True
     assert handoff["safety"]["compose_commands_require_user_review"] is True
