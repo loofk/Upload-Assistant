@@ -25096,6 +25096,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "delivery" in goal_progress_tool["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "refill" in goal_progress_tool["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "run_loop" in goal_progress_tool["response_contract"]["daily_candidate_goal_handoff_fields"]
+    assert "schedule_env_example" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "configure_schedule_call" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "run_now_call" in goal_progress_tool["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "daily_candidate_compact_missing_input_fields" in goal_progress_tool["response_contract"]
     assert "qbittorrent" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "qbittorrent_evidence_fields" in goal_progress_tool["response_contract"]
     assert "qbit_enforcement_summary" in goal_progress_tool["response_contract"]["qbittorrent_evidence_fields"]
@@ -27245,6 +27249,15 @@ services:
     assert payload["progress_summary"]["daily_candidate_handoff"]["safety"]["never_auto_submit_without_user_approval"] is True
     assert payload["progress_summary"]["daily_candidate_handoff"]["safety"]["site_policy_gate_required"] is True
     assert payload["progress_summary"]["daily_candidate_handoff"]["next_stage"] == "configure_schedule"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["schedule_env"] == "PTCLI_DAILY_CANDIDATE_SCHEDULES"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["schedule_env_example"]["json"][0]["source_tracker"] == "U2"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["schedule_env_example"]["json"][0]["target"] == "MTEAM"
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in payload["progress_summary"]["daily_candidate_handoff"]["schedule_env_example"]["shell"]
+    assert payload["progress_summary"]["daily_candidate_handoff"]["compose"]["daemon"] == "docker compose --profile daily up -d ptcli-daily-scheduler"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["configure_schedule_call"]["tool"] == "daily_candidates_schedule"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["create_jobs_call"]["tool"] == "daily_candidates_schedule_job"
+    assert payload["progress_summary"]["daily_candidate_handoff"]["run_now_call"]["tool"] == "daily_candidate_run_and_deliver"
+    assert any(item["name"] == "daily_candidate_schedule" for item in payload["progress_summary"]["daily_candidate_handoff"]["missing_inputs"])
     compact_steps = payload["progress_summary"]["daily_candidate_handoff"]["workflow_steps"]
     assert [step["name"] for step in compact_steps] == [
         "configure_schedule",

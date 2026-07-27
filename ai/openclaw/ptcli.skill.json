@@ -51736,6 +51736,13 @@
           "shortfall_count",
           "current_step",
           "workflow_steps",
+          "missing_inputs",
+          "schedule_env",
+          "schedule_env_example",
+          "compose",
+          "configure_schedule_call",
+          "create_jobs_call",
+          "run_now_call",
           "delivery_delivered",
           "approval_required",
           "can_submit_after_approval",
@@ -51762,6 +51769,12 @@
           "safe_to_call_now",
           "continue_when",
           "stop_when"
+        ],
+        "daily_candidate_compact_missing_input_fields": [
+          "name",
+          "required",
+          "source",
+          "blockers"
         ],
         "daily_candidate_compact_handoff_safety_fields": [
           "read_only",

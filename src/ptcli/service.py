@@ -39483,6 +39483,7 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
 def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dict[str, Any]) -> dict[str, Any] | None:
     if not daily_candidate_evidence:
         return None
+    schedule_handoff = daily_candidate_evidence.get("schedule_handoff") if isinstance(daily_candidate_evidence.get("schedule_handoff"), dict) else {}
     goal_handoff = daily_candidate_evidence.get("goal_handoff") if isinstance(daily_candidate_evidence.get("goal_handoff"), dict) else {}
     target_progress = daily_candidate_evidence.get("daily_candidate_target_progress") if isinstance(daily_candidate_evidence.get("daily_candidate_target_progress"), dict) else {}
     execution_plan = daily_candidate_evidence.get("daily_candidate_execution_plan") if isinstance(daily_candidate_evidence.get("daily_candidate_execution_plan"), dict) else {}
@@ -39501,6 +39502,9 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
     shortfall_count = _first_int(target.get("shortfall_count"), target_progress.get("shortfall_count"), max(0, target_count - ready_count))
     workflow_steps = _goal_progress_compact_daily_candidate_workflow_steps(execution_plan, goal_report, goal_handoff, target_progress)
     next_stage = _goal_progress_compact_daily_candidate_next_stage(action, execution_plan, workflow_steps)
+    schedule_api = schedule_handoff.get("api") if isinstance(schedule_handoff.get("api"), dict) else {}
+    schedule_env_example = schedule_handoff.get("env_example") if isinstance(schedule_handoff.get("env_example"), dict) else {"name": DAILY_CANDIDATE_SCHEDULE_ENV, "json": _daily_candidate_schedule_env_example(), "shell": f"export {DAILY_CANDIDATE_SCHEDULE_ENV}='{json.dumps(_daily_candidate_schedule_env_example(), ensure_ascii=False, separators=(',', ':'))}'"}
+    missing_inputs = _goal_progress_daily_candidate_missing_inputs(action, blockers, schedule_handoff, delivery, approval)
     return {
         "kind": "ptcli.goal_daily_candidate_compact_handoff",
         "ready": goal_report.get("ready") is True or target_progress.get("ready") is True,
@@ -39515,6 +39519,13 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "shortfall_count": shortfall_count,
         "current_step": next_stage,
         "workflow_steps": workflow_steps,
+        "missing_inputs": missing_inputs,
+        "schedule_env": schedule_handoff.get("env") or DAILY_CANDIDATE_SCHEDULE_ENV,
+        "schedule_env_example": schedule_env_example,
+        "compose": schedule_handoff.get("compose") if isinstance(schedule_handoff.get("compose"), dict) else {},
+        "configure_schedule_call": _goal_progress_compact_call(schedule_api.get("inspect_schedule") if isinstance(schedule_api.get("inspect_schedule"), dict) else {}),
+        "create_jobs_call": _goal_progress_compact_call(schedule_api.get("create_jobs") if isinstance(schedule_api.get("create_jobs"), dict) else {}),
+        "run_now_call": {"tool": "daily_candidate_run_and_deliver", "endpoint": "/v1/jobs/candidates/daily/run-and-deliver", "method": "POST", "request": {"schedules": schedule_env_example.get("json"), "write_files": True, "use_env_webhook": True}},
         "delivery_delivered": delivery.get("delivered"),
         "approval_required": approval.get("required_before_submit", True),
         "can_submit_after_approval": approval.get("can_submit_after_approval"),
@@ -39522,7 +39533,7 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
         "recommended_endpoint": (recommended_call or {}).get("endpoint") if isinstance(recommended_call, dict) else None,
         "recommended_method": (recommended_call or {}).get("method") if isinstance(recommended_call, dict) else None,
-        "read_order": ["daily_candidate_handoff", "evidence.daily_candidates.daily_candidate_execution_plan", "evidence.daily_candidates.daily_candidate_goal_final_report", "evidence.daily_candidates.goal_handoff"],
+        "read_order": ["daily_candidate_handoff", "schedule_env_example", "configure_schedule_call", "create_jobs_call", "run_now_call", "evidence.daily_candidates.schedule_handoff", "evidence.daily_candidates.daily_candidate_execution_plan", "evidence.daily_candidates.daily_candidate_goal_final_report", "evidence.daily_candidates.goal_handoff"],
         "continue_when": "ready_count>=target_count, digest delivered, and user explicitly approves one candidate before submit.",
         "stop_when": [
             "site policy gate is not ready",
@@ -39542,6 +39553,35 @@ def _goal_progress_compact_daily_candidate_handoff(daily_candidate_evidence: dic
         "blockers": blockers,
         "next_actions": _string_list(goal_report.get("next_actions")) or _string_list(goal_handoff.get("next_actions")) or _string_list(daily_candidate_evidence.get("next_actions")),
     }
+
+
+def _goal_progress_daily_candidate_missing_inputs(action: str, blockers: list[str], schedule_handoff: dict[str, Any], delivery: dict[str, Any], approval: dict[str, Any]) -> list[dict[str, Any]]:
+    missing: list[dict[str, Any]] = []
+
+    def add(name: str, source: str, blocker: str) -> None:
+        for item in missing:
+            if item["name"] == name:
+                item["blockers"].append(blocker)
+                return
+        missing.append({"name": name, "required": True, "source": source, "blockers": [blocker]})
+
+    if action == "configure_schedule" or schedule_handoff.get("ready") is not True:
+        add("daily_candidate_schedule", "daily_candidates_schedule", f"{DAILY_CANDIDATE_SCHEDULE_ENV} is not configured or no enabled schedule is ready.")
+    if action in {"publish_digest", "retry_delivery", "configure_delivery", "deliver_digest"} and delivery.get("delivered") is not True:
+        add("delivery_channel", "daily_candidate_delivery", "Daily candidate digest has not been delivered to file or webhook.")
+    if action in {"request_user_approval", "ask_user_approval", "submit_available"} and approval.get("can_submit_after_approval") is not True:
+        add("user_approval", "user_approval", "Explicit candidate approval is required before submit_daily_candidate_job.")
+    for blocker in blockers:
+        lower = blocker.lower()
+        if DAILY_CANDIDATE_SCHEDULE_ENV.lower() in lower or "schedule" in lower:
+            add("daily_candidate_schedule", "daily_candidates_schedule", blocker)
+        elif "webhook" in lower or "deliver" in lower or "notification" in lower:
+            add("delivery_channel", "daily_candidate_delivery", blocker)
+        elif "approval" in lower or "confirm_upload" in lower:
+            add("user_approval", "user_approval", blocker)
+        elif "site policy" in lower or "rule" in lower:
+            add("site_policy", "site_policy_rule_review", blocker)
+    return missing
 
 
 def _goal_progress_compact_daily_candidate_next_stage(action: str, execution_plan: dict[str, Any], workflow_steps: list[dict[str, Any]]) -> str | None:
@@ -43627,8 +43667,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
                 "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
-                "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_compact_handoff_fields": ["ready", "status", "action", "next_stage", "configured", "summary_file", "target_count", "ready_count", "safe_to_submit_count", "shortfall_count", "current_step", "workflow_steps", "missing_inputs", "schedule_env", "schedule_env_example", "compose", "configure_schedule_call", "create_jobs_call", "run_now_call", "delivery_delivered", "approval_required", "can_submit_after_approval", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_compact_workflow_step_fields": ["name", "ready", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],
+                "daily_candidate_compact_missing_input_fields": ["name", "required", "source", "blockers"],
                 "daily_candidate_compact_handoff_safety_fields": ["read_only", "uploads", "submits_candidates", "submit_requires_user_approval", "confirm_upload_required_for_submit", "never_auto_submit_without_user_approval", "site_policy_gate_required"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_candidate_run_loop_report", "daily_candidate_run_final_report", "daily_candidate_approval_final_report", "daily_candidate_user_approval_package", "daily_scheduler_final_report", "refill_loop_report", "daily_candidate_refill_final_report", "delivery_result", "delivery_audit", "daily_candidate_config_final_report", "daily_candidate_schedule_final_report", "daily_candidate_target_progress", "daily_candidate_execution_plan", "daily_candidate_goal_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "run_loop", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
