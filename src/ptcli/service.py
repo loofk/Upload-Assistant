@@ -38849,19 +38849,14 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
     first_group = None
     groups = blocker_breakdown.get("groups") if isinstance(blocker_breakdown.get("groups"), list) else []
     if groups and isinstance(groups[0], dict):
-        first_group = {
-            "owner": groups[0].get("owner"),
-            "count": groups[0].get("count"),
-            "action": groups[0].get("action"),
-            "recommended_tool": groups[0].get("recommended_tool"),
-            "safe_to_auto_fix": groups[0].get("safe_to_auto_fix"),
-            "blockers": _string_list(groups[0].get("blockers"))[:5],
-        }
+        first_group = _goal_progress_compact_blocker_group(groups[0])
     next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
     recommended_call = _goal_progress_compact_call(distance.get("recommended_call") if isinstance(distance.get("recommended_call"), dict) else next_step)
     blockers = _string_list(payload.get("blockers"))
     capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
     capability_status = {str(item.get("id")): item.get("status") for item in capabilities if isinstance(item, dict) and item.get("id")}
+    by_owner = blocker_breakdown.get("by_owner") if isinstance(blocker_breakdown.get("by_owner"), dict) else {}
+    primary_blocker_group = _goal_progress_primary_blocker_group(by_owner, recommended_call, first_group)
     return {
         "kind": "ptcli.goal_progress_brief",
         "status": payload.get("status"),
@@ -38882,8 +38877,13 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "first_blocker": blockers[0] if blockers else None,
         "first_blocker_group": first_group,
+        "primary_blocker_group": primary_blocker_group,
         "blocker_owners": list((blocker_breakdown.get("by_owner") or {}).keys()) if isinstance(blocker_breakdown.get("by_owner"), dict) else [],
         "blocker_count": len(blockers),
+        "environment_blockers": _goal_progress_owner_blockers(by_owner, "environment"),
+        "user_review_blockers": _goal_progress_owner_blockers(by_owner, "user_review"),
+        "site_policy_config_blockers": _goal_progress_owner_blockers(by_owner, "site_policy_config"),
+        "live_validation_blockers": _goal_progress_owner_blockers(by_owner, "live_validation"),
         "remaining_capability_ids": distance.get("remaining_capability_ids") if isinstance(distance.get("remaining_capability_ids"), list) else [],
         "capability_status": capability_status,
         "next_work": _goal_progress_compact_next_work(distance.get("next_work") if isinstance(distance.get("next_work"), dict) else {}),
@@ -38909,6 +38909,36 @@ def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers[:12],
         "next_actions": _string_list(payload.get("next_actions"))[:6],
     }
+
+
+def _goal_progress_compact_blocker_group(group: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "owner": group.get("owner"),
+        "count": group.get("count"),
+        "action": group.get("action"),
+        "recommended_tool": group.get("recommended_tool"),
+        "safe_to_auto_fix": group.get("safe_to_auto_fix"),
+        "blockers": _string_list(group.get("blockers"))[:5],
+    }
+
+
+def _goal_progress_primary_blocker_group(by_owner: dict[str, Any], recommended_call: dict[str, Any] | None, fallback: dict[str, Any] | None) -> dict[str, Any] | None:
+    recommended_tool = str((recommended_call or {}).get("tool") or "")
+    for owner, group in by_owner.items():
+        if isinstance(group, dict) and group.get("recommended_tool") == recommended_tool:
+            return _goal_progress_compact_blocker_group({"owner": owner, **group})
+    for owner in ("user_review", "site_policy_config", "live_validation", "environment"):
+        group = by_owner.get(owner)
+        if isinstance(group, dict):
+            return _goal_progress_compact_blocker_group({"owner": owner, **group})
+    return fallback
+
+
+def _goal_progress_owner_blockers(by_owner: dict[str, Any], owner: str) -> list[str]:
+    group = by_owner.get(owner)
+    if not isinstance(group, dict):
+        return []
+    return _string_list(group.get("blockers"))
 
 
 def _goal_progress_compact_call(call: dict[str, Any]) -> dict[str, Any] | None:
@@ -42151,7 +42181,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
                 "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
-                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "blocker_owners", "blocker_count", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "primary_blocker_group", "blocker_owners", "blocker_count", "environment_blockers", "user_review_blockers", "site_policy_config_blockers", "live_validation_blockers", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],

@@ -23384,6 +23384,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "view" in tool_by_name["goal_progress"]["input_schema"]["properties"]
     assert "progress_summary_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "primary_blocker_group" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "environment_blockers" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
+    assert "user_review_blockers" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "blocker_breakdown" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "remaining_percent" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
     assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
@@ -26743,6 +26746,12 @@ services:
     assert payload["progress_summary"]["recommended_call"]["tool"] == "site_policy_rule_review"
     assert payload["progress_summary"]["focus_now"]["recommended_step"]["tool"] == "site_policy_rule_review"
     assert "after_rule_review" not in payload["progress_summary"]["focus_now"]["recommended_step"]
+    assert payload["progress_summary"]["primary_blocker_group"]["owner"] == "user_review"
+    assert payload["progress_summary"]["primary_blocker_group"]["recommended_tool"] == "site_policy_rule_review"
+    assert payload["progress_summary"]["environment_blockers"] == []
+    assert "U2: rule_review_fingerprint is required before automation." in payload["progress_summary"]["user_review_blockers"]
+    assert "U2: download_rate_limit" in payload["progress_summary"]["site_policy_config_blockers"]
+    assert "No current-state job or summary evidence has live_validation_completion_audit.report_allowed=true." in payload["progress_summary"]["live_validation_blockers"]
     assert payload["progress_summary"]["safety"]["read_only"] is True
     assert payload["progress_summary"]["safety"]["rules_gate_must_be_ready"] is True
     brief_payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM", "brief": True})
