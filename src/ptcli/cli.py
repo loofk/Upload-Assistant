@@ -183,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     deployment_check.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
     deployment_check.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
     deployment_check.add_argument("--print-mkdir-commands", action="store_true", help="Print only seedbox_bootstrap_handoff.mkdir_commands, one per line, when missing directories are reported.")
+    deployment_check.add_argument("--print-bootstrap-commands", action="store_true", help="Print ordered seedbox bootstrap commands from seedbox_bootstrap_handoff.bootstrap_commands.")
     deployment_check.add_argument("--print-qbit-probe-command", action="store_true", help="Print only the qBittorrent inspect command suggested by seedbox_qbit_handoff.probe.")
     deployment_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
@@ -12436,6 +12437,24 @@ def _deployment_check_print_mkdir_commands(payload: dict[str, Any]) -> int:
     return 0
 
 
+def _deployment_check_print_bootstrap_commands(payload: dict[str, Any]) -> int:
+    bootstrap = payload.get("seedbox_bootstrap_handoff") if isinstance(payload.get("seedbox_bootstrap_handoff"), dict) else {}
+    commands = bootstrap.get("bootstrap_commands") if isinstance(bootstrap.get("bootstrap_commands"), list) else []
+    printable = []
+    for item in commands:
+        if isinstance(item, dict):
+            command = str(item.get("command") or "").strip()
+            if command:
+                printable.append(command)
+        elif str(item).strip():
+            printable.append(str(item).strip())
+    if not printable:
+        return 1
+    for command in printable:
+        print(command)
+    return 0
+
+
 def _deployment_check_print_qbit_probe_command(payload: dict[str, Any]) -> int:
     handoff = payload.get("seedbox_qbit_handoff") if isinstance(payload.get("seedbox_qbit_handoff"), dict) else {}
     probe = handoff.get("probe") if isinstance(handoff.get("probe"), dict) else {}
@@ -12634,6 +12653,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = _with_captured_stdout(lambda: deployment_check_cli_payload(args), json_output)
             if args.print_mkdir_commands:
                 return _deployment_check_print_mkdir_commands(payload)
+            if args.print_bootstrap_commands:
+                return _deployment_check_print_bootstrap_commands(payload)
             if args.print_qbit_probe_command:
                 return _deployment_check_print_qbit_probe_command(payload)
             _print_payload(payload, json_output)

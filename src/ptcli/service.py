@@ -9,6 +9,7 @@ import json
 import os
 import pprint
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -38784,6 +38785,7 @@ def _deployment_seedbox_bootstrap_handoff(
     compose_file = str(paths.get("compose_file") or docker_compose.get("path") or "docker-compose.yml")
     ready = bool(agent_summary.get("ready_for_ai") and docker_compose.get("ptcli_api_service_ready"))
     next_step = _deployment_seedbox_bootstrap_next_step(ready, mkdir_paths, env_template, docker_compose, blockers)
+    bootstrap_commands = _deployment_seedbox_bootstrap_commands(mkdir_paths, env_template, compose_file, qbit)
     return {
         "kind": "ptcli.seedbox_bootstrap_handoff",
         "ready": ready,
@@ -38833,6 +38835,8 @@ def _deployment_seedbox_bootstrap_handoff(
             {"method": "GET", "endpoint": "/v1/deployment/check", "continue_when": "ready=true or only non-blocking warnings remain"},
             {"method": "POST", "endpoint": "/v1/readiness/bundle", "continue_when": "live_validation_repair_plan.ready=true before doctor/live jobs"},
         ],
+        "bootstrap_commands": bootstrap_commands,
+        "print_bootstrap_commands": "python3 ptcli.py deployment-check --print-bootstrap-commands",
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
@@ -38843,6 +38847,61 @@ def _deployment_seedbox_bootstrap_handoff(
         "warnings": warnings,
         "next_actions": _deployment_seedbox_bootstrap_next_actions(ready, mkdir_paths, blockers, warnings),
     }
+
+
+def _deployment_seedbox_bootstrap_commands(mkdir_paths: list[str], env_template: dict[str, Any], compose_file: str, qbit: dict[str, Any]) -> list[dict[str, Any]]:
+    commands: list[dict[str, Any]] = [
+        {
+            "name": f"mkdir:{path}",
+            "command": f"mkdir -p {path}",
+            "safe_to_run": True,
+            "reason": "create_missing_seedbox_mount_path",
+        }
+        for path in mkdir_paths
+    ]
+    if env_template.get("env_present") is not True:
+        commands.append(
+            {
+                "name": "copy_env_template",
+                "command": str(env_template.get("copy_command") or "cp .env.ptcli.example .env"),
+                "safe_to_run": True,
+                "reason": "create_local_env_file_from_template",
+            }
+        )
+    commands.append(
+        {
+            "name": "start_ptcli_api",
+            "command": f"docker compose -f {compose_file} up -d --build ptcli-api",
+            "safe_to_run": True,
+            "reason": "start_local_ai_callable_ptcli_service",
+        }
+    )
+    commands.append(
+        {
+            "name": "verify_contracts",
+            "command": "curl -fsS http://127.0.0.1:8080/health && curl -fsS http://127.0.0.1:8080/openapi.json >/dev/null && curl -fsS http://127.0.0.1:8080/v1/tools >/dev/null",
+            "safe_to_run": True,
+            "reason": "verify_health_openapi_and_tools",
+        }
+    )
+    client = str(qbit.get("client") or "default").strip() or "default"
+    commands.append(
+        {
+            "name": "probe_qbittorrent_readonly",
+            "command": shlex.join(["python3", "ptcli.py", "inspect", "--client", client, "--limit", "20", "--json"]),
+            "safe_to_run": True,
+            "reason": "read_only_qbittorrent_connectivity_probe",
+        }
+    )
+    commands.append(
+        {
+            "name": "rerun_deployment_check",
+            "command": "python3 ptcli.py deployment-check --json",
+            "safe_to_run": True,
+            "reason": "confirm_seedbox_bootstrap_state_after_repairs",
+        }
+    )
+    return commands
 
 
 def _deployment_seedbox_bootstrap_next_step(
@@ -40904,6 +40963,8 @@ def _goal_progress_environment_repair_handoff(deployment: dict[str, Any]) -> dic
             "configured": daily_candidates.get("configured") is True,
             "schedule_ready": (daily_candidates.get("schedule_handoff") or {}).get("ready") is True if isinstance(daily_candidates.get("schedule_handoff"), dict) else False,
         },
+        "bootstrap_commands": bootstrap.get("bootstrap_commands") if isinstance(bootstrap.get("bootstrap_commands"), list) else [],
+        "print_bootstrap_commands": bootstrap.get("print_bootstrap_commands"),
         "verification_sequence": verification_sequence,
         "recommended_call": recommended_call if isinstance(recommended_call, dict) else {},
         "recommended_tool": (recommended_call or {}).get("tool") if isinstance(recommended_call, dict) else None,
@@ -44713,7 +44774,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_candidate_trigger_handoff_fields": ["ready", "status", "action", "read_only", "configured", "configured_schedule_count", "target_count", "publish_payload_field", "compose", "api", "env", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "daily_candidate_delivery_handoff_fields": ["ready", "status", "action", "read_only", "publish_payload_field", "notification_payload_field", "publish_payload_sources", "digest_evidence_refs", "completion_evidence_refs", "evidence_contract", "channels", "delivery_plan", "delivery_final_report", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "daily_candidate_config_final_report_fields": ["ready", "report_allowed", "verdict", "action", "configured", "configured_schedule_count", "target_count", "env", "compose", "api", "smoke_checks", "read_order", "complete_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
-                "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+                "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+                "seedbox_bootstrap_command_fields": ["name", "command", "safe_to_run", "reason"],
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "seedbox_qbit_handoff_fields": ["ready", "status", "read_only", "configured", "client", "torrent_client", "url", "port", "connectivity_checked", "host_gateway_required", "compose", "config_contract", "probe", "policy_limits", "manual_retorrent_preflight", "next_step", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "seedbox_deployment_final_decision_fields": ["ready", "status", "action", "verdict", "deployment_ready", "bootstrap_ready", "qbit_ready", "live_trial_ready", "api", "docker", "mounts", "qbit", "live_trial", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_order", "complete_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
@@ -44746,7 +44808,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "critical_path_focus_fields": ["phase_id", "phase_name", "recommended_step", "blockers"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "deployment_evidence_fields": ["ready", "docker_compose_api_ready", "daily_schedule_ready", "qbit_configured", "connectivity_checked", "environment_repair_handoff", "seedbox_bootstrap_handoff", "seedbox_deployment_final_decision", "deployment_final_report"],
-                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "configured_paths", "missing_mounts", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_sequence", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+                "environment_repair_handoff_fields": ["ready", "status", "action", "mkdir_commands", "bootstrap_commands", "print_bootstrap_commands", "configured_paths", "missing_mounts", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_sequence", "recommended_call", "recommended_tool", "recommended_endpoint", "safe_to_call_now", "requires_user_review", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "environment_repair_verification_step_fields": ["index", "tool", "method", "endpoint", "request", "continue_when", "safe_to_call_now", "read_only"],
                 "critical_path_compact_handoff_fields": ["ready", "status", "phase_id", "phase_name", "action", "current_step", "steps", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "read_order", "complete_when", "stop_when", "safety", "blocker_owner_order", "blockers", "next_actions"],
                 "critical_path_compact_step_fields": ["name", "status", "tool", "endpoint", "method", "recommended_call", "requires_user_review", "safe_to_call_now", "continue_when", "stop_when"],

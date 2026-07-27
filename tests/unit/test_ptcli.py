@@ -22192,6 +22192,29 @@ def test_deployment_check_cli_prints_mkdir_commands(monkeypatch, capsys) -> None
     assert capsys.readouterr().out == "mkdir -p /jobs\nmkdir -p /downloads\n"
 
 
+def test_deployment_check_cli_prints_bootstrap_commands(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        ptcli_service,
+        "deployment_check_payload",
+        lambda _request: {
+            "kind": "ptcli.deployment_check",
+            "ready": False,
+            "status": "blocked",
+            "seedbox_bootstrap_handoff": {
+                "bootstrap_commands": [
+                    {"name": "mkdir:jobs", "command": "mkdir -p /jobs"},
+                    {"name": "start_ptcli_api", "command": "docker compose up -d --build ptcli-api"},
+                ]
+            },
+        },
+    )
+
+    code = main(["deployment-check", "--print-bootstrap-commands"])
+
+    assert code == 0
+    assert capsys.readouterr().out == "mkdir -p /jobs\ndocker compose up -d --build ptcli-api\n"
+
+
 def test_deployment_check_cli_print_mkdir_commands_fails_when_none(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         ptcli_service,
@@ -38346,10 +38369,13 @@ services:
     )
     monkeypatch.setenv("TMPDIR", str(tmp_dir))
 
-    payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "brief": True})
+    brief_payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "brief": True})
+    payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir)})
 
-    handoff = payload["environment_repair_handoff"]
-    assert payload["environment_blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
+    assert brief_payload["environment"]["blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
+    assert brief_payload["environment"]["mkdir_commands"] == [f"mkdir -p {job_dir}", f"mkdir -p {downloads_dir}"]
+    handoff = payload["progress_summary"]["environment_repair_handoff"]
+    assert payload["progress_summary"]["environment_blockers"] == [f"job_dir directory is missing: {job_dir}", f"downloads_path directory is missing: {downloads_dir}"]
     assert handoff["kind"] == "ptcli.goal_environment_repair_handoff"
     assert handoff["status"] == "blocked"
     assert handoff["action"] == "create_missing_dirs"
@@ -38364,6 +38390,10 @@ services:
     assert handoff["qbit"]["configured"] is True
     assert handoff["qbit"]["host_hint"] == "http://host.docker.internal"
     assert handoff["daily_candidates"]["configured"] is False
+    assert [item["name"] for item in handoff["bootstrap_commands"][:2]] == [f"mkdir:{job_dir}", f"mkdir:{downloads_dir}"]
+    assert handoff["bootstrap_commands"][2]["name"] == "copy_env_template"
+    assert handoff["bootstrap_commands"][3]["command"] == f"docker compose -f {tmp_path / 'docker-compose.yml'} up -d --build ptcli-api"
+    assert handoff["print_bootstrap_commands"] == "python3 ptcli.py deployment-check --print-bootstrap-commands"
     assert [step["endpoint"] for step in handoff["verification_sequence"][:4]] == ["/health", "/openapi.json", "/v1/tools", "/.well-known/ptcli-agent.json"]
     assert handoff["verification_sequence"][-1]["endpoint"] == "/v1/readiness/bundle"
     assert handoff["verification_sequence"][-1]["safe_to_call_now"] is True
