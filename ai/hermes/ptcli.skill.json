@@ -51727,6 +51727,7 @@
           "ready",
           "status",
           "action",
+          "next_stage",
           "configured",
           "summary_file",
           "target_count",
@@ -51734,6 +51735,7 @@
           "safe_to_submit_count",
           "shortfall_count",
           "current_step",
+          "workflow_steps",
           "delivery_delivered",
           "approval_required",
           "can_submit_after_approval",
@@ -51748,12 +51750,27 @@
           "blockers",
           "next_actions"
         ],
+        "daily_candidate_compact_workflow_step_fields": [
+          "name",
+          "ready",
+          "status",
+          "tool",
+          "endpoint",
+          "method",
+          "recommended_call",
+          "requires_user_review",
+          "safe_to_call_now",
+          "continue_when",
+          "stop_when"
+        ],
         "daily_candidate_compact_handoff_safety_fields": [
           "read_only",
           "uploads",
           "submits_candidates",
           "submit_requires_user_approval",
-          "confirm_upload_required_for_submit"
+          "confirm_upload_required_for_submit",
+          "never_auto_submit_without_user_approval",
+          "site_policy_gate_required"
         ],
         "daily_candidate_evidence_fields": [
           "configured",

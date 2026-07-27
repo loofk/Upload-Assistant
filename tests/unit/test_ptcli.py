@@ -22460,8 +22460,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "automatic_loop" in tool_by_name["daily_candidate_refill_job"]["response_contract"]["daily_candidate_refill_final_report_fields"]
     assert "daily_candidate_handoff" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "daily_candidate_compact_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "workflow_steps" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "next_stage" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_fields"]
+    assert "daily_candidate_compact_workflow_step_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "requires_user_review" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_workflow_step_fields"]
     assert "daily_candidate_compact_handoff_safety_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "confirm_upload_required_for_submit" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_safety_fields"]
+    assert "never_auto_submit_without_user_approval" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_safety_fields"]
+    assert "site_policy_gate_required" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_compact_handoff_safety_fields"]
     assert "daily_candidate_refill_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_refill_final_report_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert tool_by_name["daily_candidate_delivery"]["path"] == "/v1/candidates/daily/deliver"
@@ -27226,6 +27232,25 @@ services:
     assert payload["progress_summary"]["daily_candidate_handoff"]["shortfall_count"] == 10
     assert payload["progress_summary"]["daily_candidate_handoff"]["recommended_call"]["tool"] == "daily_candidates_schedule"
     assert payload["progress_summary"]["daily_candidate_handoff"]["safety"]["submit_requires_user_approval"] is True
+    assert payload["progress_summary"]["daily_candidate_handoff"]["safety"]["never_auto_submit_without_user_approval"] is True
+    assert payload["progress_summary"]["daily_candidate_handoff"]["safety"]["site_policy_gate_required"] is True
+    assert payload["progress_summary"]["daily_candidate_handoff"]["next_stage"] == "configure_schedule"
+    compact_steps = payload["progress_summary"]["daily_candidate_handoff"]["workflow_steps"]
+    assert [step["name"] for step in compact_steps] == [
+        "configure_schedule",
+        "create_schedule_jobs",
+        "refill_until_target",
+        "deliver_digest",
+        "ask_user_approval",
+        "submit_approved_candidate",
+        "poll_or_resume_submitted_jobs",
+        "report_daily_result",
+    ]
+    assert compact_steps[0]["tool"] == "daily_candidates_schedule"
+    assert compact_steps[1]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
+    assert compact_steps[4]["requires_user_review"] is True
+    assert compact_steps[5]["tool"] == "submit_daily_candidate_job"
+    assert compact_steps[-1]["tool"] == "get_job_summary"
     assert payload["progress_summary"]["site_policy_repair_handoff"]["kind"] == "ptcli.goal_site_policy_repair_handoff"
     assert payload["progress_summary"]["site_policy_repair_handoff"]["status"] == "waiting_for_manual_rule_review"
     assert payload["progress_summary"]["site_policy_repair_handoff"]["action"] == "collect_manual_rule_review"
@@ -27431,6 +27456,11 @@ services:
     assert daily_brief["delivery_delivered"] is True
     assert daily_brief["recommended_tool"] == "daily_candidate_refill_job"
     assert daily_brief["recommended_call"]["endpoint"] == "/v1/jobs/candidates/daily/refill"
+    assert daily_brief["next_stage"] == "refill_until_target"
+    assert daily_brief["workflow_steps"][2]["name"] == "refill_until_target"
+    assert daily_brief["workflow_steps"][2]["tool"] == "daily_candidate_refill_job"
+    assert daily_brief["workflow_steps"][3]["tool"] == "daily_candidate_delivery"
+    assert daily_brief["workflow_steps"][4]["safe_to_call_now"] is False
 
     assert daily_evidence["next_step"]["reason"] == "daily_scheduler_final_report.refill_shortfall"
     run_loop_summary = tmp_path / "ptcli-daily-run-and-deliver-summary.json"
@@ -27918,6 +27948,14 @@ services:
     assert daily["next_step"]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
     assert daily["next_step"]["request"]["schedules"][0]["job_request"]["source_tracker"] == "U2"
     assert daily["next_step"]["request"]["schedules"][0]["job_request"]["target_trackers"] == "MTEAM"
+    daily_handoff = payload["progress_summary"]["daily_candidate_handoff"]
+    assert daily_handoff["configured"] is True
+    assert daily_handoff["next_stage"] == "refill_until_target"
+    assert daily_handoff["workflow_steps"][0]["status"] == "complete"
+    assert daily_handoff["workflow_steps"][1]["name"] == "create_schedule_jobs"
+    assert daily_handoff["workflow_steps"][1]["tool"] == "daily_candidates_schedule_job"
+    assert daily_handoff["workflow_steps"][2]["tool"] == "daily_candidates_schedule_job"
+    assert daily_handoff["workflow_steps"][5]["requires_user_review"] is True
     assert preflight["ready"] is True
     assert preflight["live_execution_package"]["ready"] is True
     assert preflight["live_validation_repair_plan"]["ready"] is True
