@@ -216,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     goal_progress.add_argument("--live-job-id", help="Alias for --job-id.")
     goal_progress.add_argument("--summary-file", help="Optional ptcli summary JSON used as live validation evidence.")
     goal_progress.add_argument("--live-summary-file", help="Alias for --summary-file.")
+    goal_progress.add_argument("--brief", action="store_true", help="Print a compact AI-readable progress summary instead of the full evidence tree.")
     goal_progress.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
@@ -12389,6 +12390,7 @@ def goal_progress_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
         "confirm_upload": args.confirm_upload,
         "job_id": args.job_id or args.live_job_id,
         "summary_file": args.summary_file or args.live_summary_file,
+        "brief": args.brief,
     }
     return goal_progress_payload({key: value for key, value in request.items() if value not in (None, "")})
 

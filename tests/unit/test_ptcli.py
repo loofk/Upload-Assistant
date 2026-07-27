@@ -23379,6 +23379,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["goal_progress"]["method"] == "GET"
     assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "goal_distance_report" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "progress_summary" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "brief" in tool_by_name["goal_progress"]["input_schema"]["properties"]
+    assert "view" in tool_by_name["goal_progress"]["input_schema"]["properties"]
+    assert "progress_summary_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["progress_summary_fields"]
     assert "blocker_breakdown" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "remaining_percent" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
     assert "recommended_call" in tool_by_name["goal_progress"]["response_contract"]["goal_distance_report_fields"]
@@ -23815,6 +23820,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     goal_progress_schema = openapi["paths"]["/v1/goal/progress"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_estimate" in goal_progress_schema["properties"]
     assert "goal_distance_report" in goal_progress_schema["properties"]
+    assert "progress_summary" in goal_progress_schema["properties"]
+    goal_progress_params = {param["name"] for param in openapi["paths"]["/v1/goal/progress"]["get"]["parameters"]}
+    assert {"brief", "view"} <= goal_progress_params
     assert "blocker_breakdown" in goal_progress_schema["properties"]
     assert "critical_path_remaining" in goal_progress_schema["properties"]
     assert "critical_path_plan" in goal_progress_schema["properties"]
@@ -26728,6 +26736,18 @@ services:
     payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"})
 
     assert payload["kind"] == "ptcli.goal_progress"
+    assert payload["progress_summary"]["kind"] == "ptcli.goal_progress_brief"
+    assert payload["progress_summary"]["estimated_percent"] == payload["completion_estimate"]["estimated_percent"]
+    assert payload["progress_summary"]["remaining_percent"] == payload["goal_distance_report"]["remaining_percent"]
+    assert payload["progress_summary"]["recommended_tool"] == "site_policy_rule_review"
+    assert payload["progress_summary"]["recommended_call"]["tool"] == "site_policy_rule_review"
+    assert payload["progress_summary"]["focus_now"]["recommended_step"]["tool"] == "site_policy_rule_review"
+    assert "after_rule_review" not in payload["progress_summary"]["focus_now"]["recommended_step"]
+    assert payload["progress_summary"]["safety"]["read_only"] is True
+    assert payload["progress_summary"]["safety"]["rules_gate_must_be_ready"] is True
+    brief_payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM", "brief": True})
+    assert brief_payload == payload["progress_summary"]
+    assert "evidence" not in brief_payload
     assert payload["status"] == "blocked"
     assert payload["completion_estimate"]["estimated_percent"] > 50
     assert payload["completion_estimate"]["critical_path_ready"] is False

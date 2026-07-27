@@ -38724,7 +38724,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
     critical_path_plan = _goal_progress_critical_path_plan(progress_items, estimate, next_step, blockers)
     goal_distance_report = _goal_progress_distance_report(progress_items, estimate, critical_path_plan, next_step, blockers)
-    return {
+    payload = {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
         "ok": estimate["critical_path_ready"],
@@ -38832,6 +38832,113 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
         "read_order": ["goal_distance_report", "completion_estimate", "critical_path_plan", "critical_path_remaining", "capabilities", "evidence.site_policies", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
         "next_actions": _goal_progress_next_actions(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight),
     }
+    payload["progress_summary"] = _goal_progress_brief_summary(payload)
+    if _truthy(request.get("brief")) or str(request.get("view") or "").strip().lower() in {"brief", "summary", "compact"}:
+        return payload["progress_summary"]
+    return payload
+
+
+def _goal_progress_brief_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the short-path progress shape intended for agent routing."""
+    estimate = payload.get("completion_estimate") if isinstance(payload.get("completion_estimate"), dict) else {}
+    distance = payload.get("goal_distance_report") if isinstance(payload.get("goal_distance_report"), dict) else {}
+    critical_path = payload.get("critical_path_plan") if isinstance(payload.get("critical_path_plan"), dict) else {}
+    focus_now = critical_path.get("focus_now") if isinstance(critical_path.get("focus_now"), dict) else {}
+    current_phase = critical_path.get("current_phase") if isinstance(critical_path.get("current_phase"), dict) else {}
+    blocker_breakdown = payload.get("blocker_breakdown") if isinstance(payload.get("blocker_breakdown"), dict) else {}
+    first_group = None
+    groups = blocker_breakdown.get("groups") if isinstance(blocker_breakdown.get("groups"), list) else []
+    if groups and isinstance(groups[0], dict):
+        first_group = {
+            "owner": groups[0].get("owner"),
+            "count": groups[0].get("count"),
+            "action": groups[0].get("action"),
+            "recommended_tool": groups[0].get("recommended_tool"),
+            "safe_to_auto_fix": groups[0].get("safe_to_auto_fix"),
+            "blockers": _string_list(groups[0].get("blockers"))[:5],
+        }
+    next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
+    recommended_call = _goal_progress_compact_call(distance.get("recommended_call") if isinstance(distance.get("recommended_call"), dict) else next_step)
+    blockers = _string_list(payload.get("blockers"))
+    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+    capability_status = {str(item.get("id")): item.get("status") for item in capabilities if isinstance(item, dict) and item.get("id")}
+    return {
+        "kind": "ptcli.goal_progress_brief",
+        "status": payload.get("status"),
+        "ok": payload.get("ok"),
+        "objective": payload.get("objective"),
+        "estimated_percent": estimate.get("estimated_percent"),
+        "remaining_percent": distance.get("remaining_percent"),
+        "plain_answer": distance.get("plain_answer"),
+        "current_phase": {
+            "id": current_phase.get("id") or distance.get("current_phase_id"),
+            "name": current_phase.get("name") or distance.get("current_phase_name"),
+            "status": current_phase.get("status") or distance.get("current_phase_status"),
+        },
+        "focus_now": {
+            "phase_id": focus_now.get("phase_id"),
+            "phase_name": focus_now.get("phase_name"),
+            "recommended_step": _goal_progress_compact_call(focus_now.get("recommended_step") if isinstance(focus_now.get("recommended_step"), dict) else {}),
+        },
+        "first_blocker": blockers[0] if blockers else None,
+        "first_blocker_group": first_group,
+        "blocker_owners": list((blocker_breakdown.get("by_owner") or {}).keys()) if isinstance(blocker_breakdown.get("by_owner"), dict) else [],
+        "blocker_count": len(blockers),
+        "remaining_capability_ids": distance.get("remaining_capability_ids") if isinstance(distance.get("remaining_capability_ids"), list) else [],
+        "capability_status": capability_status,
+        "next_work": _goal_progress_compact_next_work(distance.get("next_work") if isinstance(distance.get("next_work"), dict) else {}),
+        "recommended_call": recommended_call or None,
+        "recommended_tool": (recommended_call or {}).get("tool"),
+        "recommended_endpoint": (recommended_call or {}).get("endpoint"),
+        "recommended_method": (recommended_call or {}).get("method"),
+        "source_context": payload.get("source_context"),
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "live_upload": False,
+            "live_upload_requires_confirm_upload": True,
+            "rules_gate_must_be_ready": True,
+        },
+        "read_full_when": [
+            "Need detailed evidence, config patches, or live validation runbooks.",
+            "Any blocker or recommended_call is ambiguous from this brief summary.",
+        ],
+        "full_read_order": payload.get("read_order"),
+        "blockers": blockers[:12],
+        "next_actions": _string_list(payload.get("next_actions"))[:6],
+    }
+
+
+def _goal_progress_compact_call(call: dict[str, Any]) -> dict[str, Any] | None:
+    if not call:
+        return None
+    compact = {
+        "tool": call.get("tool"),
+        "endpoint": call.get("endpoint"),
+        "method": call.get("method"),
+        "reason": call.get("reason"),
+        "safe_to_call_now": call.get("safe_to_call_now"),
+        "request": call.get("request") if isinstance(call.get("request"), dict) else None,
+    }
+    return {key: value for key, value in compact.items() if value not in (None, "", [])}
+
+
+def _goal_progress_compact_next_work(next_work: dict[str, Any]) -> dict[str, Any] | None:
+    if not next_work:
+        return None
+    compact = {
+        "action": next_work.get("action"),
+        "primary_capability_id": next_work.get("primary_capability_id"),
+        "recommended_tool": next_work.get("recommended_tool"),
+        "recommended_endpoint": next_work.get("recommended_endpoint"),
+        "recommended_method": next_work.get("recommended_method"),
+        "recommended_request": next_work.get("recommended_request") if isinstance(next_work.get("recommended_request"), dict) else None,
+        "expected_result": next_work.get("expected_result"),
+        "next_actions": _string_list(next_work.get("next_actions"))[:3],
+    }
+    return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
 
 def _goal_progress_policy_request(request: dict[str, Any]) -> dict[str, Any]:
@@ -42042,7 +42149,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return a no-network progress audit against the final Chinese PT AI-service objective, including completed, partial, unverified, and remaining critical-path capabilities.",
             "input_schema": readiness_bundle_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
+                "required_fields": ["status", "ok", "objective", "completion_estimate", "goal_distance_report", "progress_summary", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "blocker_breakdown", "next_actions"],
+                "brief_mode": {"request": {"brief": True}, "response_kind": "ptcli.goal_progress_brief", "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"},
+                "progress_summary_fields": ["kind", "status", "ok", "objective", "estimated_percent", "remaining_percent", "plain_answer", "current_phase", "focus_now", "first_blocker", "first_blocker_group", "blocker_owners", "blocker_count", "remaining_capability_ids", "capability_status", "next_work", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "source_context", "safety", "read_full_when", "full_read_order", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "goal_distance_report_fields": ["status", "estimated_percent", "remaining_percent", "plain_answer", "confidence", "current_phase_id", "current_phase_name", "current_phase_status", "completed_capability_count", "remaining_capability_count", "completed_capability_ids", "remaining_capability_ids", "critical_remaining_capabilities", "next_work", "recommended_call", "completion_gate", "blocker_breakdown", "read_order", "blockers", "next_actions"],
                 "goal_blocker_breakdown_fields": ["total_count", "owner_count", "first_owner", "by_owner", "groups", "read_order"],
@@ -42775,6 +42884,8 @@ def _readiness_bundle_tool_request_schema() -> dict[str, Any]:
         "downloads_path": {"type": "string"},
         "compose_file": {"type": "string"},
         "max_concurrent_jobs": {"type": "integer", "default": DEFAULT_MAX_CONCURRENT_JOBS},
+        "brief": {"type": "boolean", "description": "Return ptcli.goal_progress_brief instead of the full goal evidence tree."},
+        "view": {"type": "string", "enum": ["full", "brief", "summary", "compact"], "description": "Optional response view for goal_progress; brief/summary/compact returns the compact agent-routing shape."},
     }
     return {
         "type": "object",
@@ -45173,6 +45284,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "objective": {"type": "string"},
             "completion_estimate": {"type": "object"},
             "goal_distance_report": {"type": "object"},
+            "progress_summary": {"type": "object"},
             "capabilities": {"type": "array", "items": {"type": "object"}},
             "critical_path_remaining": {"type": "array", "items": {"type": "object"}},
             "critical_path_plan": {"type": "object"},
@@ -45347,6 +45459,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "base_dir", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "brief", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                        {"name": "view", "in": "query", "required": False, "schema": {"type": "string", "enum": ["full", "brief", "summary", "compact"]}},
                     ],
                     "responses": {"200": {"description": "Current progress audit for the final ptcli AI service goal.", "content": {"application/json": {"schema": goal_progress_response_schema}}}},
                 },

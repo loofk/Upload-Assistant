@@ -1097,6 +1097,20 @@
           "max_concurrent_jobs": {
             "type": "integer",
             "default": 1
+          },
+          "brief": {
+            "type": "boolean",
+            "description": "Return ptcli.goal_progress_brief instead of the full goal evidence tree."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "brief",
+              "summary",
+              "compact"
+            ],
+            "description": "Optional response view for goal_progress; brief/summary/compact returns the compact agent-routing shape."
           }
         }
       },
@@ -51379,6 +51393,20 @@
           "max_concurrent_jobs": {
             "type": "integer",
             "default": 1
+          },
+          "brief": {
+            "type": "boolean",
+            "description": "Return ptcli.goal_progress_brief instead of the full goal evidence tree."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "brief",
+              "summary",
+              "compact"
+            ],
+            "description": "Optional response view for goal_progress; brief/summary/compact returns the compact agent-routing shape."
           }
         }
       },
@@ -51389,6 +51417,7 @@
           "objective",
           "completion_estimate",
           "goal_distance_report",
+          "progress_summary",
           "capabilities",
           "critical_path_remaining",
           "critical_path_plan",
@@ -51396,6 +51425,41 @@
           "next_step",
           "blockers",
           "blocker_breakdown",
+          "next_actions"
+        ],
+        "brief_mode": {
+          "request": {
+            "brief": true
+          },
+          "response_kind": "ptcli.goal_progress_brief",
+          "use_for": "agent routing, status checks, and next-work selection before reading the full evidence tree"
+        },
+        "progress_summary_fields": [
+          "kind",
+          "status",
+          "ok",
+          "objective",
+          "estimated_percent",
+          "remaining_percent",
+          "plain_answer",
+          "current_phase",
+          "focus_now",
+          "first_blocker",
+          "first_blocker_group",
+          "blocker_owners",
+          "blocker_count",
+          "remaining_capability_ids",
+          "capability_status",
+          "next_work",
+          "recommended_call",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "source_context",
+          "safety",
+          "read_full_when",
+          "full_read_order",
+          "blockers",
           "next_actions"
         ],
         "estimate_fields": [
@@ -52361,6 +52425,20 @@
           "max_concurrent_jobs": {
             "type": "integer",
             "default": 1
+          },
+          "brief": {
+            "type": "boolean",
+            "description": "Return ptcli.goal_progress_brief instead of the full goal evidence tree."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "brief",
+              "summary",
+              "compact"
+            ],
+            "description": "Optional response view for goal_progress; brief/summary/compact returns the compact agent-routing shape."
           }
         }
       },
