@@ -47,6 +47,7 @@ python3 ptcli.py rules --trackers MTEAM,TJUPT --json
 python3 ptcli.py site-policy-rule-review --from U2 --to MTEAM --json
 python3 ptcli.py site-policy-rule-review --source-url "https://u2.dmhy.org/details.php?id=60635" --to MTEAM --rules-reviewed --reviewer "<reviewer>" --reviewed-at "<YYYY-MM-DD>" --json
 python3 ptcli.py site-policy-rule-review --source-url "https://u2.dmhy.org/details.php?id=60635" --to MTEAM --rules-reviewed --reviewer "<reviewer>" --reviewed-at "<YYYY-MM-DD>" --print-python-update-snippet
+python3 ptcli.py site-policy-verify --from U2 --to MTEAM --accept-rules --expected-fingerprint U2="<sha256>" --expected-fingerprint MTEAM="<sha256>" --json
 python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 python3 ptcli.py source-info --tracker U2 --source-id 60635 --json
 python3 ptcli.py source-download --tracker CHD --source-id 12345 --to MTEAM --output-dir ./tmp/source --accept-rules --json

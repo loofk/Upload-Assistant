@@ -286,6 +286,25 @@ def build_parser() -> argparse.ArgumentParser:
     site_policy_rule_review.add_argument("--print-json-patch", action="store_true", help="Print only config_apply_final_report.copyable_config.json_patch when ready.")
     site_policy_rule_review.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    site_policy_verify = subparsers.add_parser(
+        "site-policy-verify",
+        help="Verify expected rule-review fingerprints against current PTCLI.SITE_POLICIES.",
+        description=(
+            "Read-only verification for the patch produced by site-policy-rule-review. "
+            "It checks current config.py through the same policy gate used by /v1/site-policies/verify and never contacts trackers or edits files."
+        ),
+    )
+    site_policy_verify.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    site_policy_verify.add_argument("--trackers", help="Optional comma-separated tracker codes.")
+    site_policy_verify.add_argument("--from", dest="source_tracker", help="Source tracker code for role-aware policy coverage.")
+    site_policy_verify.add_argument("--source-tracker", dest="source_tracker_alias", help="Alias for --from.")
+    site_policy_verify.add_argument("--to", dest="target_trackers", help="Target tracker codes, comma-separated, for role-aware policy coverage.")
+    site_policy_verify.add_argument("--target", help="Alias for --to.")
+    site_policy_verify.add_argument("--accept-rules", action="store_true", help="Acknowledge that involved tracker rules have been manually reviewed.")
+    site_policy_verify.add_argument("--expected-fingerprint", action="append", help="Expected TRACKER=FINGERPRINT entry. Can be repeated.")
+    site_policy_verify.add_argument("--expected-fingerprints-json", help='Expected fingerprints JSON object, e.g. {"U2":"...","MTEAM":"..."}.')
+    site_policy_verify.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rule_check = subparsers.add_parser("rule-check", help="Run executable rule gates for a source/target workflow.")
     rule_check.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
     rule_check.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
@@ -12481,6 +12500,23 @@ def _site_policy_rule_review_print_patch(payload: dict[str, Any], field: str) ->
     return 0
 
 
+def site_policy_verify_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import site_policy_verify_payload
+
+    source_tracker = args.source_tracker or args.source_tracker_alias
+    target = args.target or args.target_trackers
+    request = {
+        "config": args.config,
+        "trackers": args.trackers,
+        "source_tracker": source_tracker,
+        "target": target,
+        "accept_rules": args.accept_rules,
+        "expected_fingerprint": args.expected_fingerprint,
+        "expected_fingerprints_json": args.expected_fingerprints_json,
+    }
+    return site_policy_verify_payload({key: value for key, value in request.items() if value not in (None, "", [])})
+
+
 def readiness_bundle_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import readiness_bundle_payload
 
@@ -12590,6 +12626,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _site_policy_rule_review_print_patch(payload, "python_update_snippet")
             if args.print_json_patch:
                 return _site_policy_rule_review_print_patch(payload, "json_patch")
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
+
+        if args.command == "site-policy-verify":
+            payload = _with_captured_stdout(lambda: site_policy_verify_cli_payload(args), json_output)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 

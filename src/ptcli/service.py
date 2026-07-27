@@ -991,6 +991,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
+            if path == "/v1/site-policies/verify":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, site_policy_verify_payload(query))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/candidates/daily/schedule":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -1049,6 +1059,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/sites": sites_payload,
                 "/v1/site-policies": site_policies_payload,
                 "/v1/site-policies/rule-review": site_policy_rule_review_payload,
+                "/v1/site-policies/verify": site_policy_verify_payload,
                 "/v1/qbit/inspect": lambda payload: asyncio.run(qbit_inspect_payload(payload)),
                 "/v1/qbit/match": lambda payload: asyncio.run(qbit_match_payload(payload)),
                 "/v1/qbit/export": lambda payload: asyncio.run(qbit_export_payload(payload)),
@@ -6075,6 +6086,128 @@ def site_policy_rule_review_payload(request: dict[str, Any] | None = None) -> di
         "blockers": blockers,
         "next_actions": _site_policy_rule_review_next_actions(ready, blockers),
     }
+
+
+def site_policy_verify_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Verify that expected manual rule-review fingerprints are present in current config."""
+    request = request if isinstance(request, dict) else {}
+    expected_fingerprints = _site_policy_verify_expected_fingerprints(request)
+    policy_request = {
+        "config": request.get("config"),
+        "trackers": request.get("trackers"),
+        "source_tracker": request.get("source_tracker") or request.get("from"),
+        "target": request.get("target") or request.get("to"),
+        "accept_rules": _truthy(request.get("accept_rules") if "accept_rules" in request else True),
+    }
+    policy_payload = site_policies_payload({key: value for key, value in policy_request.items() if value not in (None, "")})
+    matrix = policy_payload.get("policy_matrix") if isinstance(policy_payload.get("policy_matrix"), list) else []
+    actual_fingerprints = _site_policy_verify_actual_fingerprints(matrix)
+    tracker_items = [_site_policy_verify_item(tracker, expected, actual_fingerprints.get(tracker)) for tracker, expected in expected_fingerprints.items()]
+    missing = [item for item in tracker_items if item["status"] == "missing"]
+    mismatches = [item for item in tracker_items if item["status"] == "mismatch"]
+    blockers: list[str] = []
+    if not expected_fingerprints:
+        blockers.append("expected_fingerprints is required; pass --expected-fingerprint TRACKER=SHA256 or expected_fingerprints JSON.")
+    blockers.extend(f"{item['tracker']}: rule_review_fingerprint is missing from current PTCLI.SITE_POLICIES." for item in missing)
+    blockers.extend(f"{item['tracker']}: rule_review_fingerprint does not match expected fingerprint." for item in mismatches)
+    blockers.extend(_string_list(policy_payload.get("blockers")))
+    ready = bool(expected_fingerprints) and not missing and not mismatches and policy_payload.get("ready") is True
+    return {
+        "kind": "ptcli.site_policy_verify",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "mutates_state": False,
+        "mutates_filesystem": False,
+        "contacts_trackers": False,
+        "contacts_qbittorrent": False,
+        "request": {
+            "policy_request": policy_payload.get("request"),
+            "expected_fingerprints": expected_fingerprints,
+        },
+        "expected_fingerprints": expected_fingerprints,
+        "actual_fingerprints": actual_fingerprints,
+        "matches": [item for item in tracker_items if item["status"] == "match"],
+        "missing": missing,
+        "mismatches": mismatches,
+        "items": tracker_items,
+        "policy_ready": policy_payload.get("ready") is True,
+        "policy_status": policy_payload.get("status"),
+        "policy_repair_gate": policy_payload.get("policy_repair_gate"),
+        "policy_config_apply_handoff": policy_payload.get("policy_config_apply_handoff"),
+        "policy_execution_handoff": policy_payload.get("policy_execution_handoff"),
+        "verification_call": {
+            "tool": "site_policy_verify",
+            "endpoint": "/v1/site-policies/verify",
+            "method": "POST",
+            "request": {
+                "config": request.get("config"),
+                "source_tracker": policy_request.get("source_tracker"),
+                "target": policy_request.get("target"),
+                "trackers": policy_request.get("trackers"),
+                "accept_rules": policy_request.get("accept_rules"),
+                "expected_fingerprints": expected_fingerprints,
+            },
+        },
+        "next_step": {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": policy_payload.get("recommended_request"), "reason": "policy_fingerprints_verified"} if ready else policy_payload.get("next_step"),
+        "recommended_tool": "readiness_bundle" if ready else policy_payload.get("recommended_tool") or "site_policies",
+        "recommended_endpoint": "/v1/readiness/bundle" if ready else policy_payload.get("recommended_endpoint") or "/v1/site-policies",
+        "recommended_request": policy_payload.get("recommended_request"),
+        "read_order": ["status", "items", "missing", "mismatches", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "blockers"],
+        "continue_when": "ready=true; then run readiness_bundle before live retorrent automation.",
+        "stop_when": ["expected_fingerprints is empty", "missing or mismatches is non-empty", "policy_ready=false"],
+        "safety": {"read_only": True, "does_not_edit_config": True, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
+        "blockers": blockers,
+        "next_actions": _site_policy_verify_next_actions(ready, missing, mismatches, policy_payload),
+    }
+
+
+def _site_policy_verify_expected_fingerprints(request: dict[str, Any]) -> dict[str, str]:
+    raw = request.get("expected_fingerprints") or request.get("expected_fingerprints_json")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ServiceError(f"expected_fingerprints must be JSON object: {exc}", status=HTTPStatus.BAD_REQUEST) from exc
+    expected: dict[str, str] = {}
+    if isinstance(raw, dict):
+        expected.update({normalize_tracker(str(tracker)): str(fingerprint).strip() for tracker, fingerprint in raw.items() if str(fingerprint).strip()})
+    for entry in _string_list(request.get("expected_fingerprint") or request.get("expected_fingerprint_entries")):
+        if "=" not in entry:
+            raise ServiceError("expected_fingerprint entries must use TRACKER=FINGERPRINT.", status=HTTPStatus.BAD_REQUEST)
+        tracker, fingerprint = entry.split("=", 1)
+        fingerprint = fingerprint.strip()
+        if fingerprint:
+            expected[normalize_tracker(tracker)] = fingerprint
+    return expected
+
+
+def _site_policy_verify_actual_fingerprints(matrix: list[Any]) -> dict[str, str | None]:
+    actual: dict[str, str | None] = {}
+    for item in matrix:
+        if not isinstance(item, dict) or not item.get("tracker"):
+            continue
+        tracker = str(item.get("tracker"))
+        obligations = item.get("rule_obligations") if isinstance(item.get("rule_obligations"), dict) else {}
+        profile = item.get("policy_profile") if isinstance(item.get("policy_profile"), dict) else {}
+        audit = profile.get("config_audit") if isinstance(profile.get("config_audit"), dict) else {}
+        rule_review = audit.get("rule_review") if isinstance(audit.get("rule_review"), dict) else {}
+        fingerprint = obligations.get("rule_review_fingerprint") or rule_review.get("fingerprint")
+        actual[tracker] = str(fingerprint).strip() if fingerprint else None
+    return actual
+
+
+def _site_policy_verify_item(tracker: str, expected: str, actual: str | None) -> dict[str, Any]:
+    status = "match" if actual == expected else "missing" if not actual else "mismatch"
+    return {"tracker": tracker, "expected": expected, "actual": actual, "match": status == "match", "status": status}
+
+
+def _site_policy_verify_next_actions(ready: bool, missing: list[dict[str, Any]], mismatches: list[dict[str, Any]], policy_payload: dict[str, Any]) -> list[str]:
+    if ready:
+        return ["Policy fingerprints and site policy gate are ready; run readiness_bundle before live retorrent automation."]
+    if missing or mismatches:
+        return ["Copy the rule_review merged_config_patch into PTCLI.SITE_POLICIES, then rerun site_policy_verify with the same expected_fingerprints."]
+    return _string_list(policy_payload.get("next_actions")) or ["Inspect policy_repair_gate and policy_config_apply_handoff, then repair PTCLI.SITE_POLICIES before live automation."]
 
 
 def _site_policy_rule_review_context(request: dict[str, Any]) -> dict[str, Any]:
@@ -41633,6 +41766,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     target_upload_request_schema = _target_upload_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     site_policy_rule_review_request_schema = _site_policy_rule_review_tool_request_schema()
+    site_policy_verify_request_schema = _site_policy_verify_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -42327,6 +42461,21 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "workflow_hints": {"after": "policy_repair_gate.action=review_rules", "copy_to": "PTCLI.SITE_POLICIES", "rerun": "site_policies with accept_rules=true"},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": ["rules_reviewed=true", "reviewer", "reviewed_at"], "does_not_contact_trackers": True, "does_not_edit_config": True},
         },
+        {
+            "name": "site_policy_verify",
+            "method": "POST",
+            "path": "/v1/site-policies/verify",
+            "description": "Verify that expected manual rule-review fingerprints are present in current PTCLI.SITE_POLICIES and that the site policy gate is ready. This does not contact trackers or edit config.",
+            "input_schema": site_policy_verify_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "ready", "request", "expected_fingerprints", "actual_fingerprints", "matches", "missing", "mismatches", "items", "policy_ready", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "verification_call", "next_step", "blockers", "next_actions"],
+                "item_fields": ["tracker", "expected", "actual", "match", "status"],
+                "status_values": ["match", "missing", "mismatch"],
+                "read_order": ["items", "missing", "mismatches", "policy_repair_gate", "policy_config_apply_handoff", "policy_execution_handoff", "blockers"],
+            },
+            "workflow_hints": {"after": "copy site_policy_rule_review.merged_config_patch into PTCLI.SITE_POLICIES", "continue_when": "ready=true", "then": "readiness_bundle"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True, "does_not_edit_config": True},
+        },
     ]
 
 
@@ -42565,6 +42714,19 @@ def _site_policy_rule_review_tool_request_schema() -> dict[str, Any]:
             "rules_urls": {"type": "object", "description": "Optional per-tracker rules URL overrides, e.g. {\"U2\":\"...\",\"MTEAM\":\"...\"}."},
             "notes": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "description": "Optional manual review notes to include in the fingerprint evidence and config patch."},
             "review_notes": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "description": "Alias for notes."},
+        }
+    )
+    return schema
+
+
+def _site_policy_verify_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_site_policy_tool_request_schema()))
+    properties = schema.setdefault("properties", {})
+    properties.update(
+        {
+            "expected_fingerprints": {"type": "object", "description": "Expected per-tracker rule_review_fingerprint values, e.g. {\"U2\":\"...\",\"MTEAM\":\"...\"}."},
+            "expected_fingerprints_json": {"type": "string", "description": "JSON object alias for expected_fingerprints, useful from CLI/query strings."},
+            "expected_fingerprint": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "description": "TRACKER=FINGERPRINT entry or list of entries."},
         }
     )
     return schema
@@ -44814,6 +44976,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
         },
     }
     site_policy_request_schema = _site_policy_tool_request_schema()
+    site_policy_verify_request_schema = _site_policy_verify_tool_request_schema()
     sites_response_schema = {
         "type": "object",
         "properties": {
@@ -45157,6 +45320,38 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "read_order": {"type": "array", "items": {"type": "string"}},
             "continue_when": {"type": "string"},
             "stop_when": {"type": "array", "items": {"type": "string"}},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    site_policy_verify_response_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "request": {"type": "object"},
+            "expected_fingerprints": {"type": "object"},
+            "actual_fingerprints": {"type": "object"},
+            "matches": {"type": "array", "items": {"type": "object"}},
+            "missing": {"type": "array", "items": {"type": "object"}},
+            "mismatches": {"type": "array", "items": {"type": "object"}},
+            "items": {"type": "array", "items": {"type": "object"}},
+            "policy_ready": {"type": "boolean"},
+            "policy_repair_gate": {"type": ["object", "null"]},
+            "policy_config_apply_handoff": {"type": ["object", "null"]},
+            "policy_execution_handoff": {"type": ["object", "null"]},
+            "verification_call": {"type": "object"},
+            "next_step": {"type": ["object", "null"]},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
+            "read_order": {"type": "array", "items": {"type": "string"}},
+            "continue_when": {"type": "string"},
+            "stop_when": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
@@ -45707,6 +45902,28 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": site_policy_rule_review_request_schema}}},
                     "responses": {"200": {"description": "Manual rule-review fingerprint and config patch helper.", "content": {"application/json": {"schema": site_policy_rule_review_response_schema}}}},
+                },
+            },
+            "/v1/site-policies/verify": {
+                "get": {
+                    "operationId": "getPtcliSitePolicyVerify",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "trackers", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "accept_rules", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                        {"name": "expected_fingerprints_json", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "expected_fingerprint", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {"description": "Verify rule-review fingerprints against configured site policies.", "content": {"application/json": {"schema": site_policy_verify_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "postPtcliSitePolicyVerify",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": site_policy_verify_request_schema}}},
+                    "responses": {"200": {"description": "Verify rule-review fingerprints against configured site policies.", "content": {"application/json": {"schema": site_policy_verify_response_schema}}}},
                 },
             },
             "/v1/retorrent/check": {

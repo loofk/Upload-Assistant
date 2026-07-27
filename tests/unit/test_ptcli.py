@@ -21922,6 +21922,79 @@ def test_site_policy_rule_review_cli_print_patch_fails_when_not_ready(monkeypatc
     assert capsys.readouterr().out == ""
 
 
+def test_site_policy_verify_payload_reports_ready(monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: READY_REFERENCE_POLICY_CONFIG)
+
+    payload = ptcli_service.site_policy_verify_payload(
+        {
+            "source_tracker": "U2",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "expected_fingerprints": {"U2": "u2-review", "MTEAM": "mteam-review"},
+        }
+    )
+
+    assert payload["kind"] == "ptcli.site_policy_verify"
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["policy_ready"] is True
+    assert payload["mutates_state"] is False
+    assert payload["contacts_trackers"] is False
+    assert payload["actual_fingerprints"] == {"U2": "u2-review", "MTEAM": "mteam-review"}
+    assert [item["status"] for item in payload["items"]] == ["match", "match"]
+    assert payload["missing"] == []
+    assert payload["mismatches"] == []
+    assert payload["recommended_tool"] == "readiness_bundle"
+    assert payload["verification_call"]["endpoint"] == "/v1/site-policies/verify"
+
+
+def test_site_policy_verify_payload_blocks_missing_and_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: READY_REFERENCE_POLICY_CONFIG)
+
+    payload = ptcli_service.site_policy_verify_payload(
+        {
+            "source_tracker": "U2",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "expected_fingerprints": {"U2": "wrong-review", "TJUPT": "tjupt-review"},
+        }
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert payload["mismatches"][0]["tracker"] == "U2"
+    assert payload["mismatches"][0]["actual"] == "u2-review"
+    assert payload["missing"][0]["tracker"] == "TJUPT"
+    assert "U2: rule_review_fingerprint does not match expected fingerprint." in payload["blockers"]
+    assert "TJUPT: rule_review_fingerprint is missing from current PTCLI.SITE_POLICIES." in payload["blockers"]
+
+
+def test_site_policy_verify_cli_outputs_json(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: READY_REFERENCE_POLICY_CONFIG)
+
+    code = main(
+        [
+            "site-policy-verify",
+            "--from",
+            "U2",
+            "--to",
+            "MTEAM",
+            "--accept-rules",
+            "--expected-fingerprint",
+            "U2=u2-review",
+            "--expected-fingerprints-json",
+            json.dumps({"MTEAM": "mteam-review"}),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["ready"] is True
+    assert payload["expected_fingerprints"] == {"MTEAM": "mteam-review", "U2": "u2-review"}
+    assert payload["request"]["policy_request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
+
+
 def test_deployment_check_cli_outputs_json(monkeypatch, capsys) -> None:
     captured_request = {}
 
@@ -22015,6 +22088,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/deployment/check" in paths
     assert "/v1/site-policies" in paths
     assert "/v1/site-policies/rule-review" in paths
+    assert "/v1/site-policies/verify" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/candidates/daily/scheduler" in paths
@@ -23302,6 +23376,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "continue_when" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_verification_fields"]
     assert "rule_review_fingerprint" in tool_by_name["site_policy_rule_review"]["response_contract"]["review_fields"]
     assert tool_by_name["site_policy_rule_review"]["safety"]["does_not_edit_config"] is True
+    assert tool_by_name["site_policy_verify"]["path"] == "/v1/site-policies/verify"
+    assert "expected_fingerprints" in tool_by_name["site_policy_verify"]["input_schema"]["properties"]
+    assert "actual_fingerprints" in tool_by_name["site_policy_verify"]["response_contract"]["required_fields"]
+    assert "mismatches" in tool_by_name["site_policy_verify"]["response_contract"]["required_fields"]
+    assert "policy_execution_handoff" in tool_by_name["site_policy_verify"]["response_contract"]["required_fields"]
+    assert tool_by_name["site_policy_verify"]["safety"]["does_not_edit_config"] is True
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
@@ -23959,6 +24039,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/summary/check" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/site-policies/rule-review" in openapi["paths"]
+    assert "/v1/site-policies/verify" in openapi["paths"]
+    verify_schema = openapi["paths"]["/v1/site-policies/verify"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "actual_fingerprints" in verify_schema["properties"]
+    assert "mismatches" in verify_schema["properties"]
+    assert "policy_execution_handoff" in verify_schema["properties"]
     candidate_schedule_schema = openapi["paths"]["/v1/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_handoff" in candidate_schedule_schema["properties"]
     candidate_scheduler_schema = openapi["paths"]["/v1/candidates/daily/scheduler"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
