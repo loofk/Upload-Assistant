@@ -20492,6 +20492,26 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert "U2" in readiness_report["policy_config_required_fields"]
     assert readiness_report["recommended_call"]["tool"] == "readiness_bundle"
     assert "site_extension_readiness_final_report" in readiness_report["read_order"]
+    profile_report = payload["site_adapter_profile_final_report"]
+    assert profile_report["kind"] == "ptcli.site_adapter_profile_final_report"
+    assert profile_report["ready"] is True
+    assert profile_report["report_allowed"] is True
+    assert profile_report["verdict"] == "profiles_ready"
+    assert profile_report["requested_flow"] == coverage["requested_flow"]
+    assert profile_report["summary"]["profile_count"] == 2
+    assert profile_report["summary"]["source_ready_trackers"] == ["U2", "MTEAM"]
+    assert profile_report["summary"]["target_ready_trackers"] == ["MTEAM"]
+    assert profile_report["summary"]["live_reference_sources_to_mteam"] == ["U2"]
+    assert profile_report["summary"]["reference_trackers"] == ["U2", "CHD", "MTEAM"]
+    assert profile_report["missing_by_tracker"] == {}
+    assert profile_report["recommended_call"]["tool"] == "readiness_bundle"
+    assert profile_report["safety"]["rules_not_inferred"] is True
+    assert "site_adapter_profile_final_report" in profile_report["read_order"]
+    profile_by_tracker = {item["tracker"]: item for item in profile_report["profiles"]}
+    assert profile_by_tracker["U2"]["adapter"]["source_download"] == "nexusphp_passkey"
+    assert profile_by_tracker["U2"]["adapter"]["candidate_discovery"] == "nexusphp_recent_or_search_html"
+    assert profile_by_tracker["MTEAM"]["adapter"]["target_upload"] == "mteam_api"
+    assert "uploaded_torrent_hash" in profile_by_tracker["MTEAM"]["required_evidence"]
     source_rollout = {item["tracker"]: item for item in rollout["source_rollout"]}
     assert source_rollout["U2"]["ready_for_role"] is True
     assert source_rollout["U2"]["full_live_closure_to_mteam"] is True
@@ -23823,6 +23843,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "tracker_rollout_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "adapter_extension_final_report" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "site_adapter_profile_final_report" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
     assert "adapter_coverage_summary_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "reference_adapter_report_fields" in tool_by_name["site_profiles"]["response_contract"]
@@ -23841,6 +23862,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "source_rollout" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_handoff_fields"]
     assert "adapter_extension_final_report_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "recommended_call" in tool_by_name["site_profiles"]["response_contract"]["adapter_extension_final_report_fields"]
+    assert "site_adapter_profile_final_report_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "profiles" in tool_by_name["site_profiles"]["response_contract"]["site_adapter_profile_final_report_fields"]
+    assert "site_adapter_profile_final_item_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "tracker_rollout_item_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "applicable" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_item_fields"]
     assert "ready_for_role" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_item_fields"]
@@ -24235,6 +24259,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "extension_validation_matrix" in site_profiles_schema["properties"]
     assert "extension_handoff" in site_profiles_schema["properties"]
     assert "tracker_rollout_handoff" in site_profiles_schema["properties"]
+    assert "site_adapter_profile_final_report" in site_profiles_schema["properties"]
     assert "flow_matrix" in site_profiles_schema["properties"]
     qbit_inspect_schema = openapi["paths"]["/v1/qbit/inspect"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "torrents" in qbit_inspect_schema["properties"]
@@ -25395,6 +25420,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "tracker_rollout_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "adapter_extension_final_report" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "site_extension_readiness_final_report" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "site_adapter_profile_final_report" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_coverage_summary_fields" in tools_by_name["site_profiles"]["response_contract"]
@@ -25410,6 +25436,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "tracker_rollout_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "adapter_extension_final_report_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "site_extension_readiness_final_report_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "site_adapter_profile_final_report_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "site_adapter_profile_final_item_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "recommended_call" in tools_by_name["site_profiles"]["response_contract"]["adapter_extension_final_report_fields"]
         assert "required_evidence_by_role" in tools_by_name["site_profiles"]["response_contract"]["site_extension_readiness_final_report_fields"]
         assert "tracker_rollout_item_fields" in tools_by_name["site_profiles"]["response_contract"]
@@ -27649,10 +27677,12 @@ services:
     adapters = payload["evidence"]["tracker_adapters"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
     assert adapters["site_extension_readiness_final_report"]["kind"] == "ptcli.site_extension_readiness_final_report"
+    assert adapters["site_adapter_profile_final_report"]["kind"] == "ptcli.site_adapter_profile_final_report"
     assert adapters["tracker_rollout_handoff"]["kind"] == "ptcli.tracker_rollout_handoff"
     assert adapters["adapter_coverage_summary"]["coverage_counts"]
     assert "adapter_extension_final_report" in adapters["adapter_extension_final_report"]["read_order"]
     assert "site_extension_readiness_final_report" in adapters["site_extension_readiness_final_report"]["read_order"]
+    assert "site_adapter_profile_final_report" in adapters["site_adapter_profile_final_report"]["read_order"]
     assert payload["evidence"]["live_validation"]["status"] == "missing"
     assert payload["evidence"]["live_validation"]["ready"] is False
     assert payload["evidence"]["live_validation_preflight"]["kind"] == "ptcli.goal_live_validation_preflight"
@@ -27819,6 +27849,7 @@ services:
     assert preflight["next_step"]["request"]["argv"] == preflight["live_execution_package"]["steps"][0]["request"]["argv"]
     assert adapters["requested_trackers"] == ["U2", "MTEAM"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
+    assert adapters["site_adapter_profile_final_report"]["kind"] == "ptcli.site_adapter_profile_final_report"
     assert adapters["adapter_extension_final_report"]["verdict"] in {"adapter_ready", "policy_blocked", "validation_blocked"}
     assert payload["next_step"]["tool"] == "ptcli_doctor"
     assert payload["next_step"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
