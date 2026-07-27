@@ -154,6 +154,30 @@ def build_parser() -> argparse.ArgumentParser:
     daily_scheduler.add_argument("--once", action="store_true", help="Run one scheduled scan immediately and exit. Useful for smoke tests.")
     daily_scheduler.add_argument("--json", action="store_true", help="Print machine-readable JSON for --once; continuous mode writes line-delimited JSON events.")
 
+    deployment_check = subparsers.add_parser(
+        "deployment-check",
+        help="Audit local/Docker seedbox deployment readiness without contacting trackers or qBittorrent.",
+        description=(
+            "Build the same read-only deployment report exposed at /v1/deployment/check. "
+            "Use it before readiness-bundle/live validation to verify mounts, config, Docker Compose, AI manifests, qBittorrent config, and daily-candidate deployment hints."
+        ),
+    )
+    deployment_check.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    deployment_check.add_argument("--base-dir", help="Project/base directory used for config/cookies/tmp checks.")
+    deployment_check.add_argument("--cookies-dir", help="Cookie directory for deployment checks.")
+    deployment_check.add_argument("--job-dir", help="Directory for file-backed API jobs. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
+    deployment_check.add_argument("--downloads-path", help="Mounted qBittorrent downloads path. Defaults to /downloads.")
+    deployment_check.add_argument("--compose-file", help="docker-compose.yml path for deployment checks.")
+    deployment_check.add_argument("--env-template", help="Path to .env.ptcli.example. Defaults to project .env.ptcli.example.")
+    deployment_check.add_argument("--env-file", help="Path to .env. Defaults to project .env.")
+    deployment_check.add_argument("--dockerfile", help="Path to Dockerfile.ptcli.")
+    deployment_check.add_argument("--client", default="default", help="Configured qBittorrent client name, defaults to config default.")
+    deployment_check.add_argument("--max-concurrent-jobs", type=int, help="Maximum API jobs expected for the deployment check.")
+    deployment_check.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
+    deployment_check.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
+    deployment_check.add_argument("--print-mkdir-commands", action="store_true", help="Print only seedbox_bootstrap_handoff.mkdir_commands, one per line, when missing directories are reported.")
+    deployment_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     readiness_bundle = subparsers.add_parser(
         "readiness-bundle",
         help="Build the AI live-readiness bundle without starting the HTTP service.",
@@ -12351,6 +12375,40 @@ def _daily_schedule_delivery_next_actions(publish_ready: bool, file_attempted: b
     return ["No delivery channel was requested; use --write-notification or --notification-webhook-url to hand daily candidates to an AI/IM/webhook consumer."]
 
 
+def deployment_check_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import deployment_check_payload
+
+    request: dict[str, Any] = {
+        "config": args.config,
+        "base_dir": args.base_dir,
+        "cookies_dir": args.cookies_dir,
+        "job_dir": args.job_dir,
+        "downloads_path": args.downloads_path,
+        "compose_file": args.compose_file,
+        "env_template": args.env_template,
+        "env_file": args.env_file,
+        "dockerfile": args.dockerfile,
+        "client": args.client,
+        "max_concurrent_jobs": args.max_concurrent_jobs,
+    }
+    if args.schedules_file:
+        request["schedules"] = json.loads(Path(args.schedules_file).expanduser().read_text(encoding="utf-8"))
+    elif args.schedules_json:
+        request["schedules"] = json.loads(args.schedules_json)
+    return deployment_check_payload({key: value for key, value in request.items() if value not in (None, "")})
+
+
+def _deployment_check_print_mkdir_commands(payload: dict[str, Any]) -> int:
+    bootstrap = payload.get("seedbox_bootstrap_handoff") if isinstance(payload.get("seedbox_bootstrap_handoff"), dict) else {}
+    commands = bootstrap.get("mkdir_commands") if isinstance(bootstrap.get("mkdir_commands"), list) else []
+    printable = [str(command) for command in commands if str(command).strip()]
+    if not printable:
+        return 1
+    for command in printable:
+        print(command)
+    return 0
+
+
 def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     from src.ptcli.service import site_policies_payload
 
@@ -12483,6 +12541,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "daily-scheduler":
             return run_daily_scheduler(args, json_output=json_output)
+
+        if args.command == "deployment-check":
+            payload = _with_captured_stdout(lambda: deployment_check_cli_payload(args), json_output)
+            if args.print_mkdir_commands:
+                return _deployment_check_print_mkdir_commands(payload)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
 
         if args.command == "rules":
             _print_payload(build_rules_payload(args), json_output)

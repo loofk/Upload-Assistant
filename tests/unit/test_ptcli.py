@@ -21922,6 +21922,57 @@ def test_site_policy_rule_review_cli_print_patch_fails_when_not_ready(monkeypatc
     assert capsys.readouterr().out == ""
 
 
+def test_deployment_check_cli_outputs_json(monkeypatch, capsys) -> None:
+    captured_request = {}
+
+    def fake_payload(request):
+        captured_request.update(request)
+        return {"kind": "ptcli.deployment_check", "ready": False, "status": "blocked", "seedbox_bootstrap_handoff": {"mkdir_commands": ["mkdir -p /downloads"]}}
+
+    monkeypatch.setattr(ptcli_service, "deployment_check_payload", fake_payload)
+
+    code = main(["deployment-check", "--base-dir", "/app", "--job-dir", "/jobs", "--downloads-path", "/downloads", "--max-concurrent-jobs", "2", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert payload["kind"] == "ptcli.deployment_check"
+    assert captured_request["base_dir"] == "/app"
+    assert captured_request["job_dir"] == "/jobs"
+    assert captured_request["downloads_path"] == "/downloads"
+    assert captured_request["max_concurrent_jobs"] == 2
+
+
+def test_deployment_check_cli_prints_mkdir_commands(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        ptcli_service,
+        "deployment_check_payload",
+        lambda _request: {
+            "kind": "ptcli.deployment_check",
+            "ready": False,
+            "status": "blocked",
+            "seedbox_bootstrap_handoff": {"mkdir_commands": ["mkdir -p /jobs", "mkdir -p /downloads"]},
+        },
+    )
+
+    code = main(["deployment-check", "--print-mkdir-commands"])
+
+    assert code == 0
+    assert capsys.readouterr().out == "mkdir -p /jobs\nmkdir -p /downloads\n"
+
+
+def test_deployment_check_cli_print_mkdir_commands_fails_when_none(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        ptcli_service,
+        "deployment_check_payload",
+        lambda _request: {"kind": "ptcli.deployment_check", "ready": True, "status": "ok", "seedbox_bootstrap_handoff": {"mkdir_commands": []}},
+    )
+
+    code = main(["deployment-check", "--print-mkdir-commands"])
+
+    assert code == 1
+    assert capsys.readouterr().out == ""
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}
