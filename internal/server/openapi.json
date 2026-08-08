@@ -259,6 +259,7 @@
           "downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
           "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
           "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
+          "target_package": {"$ref": "#/components/schemas/MTeamPackageOptions"},
           "confirm_upload": {"type": "boolean", "default": false, "description": "A later live target upload gate requires an explicit true value; it is never inferred."}
         },
         "additionalProperties": true
@@ -286,6 +287,18 @@
       "RetorrentImageHost": {
         "type": "object", "additionalProperties": false,
         "properties": {"name": {"type": "string", "default": "default", "description": "Configured imgbb/PTPimg integration name."}}
+      },
+      "MTeamPackageOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "maxLength": 255, "description": "Explicit reviewed MTEAM release-name override."},
+          "small_descr": {"type": "string", "maxLength": 255},
+          "category": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Current MTEAM category id when the adapter cannot infer it safely."},
+          "category_evidence": {"type": "string", "maxLength": 500, "description": "Human-readable reason or current category-page evidence for an explicit category."},
+          "standard": {"type": "integer", "enum": [1, 2, 3, 5, 6, 7], "description": "MTEAM resolution id; normally derived from MediaInfo."},
+          "anonymous": {"type": "boolean", "default": false}
+        }
       },
       "CreateJobRequest": {
         "type": "object",

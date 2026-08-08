@@ -28,6 +28,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/server"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
+	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
 	"github.com/loofk/upload-assistant/v2/internal/sites/nexusphp"
 	"github.com/loofk/upload-assistant/v2/internal/worker"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
@@ -128,6 +129,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize source adapters: %w", err)
 	}
+	targetPackageRegistry, err := sites.NewTargetPackageRegistry(mteam.NewPackageAdapter())
+	if err != nil {
+		return fmt.Errorf("initialize target package adapters: %w", err)
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	jobRunner := worker.New(
@@ -143,6 +148,7 @@ func serve(args []string) error {
 			artifactStore,
 		),
 		worker.WithImageHosts(imageHostManager, artifactStore),
+		worker.WithTargetPackages(targetPackageRegistry, artifactStore),
 	)
 	go jobRunner.Run(ctx)
 

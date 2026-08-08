@@ -19,6 +19,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
+	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -85,7 +86,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := fakeSourceProvider{
-		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", RetrievedAt: time.Now().UTC()},
+		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", AniDBID: "3456", RetrievedAt: time.Now().UTC()},
 		download: sites.DownloadedTorrent{
 			Bytes: metainfo, Filename: "U2-60635.torrent", ContentType: "application/x-bittorrent",
 			SizeBytes: int64(len(metainfo)), SHA256: sha256String(metainfo), Hashes: hashes,
@@ -125,7 +126,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithDownloader(downloader, artifactStore, allowedContentRoot),
 		WithMetadata(artifactStore),
 		WithMediaInfo(&fakeMediaInspector{result: media.Inspection{
-			Tool: "mediainfo", Version: "fixture", Document: json.RawMessage(`{"media":{"track":[]}}`), DurationMS: 1,
+			Tool: "mediainfo", Version: "fixture", Document: json.RawMessage(`{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`), DurationMS: 1,
 		}}, artifactStore),
 		WithScreenshots(
 			fakeScreenshotProfiles{profile: integrations.RuntimeScreenshotProfile{
@@ -145,6 +146,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 			artifactStore,
 		),
 		WithImageHosts(imageHost, artifactStore),
+		WithTargetPackages(mustTargetPackageRegistry(t), artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -249,8 +251,28 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	if err != nil || len(storedArtifacts) != 6 || storedArtifacts[5].Kind != "image_upload_receipt" {
 		t.Fatalf("image-upload artifacts/error = %#v/%v", storedArtifacts, err)
 	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target package RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_duplicate_check" {
+		t.Fatalf("target-package job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 7 || storedArtifacts[6].Kind != "target_package" {
+		t.Fatalf("target-package artifacts/error = %#v/%v", storedArtifacts, err)
+	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {
 		t.Fatalf("event chain/error = %d/%v", len(events), err)
 	}
+}
+
+func mustTargetPackageRegistry(t *testing.T) *sites.TargetPackageRegistry {
+	t.Helper()
+	registry, err := sites.NewTargetPackageRegistry(mteam.NewPackageAdapter())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
 }

@@ -1,0 +1,167 @@
+package worker
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/loofk/upload-assistant/v2/internal/artifacts"
+	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
+	"github.com/loofk/upload-assistant/v2/internal/sites"
+	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
+	"github.com/loofk/upload-assistant/v2/internal/workflow"
+)
+
+func TestTargetPackageStepVerifiesMaterialsAndPersistsPackage(t *testing.T) {
+	store := mustArtifactStore(t)
+	recorder := &fakeArtifactRecorder{}
+	executor := targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: recorder}
+	output, err := executor.Execute(context.Background(), targetPackageExecution(t, store, "U2", map[string]any{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorder.recorded.Kind != "target_package" || recorder.recorded.SHA256 == "" {
+		t.Fatalf("target package artifact = %#v", recorder.recorded)
+	}
+	var summary struct {
+		Prepared          bool           `json:"prepared"`
+		Target            string         `json:"target"`
+		FormFields        map[string]any `json:"form_fields"`
+		PackageArtifactID string         `json:"package_artifact_id"`
+	}
+	if err := json.Unmarshal(output, &summary); err != nil || !summary.Prepared || summary.Target != "MTEAM" ||
+		summary.FormFields["category"] != float64(405) || summary.PackageArtifactID != "artifact-id" {
+		t.Fatalf("target package summary/error = %#v/%v", summary, err)
+	}
+	file, err := store.Open(recorder.recorded.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	var prepared sites.PreparedTargetPackage
+	if err := json.NewDecoder(file).Decode(&prepared); err != nil || prepared.FormFields["standard"] != float64(1) ||
+		!strings.Contains(prepared.Description, "https://i.ibb.co/fixture/image.png") {
+		t.Fatalf("stored package/error = %#v/%v", prepared, err)
+	}
+}
+
+func TestTargetPackageStepBlocksAndResumesUncertainCategory(t *testing.T) {
+	store := mustArtifactStore(t)
+	executor := targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: &fakeArtifactRecorder{}}
+	execution := targetPackageExecution(t, store, "CHD", map[string]any{})
+	_, err := executor.Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if len(blocked.Blockers) != 1 || blocked.Blockers[0].Code != "target_category_required" ||
+		blocked.NextActions[0].Action != "provide_target_package_fields" {
+		t.Fatalf("category blocker = %#v", blocked)
+	}
+
+	execution = targetPackageExecution(t, store, "CHD", map[string]any{
+		"category": 419, "category_evidence": "current MTEAM HD movie category",
+	})
+	if _, err := executor.Execute(context.Background(), execution); err != nil {
+		t.Fatalf("resumed target package error = %v", err)
+	}
+}
+
+func TestTargetPackageStepRejectsTamperedMediaArtifact(t *testing.T) {
+	store := mustArtifactStore(t)
+	execution := targetPackageExecution(t, store, "U2", map[string]any{})
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	previous := snapshot["previous_steps"].(map[string]any)
+	mediaOutput := previous["media_info"].(map[string]any)
+	mediaOutput["artifact_sha256"] = strings.Repeat("0", 64)
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	_, err := (targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: &fakeArtifactRecorder{}}).Execute(context.Background(), execution)
+	var blocked *BlockError
+	if !errors.As(err, &blocked) || blocked.Code != "step_input_snapshot_invalid" {
+		t.Fatalf("tampered media blocker = %#v", blocked)
+	}
+}
+
+func targetPackageRegistry(t *testing.T) *sites.TargetPackageRegistry {
+	t.Helper()
+	registry, err := sites.NewTargetPackageRegistry(mteam.NewPackageAdapter())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func targetPackageExecution(t *testing.T, store *artifacts.LocalStore, source string, resumeOptions map[string]any) Execution {
+	t.Helper()
+	descriptionBody := []byte(`<p>Fixture source description</p>`)
+	descriptionFile, err := store.Write(context.Background(), artifacts.Scope{
+		JobID: "job-id", StepID: "source-step", AttemptID: "source-attempt",
+	}, "source-description.html", bytes.NewReader(descriptionBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaBody := []byte(`{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`)
+	mediaFile, err := store.Write(context.Background(), artifacts.Scope{
+		JobID: "job-id", StepID: "media-step", AttemptID: "media-attempt",
+	}, "mediainfo.json", bytes.NewReader(mediaBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := sites.SourceInfo{
+		Tracker: source, TorrentID: "60635", Name: "Fixture.Release.2026.1080p",
+		DetailsURL: "https://source.invalid/details.php?id=60635",
+	}
+	links := map[string]string{"imdb": "https://www.imdb.com/title/tt1234567/"}
+	if source == "U2" {
+		info.AniDBID = "3456"
+		links["anidb"] = "https://anidb.net/anime/3456"
+	}
+	receipt := imageUploadReceipt{
+		Index: 1, Timestamp: 50,
+		Source: screenshotArtifactInput{Index: 1, Filename: "screenshot-01.png", MIMEType: "image/png", SHA256: strings.Repeat("b", 64)},
+		Host:   imagehosts.HostSnapshot{ID: "host-id", Name: "default", Adapter: "imgbb", ConfigSHA256: "config-sha", ConfigurationTime: time.Unix(1, 0).UTC()},
+		Upload: imagehosts.UploadEvidence{
+			ImageHostID: "host-id", ImageHostName: "default", Adapter: "imgbb",
+			ConfigSHA256: "config-sha", ConfigurationTime: time.Unix(1, 0).UTC(),
+			Result: imagehosts.UploadResult{URL: "https://i.ibb.co/fixture/image.png", ViewerURL: "https://ibb.co/fixture"},
+		},
+		ReceiptID: "receipt-id", ReceiptSHA: strings.Repeat("c", 64),
+	}
+	return Execution{
+		Job: workflow.Job{ID: "job-id"}, Step: workflow.Step{ID: "target-package-step", InputSnapshot: mustJSON(map[string]any{
+			"job_input":    map[string]any{"target_package": map[string]any{}},
+			"resume_state": map[string]any{"target_package": resumeOptions},
+			"previous_steps": map[string]any{
+				"source_parse": map[string]any{"source": sites.SourceReference{Tracker: source, TorrentID: "60635"}, "target": "MTEAM"},
+				"source_inspect": map[string]any{
+					"source_info": info,
+					"description_artifact": map[string]any{
+						"artifact_id": "description-id", "storage_path": descriptionFile.RelativePath,
+						"sha256": descriptionFile.SHA256, "size_bytes": descriptionFile.SizeBytes,
+					},
+				},
+				"source_rules":   map[string]any{"rule_revision_id": "rule-id", "fingerprint": strings.Repeat("d", 64)},
+				"source_torrent": map[string]any{"artifact_id": "torrent-id", "sha256": strings.Repeat("e", 64), "hashes": map[string]any{"v1_sha1": strings.Repeat("f", 40)}},
+				"content_resolve": map[string]any{
+					"resolved": true, "downloader_name": "box", "torrent_hash": strings.Repeat("f", 40),
+					"local_root": "/downloads/release", "file_count": 1, "total_size_bytes": 13,
+					"manifest_artifact_id": "manifest-id", "manifest_sha256": strings.Repeat("a", 64), "manifest_storage_path": "manifest/path.json",
+				},
+				"metadata": map[string]any{
+					"identity": map[string]any{"title": info.Name, "imdb_id": "tt1234567", "anidb_id": info.AniDBID},
+					"links":    links, "metadata_artifact_id": "metadata-id", "metadata_sha256": strings.Repeat("1", 64), "metadata_storage_path": "metadata/path.json",
+				},
+				"media_info": map[string]any{
+					"kind": "mediainfo", "tool": "mediainfo", "version": "fixture", "artifact_id": "media-id",
+					"artifact_sha256": mediaFile.SHA256, "artifact_storage_path": mediaFile.RelativePath,
+				},
+				"image_upload": map[string]any{"uploaded": true, "receipts": []imageUploadReceipt{receipt}},
+			},
+		})},
+		Attempt: workflow.Attempt{ID: "target-package-attempt"}, Actor: workflow.Actor{Type: "worker", ID: "test-worker"},
+	}
+}
