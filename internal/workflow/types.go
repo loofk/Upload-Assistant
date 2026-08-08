@@ -9,6 +9,7 @@ import (
 var (
 	ErrNotFound        = errors.New("workflow resource not found")
 	ErrConflict        = errors.New("workflow state conflict")
+	ErrReplayUnsafe    = errors.New("workflow replay is not allowed")
 	ErrUnsupportedKind = errors.New("workflow kind is not registered")
 )
 
@@ -53,6 +54,7 @@ type Actor struct {
 
 type Job struct {
 	ID            string          `json:"id"`
+	ReplayOfJobID string          `json:"replay_of_job_id,omitempty"`
 	Kind          string          `json:"kind"`
 	Status        JobStatus       `json:"status"`
 	ExecutionMode ExecutionMode   `json:"execution_mode"`
@@ -179,6 +181,14 @@ type CreateJobInput struct {
 	ExecutionMode  ExecutionMode
 	StopAfterStep  string
 	Input          json.RawMessage
+	IdempotencyKey string
+	Owner          string
+	Actor          Actor
+}
+
+type ReplayJobInput struct {
+	ExecutionMode  ExecutionMode
+	StopAfterStep  string
 	IdempotencyKey string
 	Owner          string
 	Actor          Actor

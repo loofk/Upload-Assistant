@@ -227,6 +227,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
               client={client}
               onChanged={refreshAll}
               onLoadMoreAttempts={loadMoreAttempts}
+              onReplayed={(jobID) => { setSelectedID(jobID); void loadJobs(); }}
               onError={(reason) => setError(describeError(reason))}
             /> : <DetailSkeleton />
           ) : <WelcomePanel onCreate={() => setCreateOpen(true)} />}
@@ -262,7 +263,7 @@ function JobCard({job, selected, onSelect}: {job: Job; selected: boolean; onSele
 }
 
 function JobDetail({
-  detail, events, attempts, attemptsHaveMore, client, onChanged, onLoadMoreAttempts, onError,
+  detail, events, attempts, attemptsHaveMore, client, onChanged, onLoadMoreAttempts, onReplayed, onError,
 }: {
   detail: JobSummaryEnvelope;
   events: AuditEvent[];
@@ -271,6 +272,7 @@ function JobDetail({
   client: ApiClient;
   onChanged: () => Promise<void>;
   onLoadMoreAttempts: () => Promise<void>;
+  onReplayed: (jobID: string) => void;
   onError: (reason: unknown) => void;
 }) {
   const [tab, setTab] = useState<"steps" | "attempts" | "artifacts" | "events" | "summary">("steps");
@@ -325,8 +327,23 @@ function JobDetail({
 
   const canPause = ["queued", "running", "blocked", "failed"].includes(detail.status);
   const canResume = ["paused", "blocked", "failed"].includes(detail.status);
+  const replayUnsafe = detail.blockers.some((blocker) => blocker.code.endsWith("_outcome_unknown") || blocker.code.includes("requires_reconciliation"));
+  const canReplay = ["blocked", "failed", "cancelled"].includes(detail.status) && !replayUnsafe;
   const completedSteps = detail.steps.filter((step) => step.status === "complete" || step.status === "skipped").length;
   const progress = detail.steps.length ? Math.round((completedSteps / detail.steps.length) * 100) : 0;
+
+  const replay = async () => {
+    if (!window.confirm("确认创建全新的逐步回放任务？旧规则接受、人工义务、恢复参数和 live 上传确认不会继承。")) return;
+    setBusy(true);
+    try {
+      const created = await client.replayJob(detail.job_id);
+      onReplayed(created.job_id);
+    } catch (reason) {
+      onError(reason);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <article className="job-detail">
@@ -339,6 +356,7 @@ function JobDetail({
         <div className="detail-actions">
           {canPause && <button className="secondary" disabled={busy} onClick={() => void transition("pause")}>暂停</button>}
           {canResume && <button className="primary" disabled={busy} onClick={() => void resume()}>续跑</button>}
+          {canReplay && <button className="secondary" disabled={busy} onClick={() => void replay()}>重放新任务</button>}
           {!terminalStatuses.has(detail.status) && <button className="danger" disabled={busy} onClick={() => void transition("cancel")}>取消</button>}
         </div>
       </header>

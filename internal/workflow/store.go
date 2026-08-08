@@ -156,6 +156,175 @@ func (s *Store) CreateJob(ctx context.Context, workflowVersionID string, definit
 	return s.GetJob(ctx, id)
 }
 
+func (s *Store) ReplayJob(
+	ctx context.Context,
+	originalJobID, workflowVersionID string,
+	definition Definition,
+	input ReplayJobInput,
+) (Job, error) {
+	if strings.TrimSpace(input.IdempotencyKey) == "" {
+		return Job{}, fmt.Errorf("replay idempotency key is required")
+	}
+	if input.ExecutionMode == "" {
+		input.ExecutionMode = ExecutionStep
+	}
+	if input.ExecutionMode != ExecutionAuto && input.ExecutionMode != ExecutionStep {
+		return Job{}, fmt.Errorf("invalid execution mode %q", input.ExecutionMode)
+	}
+	if input.Owner == "" {
+		input.Owner = "system"
+	}
+	if input.Actor.Type == "" {
+		input.Actor.Type = "system"
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Job{}, fmt.Errorf("begin replay job transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var originalKind string
+	var originalStatus JobStatus
+	var originalInput, originalBlockers json.RawMessage
+	err = tx.QueryRow(ctx, `
+		SELECT kind, status, input, blockers
+		FROM jobs WHERE id = $1 FOR UPDATE`, originalJobID).Scan(
+		&originalKind, &originalStatus, &originalInput, &originalBlockers,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Job{}, ErrNotFound
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("lock replay source job: %w", err)
+	}
+	if originalKind != definition.Name {
+		return Job{}, fmt.Errorf("%w: replay workflow kind changed", ErrConflict)
+	}
+	replayInput, err := safeReplayInput(originalKind, originalInput)
+	if err != nil {
+		return Job{}, fmt.Errorf("prepare replay input: %w", err)
+	}
+	requestHash := sha256Hex([]byte(strings.Join([]string{
+		originalKind, originalJobID, string(input.ExecutionMode), input.StopAfterStep, string(replayInput),
+	}, "\x00")))
+	var existingID, existingHash, existingParent string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, COALESCE(idempotency_request_hash, ''), COALESCE(replay_of_job_id::text, '')
+		FROM jobs WHERE idempotency_owner = $1 AND idempotency_key = $2`,
+		input.Owner, input.IdempotencyKey,
+	).Scan(&existingID, &existingHash, &existingParent)
+	if err == nil {
+		if existingHash != requestHash || existingParent != originalJobID {
+			return Job{}, fmt.Errorf("%w: idempotency key was already used with a different request", ErrConflict)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return Job{}, fmt.Errorf("commit idempotent replay transaction: %w", err)
+		}
+		return s.GetJob(ctx, existingID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Job{}, fmt.Errorf("lookup idempotent replay: %w", err)
+	}
+	if originalStatus != JobBlocked && originalStatus != JobFailed && originalStatus != JobCancelled {
+		return Job{}, fmt.Errorf("%w: only blocked, failed, or cancelled jobs can be replayed", ErrReplayUnsafe)
+	}
+	if blocker, err := unsafeReplayBlocker(originalBlockers); err != nil {
+		return Job{}, fmt.Errorf("inspect replay blockers: %w", err)
+	} else if blocker != "" {
+		return Job{}, fmt.Errorf("%w: blocker %s requires reconciliation on the original job", ErrReplayUnsafe, blocker)
+	}
+	var replayJobID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO jobs(
+			kind, status, execution_mode, workflow_version_id, current_step_key,
+			stop_after_step, input, idempotency_key, idempotency_owner,
+			idempotency_request_hash, replay_of_job_id
+		)
+		VALUES ($1, 'queued', $2, $3, $4, NULLIF($5, ''), $6, $7, $8, $9, $10)
+		ON CONFLICT (idempotency_owner, idempotency_key) WHERE idempotency_key IS NOT NULL
+		DO UPDATE SET updated_at = jobs.updated_at
+		WHERE jobs.idempotency_request_hash = EXCLUDED.idempotency_request_hash
+		RETURNING id::text`,
+		originalKind, input.ExecutionMode, workflowVersionID, definition.Steps[0].Key,
+		input.StopAfterStep, replayInput, input.IdempotencyKey, input.Owner, requestHash, originalJobID,
+	).Scan(&replayJobID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Job{}, fmt.Errorf("%w: idempotency key was already used with a different request", ErrConflict)
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("insert replay job: %w", err)
+	}
+	var existingSteps int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM job_steps WHERE job_id = $1", replayJobID).Scan(&existingSteps); err != nil {
+		return Job{}, fmt.Errorf("count replay job steps: %w", err)
+	}
+	if existingSteps == 0 {
+		for position, step := range definition.Steps {
+			status := StepPending
+			if position == 0 {
+				status = StepReady
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO job_steps(job_id, step_key, position, status, required, gate_kind)
+				VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))`,
+				replayJobID, step.Key, position+1, status, step.Required, step.GateKind,
+			); err != nil {
+				return Job{}, fmt.Errorf("insert replay job step %s: %w", step.Key, err)
+			}
+		}
+		if _, err := appendEvent(ctx, tx, replayJobID, "", "", "job.created", input.Actor, map[string]any{
+			"kind": originalKind, "execution_mode": input.ExecutionMode,
+			"workflow_version_id": workflowVersionID, "replay_of_job_id": originalJobID,
+			"safety_resets": []string{"accept_rules", "manual_obligations", "confirm_upload"},
+		}); err != nil {
+			return Job{}, err
+		}
+		if _, err := appendEvent(ctx, tx, originalJobID, "", "", "job.replayed", input.Actor, map[string]any{
+			"replay_job_id": replayJobID, "execution_mode": input.ExecutionMode,
+		}); err != nil {
+			return Job{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, fmt.Errorf("commit replay job transaction: %w", err)
+	}
+	return s.GetJob(ctx, replayJobID)
+}
+
+func safeReplayInput(kind string, body json.RawMessage) (json.RawMessage, error) {
+	var value map[string]any
+	if err := json.Unmarshal(body, &value); err != nil || value == nil {
+		return nil, errors.New("job input must be a JSON object")
+	}
+	for _, key := range []string{"accept_rules", "confirm_upload", "obligations", "manual_obligations", "resume_state"} {
+		delete(value, key)
+	}
+	if kind == "retorrent" {
+		value["confirm_upload"] = false
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return canonicalJSON(encoded)
+}
+
+func unsafeReplayBlocker(body json.RawMessage) (string, error) {
+	var blockers []struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &blockers); err != nil {
+		return "", err
+	}
+	for _, blocker := range blockers {
+		code := strings.ToLower(strings.TrimSpace(blocker.Code))
+		if strings.HasSuffix(code, "_outcome_unknown") || strings.Contains(code, "requires_reconciliation") {
+			return blocker.Code, nil
+		}
+	}
+	return "", nil
+}
+
 func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
 	return scanJob(s.pool.QueryRow(ctx, jobSelect+" WHERE id = $1", id))
 }
@@ -1011,7 +1180,7 @@ func buildStepInputSnapshot(
 }
 
 const jobSelect = `
-	SELECT id::text, kind, status, execution_mode, COALESCE(current_step_key, ''),
+	SELECT id::text, COALESCE(replay_of_job_id::text, ''), kind, status, execution_mode, COALESCE(current_step_key, ''),
 	       input, blockers, next_actions, resume_state, summary,
 	       created_at, updated_at, started_at, finished_at
 	FROM jobs`
@@ -1026,7 +1195,7 @@ func scanJob(row pgx.Row) (Job, error) {
 	var job Job
 	var startedAt, finishedAt pgtype.Timestamptz
 	err := row.Scan(
-		&job.ID, &job.Kind, &job.Status, &job.ExecutionMode, &job.CurrentStep,
+		&job.ID, &job.ReplayOfJobID, &job.Kind, &job.Status, &job.ExecutionMode, &job.CurrentStep,
 		&job.Input, &job.Blockers, &job.NextActions, &job.ResumeState, &job.Summary,
 		&job.CreatedAt, &job.UpdatedAt, &startedAt, &finishedAt,
 	)

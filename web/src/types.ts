@@ -18,6 +18,7 @@ export interface NextAction {
 
 export interface Job {
   id: string;
+  replay_of_job_id?: string;
   kind: string;
   status: JobStatus;
   execution_mode: "auto" | "step";
@@ -176,6 +177,7 @@ export interface JobEnvelope {
   ok: boolean;
   status: JobStatus;
   job_id: string;
+  replay_of_job_id?: string;
   current_step?: string;
   blockers: Blocker[];
   next_actions: NextAction[];
@@ -188,6 +190,7 @@ export interface JobSummaryEnvelope {
   ok: boolean;
   status: JobStatus;
   job_id: string;
+	replay_of_job_id?: string;
 	kind: string;
   current_step?: string;
   blockers: Blocker[];

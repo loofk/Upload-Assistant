@@ -129,6 +129,21 @@ describe("ApiClient safety defaults", () => {
     expect(new Headers(init.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
   });
 
+  it("creates a fresh step-mode replay without consent fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true, status: "queued", job_id: "new-job", replay_of_job_id: "old-job",
+    }), {status: 202, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", {randomUUID: () => "44444444-4444-4444-8444-444444444444"});
+    await new ApiClient("ua_test-token-value-that-is-long-enough").replayJob("old/job");
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/v2/jobs/old%2Fjob/replay");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("44444444-4444-4444-8444-444444444444");
+    expect(JSON.parse(String(init.body))).toEqual({execution_mode: "step"});
+    expect(String(init.body)).not.toContain("confirm_upload");
+    expect(String(init.body)).not.toContain("accept_rules");
+  });
+
   it("requests a local-only live readiness report without confirmation fields", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ok: false, status: "blocked", configuration_ready: false,

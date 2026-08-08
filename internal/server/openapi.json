@@ -275,6 +275,18 @@
     "/api/v2/jobs/{job_id}/cancel": {
       "post": {"operationId": "cancelJob", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
     },
+    "/api/v2/jobs/{job_id}/replay": {
+      "post": {
+        "operationId": "replayJob",
+        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs and reconciliation-required or unknown external outcomes are rejected.",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}, {"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReplayJobRequest"}}}},
+        "responses": {
+          "202": {"description": "Fresh safety-reset replay job accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}},
+          "400": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
     "/api/v2/sites": {
       "get": {"operationId": "listSites", "responses": {"200": {"description": "Site adapters and active rule fingerprints", "content": {"application/json": {"schema": {"type": "object"}}}}}}
     },
@@ -782,6 +794,13 @@
         "additionalProperties": false,
         "properties": {"resume_state": {"type": "object", "additionalProperties": true, "default": {}}}
       },
+      "ReplayJobRequest": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "execution_mode": {"type": "string", "enum": ["auto", "step"], "default": "step"},
+          "stop_after_step": {"type": "string", "description": "Optional boundary in the current workflow definition. The original boundary is not inherited."}
+        }
+      },
       "RetorrentSummaryArtifact": {
         "type": "object", "additionalProperties": false,
         "required": ["artifact_id", "kind", "storage_path", "size_bytes", "sha256"],
@@ -843,7 +862,7 @@
         "type": "object",
         "required": ["id", "kind", "status", "execution_mode", "input", "blockers", "next_actions", "resume_state", "summary", "created_at", "updated_at"],
         "properties": {
-          "id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "execution_mode": {"type": "string", "enum": ["auto", "step"]}, "current_step": {"type": "string"},
+          "id": {"type": "string", "format": "uuid"}, "replay_of_job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "execution_mode": {"type": "string", "enum": ["auto", "step"]}, "current_step": {"type": "string"},
           "input": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"},
           "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}
         }
@@ -851,7 +870,7 @@
       "JobEnvelope": {
         "type": "object",
         "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "job"],
-        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "job": {"$ref": "#/components/schemas/Job"}}
+        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "replay_of_job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "job": {"$ref": "#/components/schemas/Job"}}
       },
       "JobListEnvelope": {
         "type": "object", "additionalProperties": false,
@@ -867,7 +886,7 @@
       "JobSummaryEnvelope": {
         "type": "object",
         "required": ["ok", "status", "job_id", "kind", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
-		"properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string", "enum": ["retorrent", "daily_candidates"]}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+		"properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "replay_of_job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string", "enum": ["retorrent", "daily_candidates"]}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
       },
       "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object", "description": "The raw durable snapshot is never returned. The API exposes only {redacted:true,sha256:<digest>}."}, "output_summary": {"type": "object", "description": "Recursively redacted step output evidence."}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
       "StepAttempt": {

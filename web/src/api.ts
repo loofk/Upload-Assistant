@@ -205,6 +205,14 @@ export class ApiClient {
     });
   }
 
+  async replayJob(jobID: string): Promise<JobEnvelope> {
+    return this.request(`/api/v2/jobs/${encodeURIComponent(jobID)}/replay`, {
+      method: "POST",
+      headers: {"Idempotency-Key": crypto.randomUUID()},
+      body: JSON.stringify({execution_mode: "step"}),
+    });
+  }
+
   async downloadArtifact(jobID: string, artifactID: string): Promise<Blob> {
     const response = await fetch(`/api/v2/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifactID)}/content`, {
       headers: {Authorization: `Bearer ${this.token}`, Accept: "application/octet-stream"},

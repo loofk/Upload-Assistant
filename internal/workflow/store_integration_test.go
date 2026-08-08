@@ -38,7 +38,7 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	input := CreateJobInput{
 		Kind:           "retorrent",
 		ExecutionMode:  ExecutionStep,
-		Input:          json.RawMessage(`{"source_url":"https://example.invalid/details.php?id=1","target":"MTEAM"}`),
+		Input:          json.RawMessage(`{"source_url":"https://example.invalid/details.php?id=1","target":"MTEAM","accept_rules":{"U2":{"accepted":true,"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","obligations":{"manual":{"confirmed":true,"evidence":"old"}}}},"confirm_upload":true}`),
 		IdempotencyKey: idempotencyKey,
 		Owner:          "integration-test",
 		Actor:          Actor{Type: "test", ID: "store-lifecycle"},
@@ -52,6 +52,11 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	})
 	if job.Status != JobQueued || job.CurrentStep != "source_parse" {
 		t.Fatalf("created job status/current = %s/%s", job.Status, job.CurrentStep)
+	}
+	if _, err := store.ReplayJob(ctx, job.ID, workflowID, definition, ReplayJobInput{
+		IdempotencyKey: "unsafe-active-" + uuid.NewString(), Owner: "integration-test",
+	}); !errors.Is(err, ErrReplayUnsafe) {
+		t.Fatalf("active ReplayJob() error = %v, want ErrReplayUnsafe", err)
 	}
 	page, err := store.ListJobs(ctx, ListJobsFilter{Status: JobQueued, Kind: "retorrent", Limit: 100})
 	if err != nil {
@@ -193,6 +198,29 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	if err != nil || job.Status != JobCancelled {
 		t.Fatalf("CancelJob() job/error = %s/%v", job.Status, err)
 	}
+	replayKey := "safe-replay-" + uuid.NewString()
+	replay, err := store.ReplayJob(ctx, job.ID, workflowID, definition, ReplayJobInput{
+		ExecutionMode: ExecutionStep, IdempotencyKey: replayKey, Owner: "integration-test",
+		Actor: Actor{Type: "test", ID: "store-lifecycle"},
+	})
+	if err != nil || replay.Status != JobQueued || replay.ReplayOfJobID != job.ID || replay.ExecutionMode != ExecutionStep {
+		t.Fatalf("ReplayJob() replay/error = %#v/%v", replay, err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM jobs WHERE id = $1", replay.ID) })
+	var replayInput map[string]any
+	if err := json.Unmarshal(replay.Input, &replayInput); err != nil {
+		t.Fatal(err)
+	}
+	if _, inherited := replayInput["accept_rules"]; inherited || replayInput["confirm_upload"] != false {
+		t.Fatalf("replay inherited authorization input = %#v", replayInput)
+	}
+	idempotentReplay, err := store.ReplayJob(ctx, job.ID, workflowID, definition, ReplayJobInput{
+		ExecutionMode: ExecutionStep, IdempotencyKey: replayKey, Owner: "integration-test",
+		Actor: Actor{Type: "test", ID: "store-lifecycle"},
+	})
+	if err != nil || idempotentReplay.ID != replay.ID {
+		t.Fatalf("idempotent ReplayJob() replay/error = %#v/%v", idempotentReplay, err)
+	}
 
 	events, err := store.ListEvents(ctx, job.ID, 0, 100)
 	if err != nil {
@@ -203,6 +231,27 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	}
 	if err := VerifyEventChain(events); err != nil {
 		t.Fatalf("VerifyEventChain() error = %v", err)
+	}
+	replayEvents := 0
+	for _, event := range events {
+		if event.Type == "job.replayed" {
+			replayEvents++
+		}
+	}
+	if replayEvents != 1 {
+		t.Fatalf("job.replayed event count = %d, want 1", replayEvents)
+	}
+	childEvents, err := store.ListEvents(ctx, replay.ID, 0, 100)
+	if err != nil || len(childEvents) != 1 || VerifyEventChain(childEvents) != nil {
+		t.Fatalf("replay child events/error = %#v/%v", childEvents, err)
+	}
+	var childPayload struct {
+		ReplayOfJobID string   `json:"replay_of_job_id"`
+		SafetyResets  []string `json:"safety_resets"`
+	}
+	if err := json.Unmarshal(childEvents[0].Payload, &childPayload); err != nil ||
+		childPayload.ReplayOfJobID != job.ID || len(childPayload.SafetyResets) != 3 {
+		t.Fatalf("replay child payload/error = %#v/%v", childPayload, err)
 	}
 }
 
@@ -320,5 +369,18 @@ func TestStorePausesRunningAttemptAndRecoversExpiredLease(t *testing.T) {
 	}
 	if !seenPaused || !seenRecovered {
 		t.Fatalf("pause/recovery events = %t/%t", seenPaused, seenRecovered)
+	}
+}
+
+func TestSafeReplayInputAndReconciliationBlockers(t *testing.T) {
+	input, err := safeReplayInput("retorrent", json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=1","accept_rules":{"U2":{"accepted":true}},"confirm_upload":true,"downloader":{"name":"box"}}`))
+	if err != nil || string(input) != `{"confirm_upload":false,"downloader":{"name":"box"},"source_url":"https://u2.dmhy.org/details.php?id=1"}` {
+		t.Fatalf("safeReplayInput() input/error = %s/%v", input, err)
+	}
+	for _, code := range []string{"target_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"} {
+		blocker, err := unsafeReplayBlocker(json.RawMessage(`[{"code":"` + code + `"}]`))
+		if err != nil || blocker != code {
+			t.Fatalf("unsafeReplayBlocker(%s) = %q/%v", code, blocker, err)
+		}
 	}
 }

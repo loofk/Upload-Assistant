@@ -191,6 +191,29 @@ func TestJobAttemptsUsesOpaquePaginationCursor(t *testing.T) {
 	}
 }
 
+func TestJobReplayUsesFreshStepModeAndIdempotencyKey(t *testing.T) {
+	jobID := "00000000-0000-0000-0000-000000000001"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v2/jobs/"+jobID+"/replay" ||
+			request.Header.Get("Idempotency-Key") != "replay-intent" {
+			t.Fatalf("request = %s %s key=%q", request.Method, request.URL.Path, request.Header.Get("Idempotency-Key"))
+		}
+		body, _ := io.ReadAll(request.Body)
+		if string(body) != `{"execution_mode":"step","stop_after_step":"target_duplicate_check"}` {
+			t.Fatalf("replay body = %s", body)
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"queued","job_id":"00000000-0000-0000-0000-000000000002","replay_of_job_id":"` + jobID + `"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--api-url", server.URL, "jobs", "replay", jobID, "--stop-after-step", "target_duplicate_check", "--idempotency-key", "replay-intent",
+	}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"replay_of_job_id": "`+jobID+`"`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func TestLiveReadinessUsesExactLocalOnlyInputs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		query := request.URL.Query()

@@ -42,6 +42,7 @@ docker compose ps
 - 健康检查：`GET /health/ready`
 - OpenAPI 3.1：`GET /openapi.json`
 - AI 工具：`GET /api/v2/tools`
+- 安全回放：`POST /api/v2/jobs/{job_id}/replay`（只复制非授权输入，重新执行全部 gate）
 - Agent 发现：`GET /.well-known/upload-assistant.json`
 - Agent Skill：`GET /.well-known/upload-assistant/SKILL.md`
 
@@ -103,7 +104,7 @@ UA_POSTGRES_PASSWORD=compose-config-fixture make go-compose-config
 make verify-go-v2-local
 ```
 
-`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、42 个 AI 工具、Agent Skill、中文 Web、CLI、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
+`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、43 个 AI 工具、Agent Skill、中文 Web、CLI、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
 
 本地与 CI 测试只使用 fixture、`httptest` 和隔离 PostgreSQL，不联系真实 Tracker、下载器或图床。真实 U2→MTEAM、CHD→MTEAM、qBittorrent、MediaInfo/BDInfo/截图/mkbrr 与 imgbb/PTPimg 闭环必须由操作者提供合法账号、资源和显式授权后执行；在此之前必须保持为外部验证阻塞，不能伪造完成。
 

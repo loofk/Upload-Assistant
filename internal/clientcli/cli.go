@@ -198,7 +198,7 @@ func (r runner) request(ctx context.Context, method, requestPath string, query u
 
 func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|cancel")
+		return nil, errors.New("usage: jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel")
 	}
 	switch args[0] {
 	case "list":
@@ -261,6 +261,31 @@ func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error
 		query := url.Values{"limit": []string{strconv.Itoa(*limit)}}
 		setQuery(query, "cursor", *cursor)
 		return r.request(ctx, http.MethodGet, "/api/v2/jobs/"+id+"/attempts", query, nil, nil, true)
+	case "replay":
+		if len(args) < 2 {
+			return nil, errors.New("usage: jobs replay <job-id> [--execution-mode step|auto] [--stop-after-step STEP] [--idempotency-key KEY]")
+		}
+		id, err := validUUID(args[1], "job ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("jobs replay")
+		mode := flags.String("execution-mode", "step", "fresh replay execution mode")
+		stopAfter := flags.String("stop-after-step", "", "fresh replay workflow boundary")
+		key := flags.String("idempotency-key", "", "stable replay intent key")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(*key) == "" {
+			*key = "cli-replay-" + uuid.NewString()
+		}
+		body := map[string]any{"execution_mode": strings.TrimSpace(*mode)}
+		if strings.TrimSpace(*stopAfter) != "" {
+			body["stop_after_step"] = strings.TrimSpace(*stopAfter)
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/jobs/"+id+"/replay", nil, body, map[string]string{
+			"Idempotency-Key": strings.TrimSpace(*key),
+		}, true)
 	case "pause", "cancel", "retry":
 		if len(args) != 2 {
 			return nil, fmt.Errorf("usage: jobs %s <job-id>", args[0])
@@ -883,7 +908,7 @@ func usage() string {
 Usage:
   upload-assistant cli [global options] health
   upload-assistant cli [global options] tools
-  upload-assistant cli [global options] jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|cancel ...
+  upload-assistant cli [global options] jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel ...
   upload-assistant cli [global options] retorrent create --source-url URL --target SITE [options]
   upload-assistant cli [global options] candidates list|scan|submit ...
   upload-assistant cli [global options] sites

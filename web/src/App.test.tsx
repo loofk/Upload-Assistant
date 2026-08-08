@@ -1,4 +1,4 @@
-import {cleanup, render, screen} from "@testing-library/react";
+import {cleanup, render, screen, waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import App from "./App";
@@ -76,6 +76,45 @@ describe("App authentication boundary", () => {
     expect(await screen.findByText("上传目标站")).toBeInTheDocument();
     expect(screen.getAllByText(/remote_outcome_unknown/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/sha256:/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "重放新任务"})).not.toBeInTheDocument();
+  });
+
+  it("creates a safety-reset replay from an eligible job", async () => {
+    sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+    const originalID = "44444444-4444-4444-8444-444444444444";
+    const replayID = "77777777-7777-4777-8777-777777777777";
+    const job = (id: string, status: "blocked" | "queued") => ({
+      id, kind: "retorrent", status, execution_mode: "step", current_step: "source_parse",
+      replay_of_job_id: id === replayID ? originalID : undefined,
+      input: {target: "MTEAM"}, blockers: status === "blocked" ? [{code: "credential_required"}] : [],
+      next_actions: [], resume_state: {}, summary: {}, created_at: "2026-08-08T00:00:00Z", updated_at: "2026-08-08T00:00:00Z",
+    });
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      let payload: object;
+      let status = 200;
+      if (path.startsWith("/api/v2/jobs?")) payload = {ok: true, status: "ready", jobs: [job(originalID, "blocked")], has_more: false, next_cursor: ""};
+      else if (path === `/api/v2/jobs/${originalID}/replay` && init?.method === "POST") {
+        payload = {ok: true, status: "queued", job_id: replayID, replay_of_job_id: originalID, job: job(replayID, "queued"), blockers: [], next_actions: [], resume_state: {}, summary: {}};
+        status = 202;
+      } else if (path.endsWith("/summary")) {
+        const current = path.includes(replayID) ? job(replayID, "queued") : job(originalID, "blocked");
+        payload = {...current, ok: current.status !== "blocked", job_id: current.id, steps: [], artifacts: []};
+      } else if (path.includes("/events?")) payload = {ok: true, status: "ready", events: [], next_cursor: 0};
+      else if (path.includes("/attempts?")) payload = {ok: true, status: "ready", attempts: [], has_more: false, next_cursor: "", blockers: [], next_actions: []};
+      else payload = {};
+      return Promise.resolve(new Response(JSON.stringify(payload), {status, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", {randomUUID: () => "88888888-8888-4888-8888-888888888888"});
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name: "重放新任务"}));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => path === `/api/v2/jobs/${originalID}/replay` && init?.method === "POST")).toBe(true));
+    const replayCall = fetchMock.mock.calls.find(([path, init]) => path === `/api/v2/jobs/${originalID}/replay` && init?.method === "POST");
+    expect(new Headers(replayCall?.[1]?.headers).get("Idempotency-Key")).toBe("88888888-8888-4888-8888-888888888888");
+    expect(JSON.parse(String(replayCall?.[1]?.body))).toEqual({execution_mode: "step"});
+    expect(await screen.findByText(new RegExp(replayID))).toBeInTheDocument();
   });
 
   it("shows recursively redacted global configuration and action audits", async () => {

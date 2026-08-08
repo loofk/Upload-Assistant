@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,18 @@ type attemptJobService struct {
 	job    workflow.Job
 	page   workflow.AttemptPage
 	filter workflow.ListAttemptsFilter
+}
+
+type replayJobService struct {
+	JobService
+	job   workflow.Job
+	input workflow.ReplayJobInput
+	err   error
+}
+
+func (service *replayJobService) ReplayJob(_ context.Context, _ string, input workflow.ReplayJobInput) (workflow.Job, error) {
+	service.input = input
+	return service.job, service.err
 }
 
 func (service *attemptJobService) GetJob(context.Context, string) (workflow.Job, error) {
@@ -160,6 +173,50 @@ func TestListAttemptsUsesOpaqueCursorAndRedactsSnapshotsAndErrors(t *testing.T) 
 	}
 	if err := json.Unmarshal(envelope.Attempts[0].InputSnapshot, &snapshot); err != nil || !snapshot.Redacted || len(snapshot.SHA256) != 64 {
 		t.Fatalf("attempt snapshot/error = %#v/%v", snapshot, err)
+	}
+}
+
+func TestReplayJobDefaultsToStepModeAndReturnsLineage(t *testing.T) {
+	originalID := "44444444-4444-4444-8444-444444444444"
+	replayID := "77777777-7777-4777-8777-777777777777"
+	service := &replayJobService{job: workflow.Job{
+		ID: replayID, ReplayOfJobID: originalID, Kind: "retorrent", Status: workflow.JobQueued,
+		ExecutionMode: workflow.ExecutionStep, Input: json.RawMessage(`{"confirm_upload":false}`),
+		Blockers: json.RawMessage(`[]`), NextActions: json.RawMessage(`[]`), ResumeState: json.RawMessage(`{}`), Summary: json.RawMessage(`{}`),
+	}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/jobs/"+originalID+"/replay", nil)
+	request.SetPathValue("job_id", originalID)
+	request.Header.Set("Idempotency-Key", "replay-intent")
+	request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{
+		UserID: "operator", Role: "operator", TokenScopes: []string{"jobs:write"},
+	}))
+	response := httptest.NewRecorder()
+	(jobsAPI{service: service}).replay(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("replay status/body = %d/%s", response.Code, response.Body.String())
+	}
+	if service.input.ExecutionMode != workflow.ExecutionStep || service.input.IdempotencyKey != "replay-intent" || service.input.Owner != "operator" {
+		t.Fatalf("replay input = %#v", service.input)
+	}
+	var envelope jobEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.JobID != replayID || envelope.ReplayOfJobID != originalID {
+		t.Fatalf("replay envelope/error = %#v/%v", envelope, err)
+	}
+}
+
+func TestReplayJobReturnsStableSafetyConflict(t *testing.T) {
+	originalID := "44444444-4444-4444-8444-444444444444"
+	service := &replayJobService{err: fmt.Errorf("%w: blocker target_upload_outcome_unknown requires reconciliation", workflow.ErrReplayUnsafe)}
+	request := httptest.NewRequest(http.MethodPost, "/replay", strings.NewReader(`{"execution_mode":"auto"}`))
+	request.SetPathValue("job_id", originalID)
+	request.Header.Set("Idempotency-Key", "unsafe-replay")
+	request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{
+		UserID: "operator", Role: "operator", TokenScopes: []string{"jobs:write"},
+	}))
+	response := httptest.NewRecorder()
+	(jobsAPI{service: service}).replay(response, request)
+	if response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"replay_not_allowed"`)) {
+		t.Fatalf("unsafe replay status/body = %d/%s", response.Code, response.Body.String())
 	}
 }
 

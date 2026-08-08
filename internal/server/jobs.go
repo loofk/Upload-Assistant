@@ -23,6 +23,7 @@ import (
 
 type JobService interface {
 	CreateJob(context.Context, workflow.CreateJobInput) (workflow.Job, error)
+	ReplayJob(context.Context, string, workflow.ReplayJobInput) (workflow.Job, error)
 	GetJob(context.Context, string) (workflow.Job, error)
 	ListJobs(context.Context, workflow.ListJobsFilter) (workflow.JobPage, error)
 	ListSteps(context.Context, string) ([]workflow.Step, error)
@@ -55,16 +56,22 @@ type resumeJobRequest struct {
 	ResumeState json.RawMessage `json:"resume_state"`
 }
 
+type replayJobRequest struct {
+	ExecutionMode workflow.ExecutionMode `json:"execution_mode,omitempty"`
+	StopAfterStep string                 `json:"stop_after_step,omitempty"`
+}
+
 type jobEnvelope struct {
-	OK          bool               `json:"ok"`
-	Status      workflow.JobStatus `json:"status"`
-	JobID       string             `json:"job_id"`
-	CurrentStep string             `json:"current_step,omitempty"`
-	Blockers    json.RawMessage    `json:"blockers"`
-	NextActions json.RawMessage    `json:"next_actions"`
-	ResumeState json.RawMessage    `json:"resume_state"`
-	Summary     json.RawMessage    `json:"summary"`
-	Job         workflow.Job       `json:"job"`
+	OK            bool               `json:"ok"`
+	Status        workflow.JobStatus `json:"status"`
+	JobID         string             `json:"job_id"`
+	ReplayOfJobID string             `json:"replay_of_job_id,omitempty"`
+	CurrentStep   string             `json:"current_step,omitempty"`
+	Blockers      json.RawMessage    `json:"blockers"`
+	NextActions   json.RawMessage    `json:"next_actions"`
+	ResumeState   json.RawMessage    `json:"resume_state"`
+	Summary       json.RawMessage    `json:"summary"`
+	Job           workflow.Job       `json:"job"`
 }
 
 func registerJobRoutes(mux *http.ServeMux, service JobService, reader ArtifactContentReader) {
@@ -78,6 +85,7 @@ func registerJobRoutes(mux *http.ServeMux, service JobService, reader ArtifactCo
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/events", api.events)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts", api.artifacts)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts/{artifact_id}/content", api.artifactContent)
+	mux.HandleFunc("POST /api/v2/jobs/{job_id}/replay", api.replay)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/pause", api.pause)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/resume", api.resume)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/cancel", api.cancel)
@@ -223,12 +231,16 @@ func (a jobsAPI) summary(w http.ResponseWriter, r *http.Request) {
 		writeWorkflowError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"ok": jobOK(job.Status), "status": job.Status, "job_id": id, "kind": job.Kind,
 		"current_step": job.CurrentStep, "blockers": redactJSON(job.Blockers),
 		"next_actions": redactJSON(job.NextActions), "resume_state": redactJSON(job.ResumeState),
 		"summary": redactJSON(job.Summary), "steps": redactSteps(steps), "artifacts": redactArtifacts(artifacts),
-	})
+	}
+	if job.ReplayOfJobID != "" {
+		response["replay_of_job_id"] = job.ReplayOfJobID
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (a jobsAPI) create(w http.ResponseWriter, r *http.Request) {
@@ -429,6 +441,39 @@ func (a jobsAPI) pause(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, envelopeFor(job))
 }
 
+func (a jobsAPI) replay(w http.ResponseWriter, r *http.Request) {
+	principal, allowed := requireScope(w, r, "jobs:write")
+	if !allowed {
+		return
+	}
+	id, ok := jobID(w, r)
+	if !ok {
+		return
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" || len(idempotencyKey) > 200 {
+		writeProblem(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 200 characters")
+		return
+	}
+	request := replayJobRequest{ExecutionMode: workflow.ExecutionStep}
+	if r.ContentLength != 0 {
+		if err := decodeJSON(w, r, &request); err != nil {
+			writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
+	job, err := a.service.ReplayJob(r.Context(), id, workflow.ReplayJobInput{
+		ExecutionMode: request.ExecutionMode, StopAfterStep: request.StopAfterStep,
+		IdempotencyKey: idempotencyKey, Owner: principal.UserID,
+		Actor: workflow.Actor{Type: "user", ID: principal.UserID},
+	})
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, envelopeFor(job))
+}
+
 func (a jobsAPI) resume(w http.ResponseWriter, r *http.Request) {
 	principal, allowed := requireScope(w, r, "jobs:write")
 	if !allowed {
@@ -474,7 +519,8 @@ func envelopeFor(job workflow.Job) jobEnvelope {
 	job = redactJob(job)
 	return jobEnvelope{
 		OK: jobOK(job.Status), Status: job.Status, JobID: job.ID,
-		CurrentStep: job.CurrentStep, Blockers: job.Blockers, NextActions: job.NextActions,
+		ReplayOfJobID: job.ReplayOfJobID,
+		CurrentStep:   job.CurrentStep, Blockers: job.Blockers, NextActions: job.NextActions,
 		ResumeState: job.ResumeState, Summary: job.Summary, Job: job,
 	}
 }
@@ -593,6 +639,8 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusNotFound, "not_found", "job was not found")
 	case errors.Is(err, workflow.ErrConflict):
 		writeProblem(w, http.StatusConflict, "state_conflict", err.Error())
+	case errors.Is(err, workflow.ErrReplayUnsafe):
+		writeProblem(w, http.StatusConflict, "replay_not_allowed", err.Error())
 	case errors.Is(err, workflow.ErrUnsupportedKind):
 		writeProblem(w, http.StatusBadRequest, "unsupported_job_kind", err.Error())
 	default:

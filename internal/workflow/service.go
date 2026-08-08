@@ -54,6 +54,18 @@ func (s *Service) CreateJob(ctx context.Context, input CreateJobInput) (Job, err
 	return s.store.CreateJob(ctx, registered.versionID, registered.definition, input)
 }
 
+func (s *Service) ReplayJob(ctx context.Context, id string, input ReplayJobInput) (Job, error) {
+	original, err := s.store.GetJob(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	registered, exists := s.workflows[original.Kind]
+	if !exists {
+		return Job{}, fmt.Errorf("%w: %s", ErrUnsupportedKind, original.Kind)
+	}
+	return s.store.ReplayJob(ctx, id, registered.versionID, registered.definition, input)
+}
+
 func (s *Service) GetJob(ctx context.Context, id string) (Job, error) {
 	return s.store.GetJob(ctx, id)
 }
