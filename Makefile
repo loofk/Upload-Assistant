@@ -8,13 +8,12 @@ help: ## 查看所有可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-lint: ## 运行 ruff 代码检查
-	$(PYTHON) -m ruff check --config pyproject.toml .
+lint: go-lint ## 默认检查 Go v2
 
 lint-ptcli: ## 只检查 focused PTCLI v1 代码和验收脚本
 	$(PYTHON) -m ruff check --config pyproject.toml ptcli.py src/ptcli tests/ptcli_v1 scripts/sync_agent_skill_templates.py scripts/verify_ptcli_local_ready.py
 
-test: test-ptcli ## 默认运行快速、无网络的 focused PTCLI v1 测试
+test: go-test ## 默认运行 Go v2 测试
 
 test-ptcli: ## 运行 focused PTCLI v1 LOCAL_READY 测试
 	$(PYTHON) -m pytest -q tests/ptcli_v1
@@ -22,7 +21,7 @@ test-ptcli: ## 运行 focused PTCLI v1 LOCAL_READY 测试
 test-legacy: ## 运行 legacy/full UA 测试；需安装 requirements-legacy-dev.txt
 	$(PYTHON) -m pytest -m 'not live' --ignore=tests/ptcli_v1
 
-check: check-ptcli ## 默认执行 focused PTCLI v1 门禁
+check: go-check ## 默认执行 Go v2、Web 与构建门禁
 
 check-ptcli: lint-ptcli test-ptcli agent-skills-check ## focused lint + test + agent manifest 同步检查
 
@@ -38,7 +37,8 @@ agent-skills-check: ## 校验 OpenClaw/Hermes 静态 skill manifest 与服务契
 agent-skills-sync: ## 生成/同步 OpenClaw/Hermes 静态 skill manifest
 	$(PYTHON) scripts/sync_agent_skill_templates.py --write
 
-smoke: smoke-ptcli ## 快速导入检查（默认验证聚焦版 PT CLI）
+smoke: go-build ## 默认构建原生 Go v2 服务
+	./tmp/upload-assistant-v2 version
 
 smoke-legacy: ## 迁移期 legacy/full UA 导入检查
 	$(PYTHON) -c "from src.args import Args; print('✓ args')"

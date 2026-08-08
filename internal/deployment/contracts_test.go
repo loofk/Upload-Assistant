@@ -94,6 +94,17 @@ func TestGoV2CIAndPublicDocumentationAreTheDefault(t *testing.T) {
 	if !strings.Contains(environment, "UA_POSTGRES_PASSWORD=\n") || !strings.Contains(environment, "UA_DOWNLOADS_HOST_PATH=") {
 		t.Fatal(".env.example must require an explicit database password and document the downloads mount")
 	}
+	makefile := string(readFile(t, filepath.Join(root, "Makefile")))
+	for _, required := range []string{"lint: go-lint", "test: go-test", "check: go-check", "smoke: go-build"} {
+		if !strings.Contains(makefile, required) {
+			t.Errorf("default developer workflow is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"test: test-ptcli", "check: check-ptcli", "smoke: smoke-ptcli"} {
+		if strings.Contains(makefile, forbidden) {
+			t.Errorf("default developer workflow still routes to legacy target %q", forbidden)
+		}
+	}
 }
 
 func repositoryRoot(t *testing.T) string {
