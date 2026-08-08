@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -27,7 +28,7 @@ func TestListJobsUsesStableCursorAndFilters(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 8, 1, 2, 3, 4, time.UTC)
 	job := workflow.Job{
 		ID: "44444444-4444-4444-8444-444444444444", Kind: "retorrent", Status: workflow.JobBlocked,
-		ExecutionMode: workflow.ExecutionStep, Input: json.RawMessage(`{}`), Blockers: json.RawMessage(`[]`),
+		ExecutionMode: workflow.ExecutionStep, Input: json.RawMessage(`{"source_url":"https://u2.dmhy.org/download.php?id=1&passkey=list-secret"}`), Blockers: json.RawMessage(`[]`),
 		NextActions: json.RawMessage(`[]`), ResumeState: json.RawMessage(`{}`), Summary: json.RawMessage(`{}`),
 		CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
@@ -51,6 +52,9 @@ func TestListJobsUsesStableCursorAndFilters(t *testing.T) {
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || len(envelope.Jobs) != 1 || !envelope.HasMore || envelope.NextCursor == "" {
 		t.Fatalf("list envelope/error = %#v/%v", envelope, err)
+	}
+	if bytes.Contains(response.Body.Bytes(), []byte("list-secret")) {
+		t.Fatalf("list response exposed source secret: %s", response.Body.String())
 	}
 	cursorTime, cursorID, err := decodeJobCursor(envelope.NextCursor)
 	if err != nil || !cursorTime.Equal(createdAt) || cursorID != job.ID {

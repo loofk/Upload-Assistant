@@ -108,7 +108,7 @@ func (a jobsAPI) list(w http.ResponseWriter, r *http.Request) {
 		nextCursor = encodeJobCursor(page.Jobs[len(page.Jobs)-1])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "status": "ready", "jobs": page.Jobs,
+		"ok": true, "status": "ready", "jobs": redactJobs(page.Jobs),
 		"has_more": page.HasMore, "next_cursor": nextCursor,
 		"blockers": []any{}, "next_actions": []any{},
 	})
@@ -139,9 +139,9 @@ func (a jobsAPI) summary(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": jobOK(job.Status), "status": job.Status, "job_id": id,
-		"current_step": job.CurrentStep, "blockers": job.Blockers,
-		"next_actions": job.NextActions, "resume_state": job.ResumeState,
-		"summary": job.Summary, "steps": steps, "artifacts": artifacts,
+		"current_step": job.CurrentStep, "blockers": redactJSON(job.Blockers),
+		"next_actions": redactJSON(job.NextActions), "resume_state": redactJSON(job.ResumeState),
+		"summary": redactJSON(job.Summary), "steps": redactSteps(steps), "artifacts": redactArtifacts(artifacts),
 	})
 }
 
@@ -219,7 +219,7 @@ func (a jobsAPI) steps(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "status": job.Status, "job_id": id, "current_step": job.CurrentStep,
-		"blockers": job.Blockers, "next_actions": job.NextActions, "steps": steps,
+		"blockers": redactJSON(job.Blockers), "next_actions": redactJSON(job.NextActions), "steps": redactSteps(steps),
 	})
 }
 
@@ -255,7 +255,7 @@ func (a jobsAPI) events(w http.ResponseWriter, r *http.Request) {
 		nextCursor = events[len(events)-1].Sequence
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "status": "ready", "job_id": id, "events": events, "next_cursor": nextCursor,
+		"ok": true, "status": "ready", "job_id": id, "events": redactEvents(events), "next_cursor": nextCursor,
 	})
 }
 
@@ -278,8 +278,8 @@ func (a jobsAPI) artifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "status": job.Status, "job_id": id, "artifacts": artifacts,
-		"blockers": job.Blockers, "next_actions": job.NextActions,
+		"ok": true, "status": job.Status, "job_id": id, "artifacts": redactArtifacts(artifacts),
+		"blockers": redactJSON(job.Blockers), "next_actions": redactJSON(job.NextActions),
 	})
 }
 
@@ -342,6 +342,7 @@ func (a jobsAPI) cancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func envelopeFor(job workflow.Job) jobEnvelope {
+	job = redactJob(job)
 	return jobEnvelope{
 		OK: jobOK(job.Status), Status: job.Status, JobID: job.ID,
 		CurrentStep: job.CurrentStep, Blockers: job.Blockers, NextActions: job.NextActions,
