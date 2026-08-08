@@ -1,5 +1,6 @@
 import {FormEvent, useCallback, useEffect, useMemo, useState} from "react";
 import {ApiClient, ApiError} from "./api";
+import Candidates from "./Candidates";
 import Configuration from "./Configuration";
 import type {
   Artifact,
@@ -21,6 +22,7 @@ const downloadableArtifactKinds = new Set([
   "target_package", "duplicate_check", "target_torrent_receipt", "preupload_duplicate_check",
   "target_upload_receipt", "target_torrent_download_receipt", "target_injection_receipt",
   "target_seed_observation", "job_summary",
+  "candidate_scan", "candidate_evaluation", "candidate_digest", "candidate_summary",
 ]);
 const statusLabels: Record<JobStatus, string> = {
   draft: "草稿",
@@ -92,7 +94,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [section, setSection] = useState<"jobs" | "configuration">("jobs");
+  const [section, setSection] = useState<"jobs" | "candidates" | "configuration">("jobs");
 
   const describeError = useCallback((reason: unknown) => {
     if (reason instanceof ApiError && reason.status === 401) return "API Token 无效、已撤销或已过期。";
@@ -157,7 +159,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
           <div className="brand-mark small" aria-hidden="true">UA</div>
           <div><strong>Upload Assistant</strong><span>可审计转种控制台</span></div>
         </div>
-        <nav className="main-nav" aria-label="主导航"><button className={section === "jobs" ? "active" : ""} onClick={() => setSection("jobs")}>任务</button><button className={section === "configuration" ? "active" : ""} onClick={() => setSection("configuration")}>配置</button></nav>
+        <nav className="main-nav" aria-label="主导航"><button className={section === "jobs" ? "active" : ""} onClick={() => setSection("jobs")}>任务</button><button className={section === "candidates" ? "active" : ""} onClick={() => setSection("candidates")}>每日候选</button><button className={section === "configuration" ? "active" : ""} onClick={() => setSection("configuration")}>配置</button></nav>
         <div className="topbar-actions">
           <span className="service-state"><i /> 本地服务已连接</span>
           <button className="ghost" onClick={() => void refreshAll()}>刷新</button>
@@ -167,7 +169,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
 
       {error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
 
-      {section === "configuration" ? <Configuration client={client} onError={(reason) => setError(describeError(reason))} /> : <div className="workspace">
+      {section === "configuration" ? <Configuration client={client} onError={(reason) => setError(describeError(reason))} /> : section === "candidates" ? <Candidates client={client} onError={(reason) => setError(describeError(reason))} onJobCreated={(jobID) => { setSection("jobs"); setSelectedID(jobID); void loadJobs(); }} /> : <div className="workspace">
         <aside className="job-sidebar">
           <div className="sidebar-heading">
             <div><p className="eyebrow">DURABLE JOBS</p><h2>任务</h2></div>
@@ -216,7 +218,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
 }
 
 function JobCard({job, selected, onSelect}: {job: Job; selected: boolean; onSelect: (id: string) => void}) {
-  const source = typeof job.input?.source_url === "string" ? job.input.source_url : "来源待解析";
+  const source = typeof job.input?.source_url === "string" ? job.input.source_url : typeof job.input?.source === "string" ? job.input.source : "来源待解析";
   const target = typeof job.input?.target === "string" ? job.input.target : "目标待解析";
   let sourceLabel = source;
   try { sourceLabel = new URL(source).hostname; } catch { /* Keep the bounded redacted string. */ }
@@ -298,7 +300,7 @@ function JobDetail({
       <header className="detail-header">
         <div>
           <div className="title-row"><StatusPill status={detail.status} /><span className="mode-label">{detail.current_step || "流程结束"}</span></div>
-          <h1>转种任务 <span>{shortID(detail.job_id)}</span></h1>
+          <h1>{detail.kind === "daily_candidates" ? "每日候选任务" : "转种任务"} <span>{shortID(detail.job_id)}</span></h1>
           <button className="copy-id" onClick={() => void navigator.clipboard?.writeText(detail.job_id)}>{detail.job_id} · 复制</button>
         </div>
         <div className="detail-actions">
@@ -493,6 +495,8 @@ function humanizeStep(key: string): string {
     target_duplicate_check: "目标站查重", target_rules: "验证目标站规则", target_torrent: "生成目标种子",
     target_upload: "上传目标站", target_torrent_download: "下载目标站新种", target_inject: "注入目标站做种",
     target_seed_verify: "核验做种义务", summary: "生成闭环总结",
+    candidate_rules: "冻结候选规则", candidate_scan: "扫描源站候选",
+    candidate_evaluate: "评估元数据与查重", candidate_rank: "排名并持久化", candidate_summary: "生成候选总结",
   };
   return labels[key] ?? key.replaceAll("_", " ");
 }

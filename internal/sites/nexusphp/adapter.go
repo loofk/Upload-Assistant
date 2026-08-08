@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -158,6 +159,56 @@ func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceRefe
 	}, nil
 }
 
+func (adapter *Adapter) ListCandidates(ctx context.Context, request sites.CandidateScanRequest) (sites.CandidateScanEvidence, error) {
+	if request.Limit <= 0 {
+		request.Limit = 20
+	}
+	if request.Limit > 100 {
+		request.Limit = 100
+	}
+	if request.Page <= 0 {
+		request.Page = 1
+	}
+	runtime, err := adapter.runtime(ctx)
+	if err != nil {
+		return sites.CandidateScanEvidence{}, err
+	}
+	cookie := strings.TrimSpace(runtime.Credentials["cookie"])
+	if cookie == "" {
+		return sites.CandidateScanEvidence{}, sites.NewAdapterError(
+			"site_cookie_required", "an enabled cookie credential is required to list source candidates", false, nil,
+		)
+	}
+	listingURL := adapter.resolve("/torrents.php", url.Values{"page": []string{strconv.Itoa(request.Page - 1)}})
+	response, err := adapter.get(ctx, listingURL, cookie)
+	if err != nil {
+		return sites.CandidateScanEvidence{}, err
+	}
+	defer response.Body.Close()
+	if err := validateStatus(response, "source candidate listing"); err != nil {
+		return sites.CandidateScanEvidence{}, err
+	}
+	body, err := readBounded(response.Body, maxDetailsBytes)
+	if err != nil || !looksLikeHTML(response.Header.Get("Content-Type"), body) {
+		return sites.CandidateScanEvidence{}, sites.NewAdapterError("source_candidate_listing_invalid", "source candidate listing is unreadable or not HTML", false, err)
+	}
+	if looksLikeLogin(string(body)) {
+		return sites.CandidateScanEvidence{}, sites.NewAdapterError("site_authentication_failed", "source site returned a login page; refresh the cookie credential", false, nil)
+	}
+	items := parseCandidateRows(adapter.profile.SiteCode, adapter.baseURL, string(body), request.Limit)
+	downloadable := strings.TrimSpace(runtime.Credentials["passkey"]) != ""
+	for index := range items {
+		items[index].Downloadable = downloadable
+		if !downloadable {
+			items[index].DownloadBlockers = []string{"site_passkey_required"}
+		}
+	}
+	return sites.CandidateScanEvidence{
+		SiteCode: adapter.profile.SiteCode, Page: request.Page, Limit: request.Limit,
+		Items: items, ScannedAt: time.Now().UTC(),
+	}, nil
+}
+
 func (adapter *Adapter) runtime(ctx context.Context) (integrations.RuntimeSite, error) {
 	runtime, err := adapter.provider.GetRuntimeSite(ctx, adapter.profile.SiteCode)
 	if err != nil {
@@ -286,7 +337,101 @@ var (
 	anidbPattern       = regexp.MustCompile(`(?i)anidb\.net/(?:anime/|a)(\d+)`)
 	hashPattern        = regexp.MustCompile(`(?i)(?:info[ _-]?hash|torrent[ _-]?hash)[^a-f0-9]{0,40}([a-f0-9]{40})`)
 	loginFormPattern   = regexp.MustCompile(`(?is)<form[^>]+(?:login\.php|name=["']login)`)
+	rowPattern         = regexp.MustCompile(`(?is)(<tr\b[^>]*>.*?</tr>)`)
+	detailsLinkPattern = regexp.MustCompile(`(?is)<a\b[^>]*href=["']([^"']*details\.php\?[^"']*)["'][^>]*>(.*?)</a>`)
+	dataBytesPattern   = regexp.MustCompile(`(?i)data-(?:size-)?bytes=["'](\d+)["']`)
+	humanSizePattern   = regexp.MustCompile(`(?i)\b(\d+(?:\.\d+)?)\s*(TiB|GiB|MiB|KiB|TB|GB|MB|KB)\b`)
+	timeElementPattern = regexp.MustCompile(`(?is)<time\b[^>]*datetime=["']([^"']+)["']`)
+	dateTimePattern    = regexp.MustCompile(`\b(20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)\b`)
 )
+
+func parseCandidateRows(siteCode string, baseURL *url.URL, page string, limit int) []sites.SourceCandidate {
+	rows := rowPattern.FindAllStringSubmatch(page, -1)
+	items := make([]sites.SourceCandidate, 0, min(limit, len(rows)))
+	seen := make(map[string]struct{})
+	for _, rowMatch := range rows {
+		row := rowMatch[1]
+		link := detailsLinkPattern.FindStringSubmatch(row)
+		if len(link) != 3 {
+			continue
+		}
+		href := html.UnescapeString(strings.TrimSpace(link[1]))
+		parsed, err := url.Parse(href)
+		if err != nil {
+			continue
+		}
+		torrentID := strings.TrimSpace(parsed.Query().Get("id"))
+		if torrentID == "" {
+			continue
+		}
+		if _, exists := seen[torrentID]; exists {
+			continue
+		}
+		seen[torrentID] = struct{}{}
+		details := *baseURL
+		details.Path = strings.TrimRight(baseURL.Path, "/") + "/details.php"
+		details.RawQuery = url.Values{"id": []string{torrentID}}.Encode()
+		labels := promotionLabels(normalizedText(row))
+		item := sites.SourceCandidate{
+			Tracker: siteCode, TorrentID: torrentID, DetailsURL: details.String(),
+			Title: normalizedText(link[2]), SizeBytes: candidateSize(row),
+			PublishedAt: candidateTime(row), PromotionLabels: labels, DownloadBlockers: []string{},
+		}
+		for _, label := range labels {
+			if label == "free" || label == "freeleech" || label == "免费" || label == "免費" {
+				item.Free = true
+			}
+		}
+		items = append(items, item)
+		if len(items) == limit {
+			break
+		}
+	}
+	return items
+}
+
+func candidateSize(row string) int64 {
+	if match := dataBytesPattern.FindStringSubmatch(row); len(match) == 2 {
+		value, _ := strconv.ParseInt(match[1], 10, 64)
+		return value
+	}
+	match := humanSizePattern.FindStringSubmatch(normalizedText(row))
+	if len(match) != 3 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(match[1], 64)
+	if err != nil {
+		return 0
+	}
+	multipliers := map[string]float64{
+		"KIB": 1 << 10, "MIB": 1 << 20, "GIB": 1 << 30, "TIB": 1 << 40,
+		"KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
+	}
+	return int64(value * multipliers[strings.ToUpper(match[2])])
+}
+
+func candidateTime(row string) *time.Time {
+	value := ""
+	if match := timeElementPattern.FindStringSubmatch(row); len(match) == 2 {
+		value = strings.TrimSpace(match[1])
+	} else if match := dateTimePattern.FindStringSubmatch(normalizedText(row)); len(match) == 2 {
+		value = strings.TrimSpace(match[1])
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02T15:04:05"} {
+		var parsed time.Time
+		var err error
+		if layout == time.RFC3339 {
+			parsed, err = time.Parse(layout, value)
+		} else {
+			parsed, err = time.ParseInLocation(layout, value, time.FixedZone("Asia/Shanghai", 8*60*60))
+		}
+		if err == nil {
+			parsed = parsed.UTC()
+			return &parsed
+		}
+	}
+	return nil
+}
 
 func parseDetails(siteCode, torrentID, detailsURL, page string) sites.SourceInfo {
 	text := normalizedText(page)
@@ -379,4 +524,7 @@ func responseFilename(disposition string) string {
 	return filename
 }
 
-var _ sites.SourceAdapter = (*Adapter)(nil)
+var (
+	_ sites.SourceAdapter          = (*Adapter)(nil)
+	_ sites.SourceCandidateAdapter = (*Adapter)(nil)
+)

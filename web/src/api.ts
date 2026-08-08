@@ -1,5 +1,6 @@
 import type {
   CreateJobInput,
+  DailyCandidateListEnvelope,
   EventsEnvelope,
   Downloader,
   ImageHost,
@@ -35,10 +36,36 @@ export class ApiClient {
   constructor(private readonly token: string) {}
 
   async listJobs(options: {status?: JobStatus | ""; cursor?: string; limit?: number} = {}): Promise<JobListEnvelope> {
-    const query = new URLSearchParams({kind: "retorrent", limit: String(options.limit ?? 25)});
+    const query = new URLSearchParams({limit: String(options.limit ?? 25)});
     if (options.status) query.set("status", options.status);
     if (options.cursor) query.set("cursor", options.cursor);
     return this.request(`/api/v2/jobs?${query.toString()}`);
+  }
+
+  async listDailyCandidates(options: {source: string; target: string; date?: string; limit?: number}): Promise<DailyCandidateListEnvelope> {
+    const query = new URLSearchParams({source: options.source.toUpperCase(), target: options.target.toUpperCase(), limit: String(options.limit ?? 25)});
+    if (options.date) query.set("date", options.date);
+    return this.request(`/api/v2/candidates/daily?${query.toString()}`);
+  }
+
+  async createDailyCandidateJob(input: {source: string; target: string; targetCount: number; scanLimit: number; date?: string}): Promise<JobEnvelope> {
+    return this.request("/api/v2/candidates/daily", {
+      method: "POST",
+      headers: {"Idempotency-Key": crypto.randomUUID()},
+      body: JSON.stringify({
+        source: input.source.toUpperCase(), target: input.target.toUpperCase(),
+        target_count: input.targetCount, scan_limit: input.scanLimit,
+        date: input.date || undefined, execution_mode: "auto",
+      }),
+    });
+  }
+
+  async submitDailyCandidate(candidateID: string): Promise<JobEnvelope> {
+    return this.request(`/api/v2/candidates/${encodeURIComponent(candidateID)}/retorrent-job`, {
+      method: "POST",
+      headers: {"Idempotency-Key": crypto.randomUUID()},
+      body: JSON.stringify({execution_mode: "step"}),
+    });
   }
 
   async getSummary(jobID: string): Promise<JobSummaryEnvelope> {

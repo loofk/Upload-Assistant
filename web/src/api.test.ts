@@ -31,4 +31,26 @@ describe("ApiClient safety defaults", () => {
     expect(body.input.accept_rules).toBeUndefined();
     expect(body.execution_mode).toBe("step");
   });
+
+  it("creates audited candidate scans and submits candidates only in step mode", async () => {
+	const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ok: true, job_id: "job-id"}), {
+	  status: 202, headers: {"Content-Type": "application/json"},
+	})));
+	vi.stubGlobal("fetch", fetchMock);
+	vi.stubGlobal("crypto", {randomUUID: () => "22222222-2222-4222-8222-222222222222"});
+	const client = new ApiClient("ua_test-token-value-that-is-long-enough");
+
+	await client.createDailyCandidateJob({source: "u2", target: "mteam", targetCount: 10, scanLimit: 30});
+	await client.submitDailyCandidate("55555555-5555-4555-8555-555555555555");
+
+	const [scanPath, scanInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+	expect(scanPath).toBe("/api/v2/candidates/daily");
+	expect(JSON.parse(String(scanInit.body))).toMatchObject({source: "U2", target: "MTEAM", target_count: 10, execution_mode: "auto"});
+	const [submitPath, submitInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+	expect(submitPath).toBe("/api/v2/candidates/55555555-5555-4555-8555-555555555555/retorrent-job");
+	const submitBody = JSON.parse(String(submitInit.body));
+	expect(submitBody.execution_mode).toBe("step");
+	expect(submitBody.accept_rules).toBeUndefined();
+	expect(submitBody.confirm_upload).toBeUndefined();
+  });
 });

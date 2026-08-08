@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("workflow resource not found")
-	ErrConflict = errors.New("workflow state conflict")
+	ErrNotFound        = errors.New("workflow resource not found")
+	ErrConflict        = errors.New("workflow state conflict")
+	ErrUnsupportedKind = errors.New("workflow kind is not registered")
 )
 
 type JobStatus string

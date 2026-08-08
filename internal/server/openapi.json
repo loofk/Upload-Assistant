@@ -59,12 +59,42 @@
         "responses": {"200": {"description": "Compact AI tool definitions", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ToolsResponse"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/candidates/daily": {
+      "get": {
+        "operationId": "listDailyCandidates",
+        "parameters": [
+          {"name": "source", "in": "query", "schema": {"type": "string"}},
+          {"name": "target", "in": "query", "schema": {"type": "string"}},
+          {"name": "date", "in": "query", "schema": {"type": "string", "format": "date"}},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["candidate", "blocked", "submitted", "expired"]}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10}}
+        ],
+        "responses": {"200": {"description": "Persisted ranked daily candidates", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DailyCandidateListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+      },
+      "post": {
+        "operationId": "createDailyCandidateJob",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateDailyCandidateJobRequest"}}}},
+        "responses": {"202": {"description": "Daily candidate workflow accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/candidates/{candidate_id}/retorrent-job": {
+      "post": {
+        "operationId": "submitDailyCandidate",
+        "parameters": [
+          {"name": "candidate_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"$ref": "#/components/parameters/IdempotencyKey"}
+        ],
+        "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubmitDailyCandidateRequest"}}}},
+        "responses": {"202": {"description": "Unconfirmed retorrent workflow accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/jobs": {
       "get": {
         "operationId": "listJobs",
         "parameters": [
           {"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/JobStatus"}},
-          {"name": "kind", "in": "query", "schema": {"type": "string", "const": "retorrent"}},
+          {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["retorrent", "daily_candidates"]}},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
           {"name": "cursor", "in": "query", "schema": {"type": "string"}}
         ],
@@ -331,6 +361,70 @@
         "type": "object", "additionalProperties": false,
         "properties": {"name": {"type": "string", "default": "default", "description": "Configured imgbb/PTPimg integration name."}}
       },
+      "DailyCandidateInput": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source", "target"],
+        "properties": {
+          "source": {"type": "string"}, "target": {"type": "string"},
+          "target_count": {"type": "integer", "minimum": 1, "maximum": 25, "default": 10},
+          "scan_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+          "page": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1},
+          "date": {"type": "string", "format": "date"}
+        }
+      },
+      "CreateDailyCandidateJobRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source", "target"],
+        "properties": {
+          "source": {"type": "string"}, "target": {"type": "string"},
+          "target_count": {"type": "integer", "minimum": 1, "maximum": 25, "default": 10},
+          "scan_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+          "page": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1},
+          "date": {"type": "string", "format": "date"},
+          "execution_mode": {"type": "string", "enum": ["auto", "step"], "default": "auto"},
+          "stop_after_step": {"type": "string"}
+        }
+      },
+      "SubmitDailyCandidateRequest": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "execution_mode": {"type": "string", "enum": ["auto", "step"], "default": "step"},
+          "stop_after_step": {"type": "string"},
+          "downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
+          "target_downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
+          "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
+          "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
+          "target_package": {"$ref": "#/components/schemas/MTeamPackageOptions"}
+        },
+        "description": "This request deliberately has no accept_rules or confirm_upload fields. The created retorrent job must satisfy those gates later."
+      },
+      "DailyCandidateItem": {
+        "type": "object", "required": ["id", "source_site", "target_site", "source_torrent_id", "recommendation_date", "score", "payload", "status", "expires_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "discovery_job_id": {"type": "string", "format": "uuid"},
+          "submitted_job_id": {"type": "string", "format": "uuid"}, "source_site": {"type": "string"}, "target_site": {"type": "string"},
+          "source_torrent_id": {"type": "string"}, "recommendation_date": {"type": "string", "format": "date-time"},
+          "rank": {"type": "integer", "minimum": 1}, "score": {"type": "number"}, "payload": {"type": "object"},
+          "status": {"type": "string", "enum": ["candidate", "blocked", "submitted", "expired"]}, "expires_at": {"type": "string", "format": "date-time"},
+          "retorrent_action": {
+            "type": "object", "required": ["method", "path", "requires"],
+            "properties": {
+              "method": {"type": "string", "const": "POST"}, "path": {"type": "string"},
+              "requires": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      },
+      "DailyCandidateListEnvelope": {
+        "type": "object", "required": ["ok", "status", "date", "count", "ready_count", "candidates", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean"}, "status": {"type": "string"}, "date": {"type": "string", "format": "date"},
+          "count": {"type": "integer"}, "ready_count": {"type": "integer"},
+          "candidates": {"type": "array", "items": {"$ref": "#/components/schemas/DailyCandidateItem"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
       "MTeamPackageOptions": {
         "type": "object",
         "additionalProperties": false,
@@ -354,7 +448,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["input"],
-        "properties": {"kind": {"type": "string", "const": "retorrent", "default": "retorrent"}, "execution_mode": {"type": "string", "enum": ["auto", "step"], "default": "auto"}, "stop_after_step": {"type": "string"}, "input": {"$ref": "#/components/schemas/RetorrentInput"}}
+        "properties": {"kind": {"type": "string", "enum": ["retorrent", "daily_candidates"], "default": "retorrent"}, "execution_mode": {"type": "string", "enum": ["auto", "step"], "default": "auto"}, "stop_after_step": {"type": "string"}, "input": {"oneOf": [{"$ref": "#/components/schemas/RetorrentInput"}, {"$ref": "#/components/schemas/DailyCandidateInput"}]}}
       },
       "ResumeJobRequest": {
         "type": "object",
@@ -423,8 +517,8 @@
       },
       "JobSummaryEnvelope": {
         "type": "object",
-        "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
-        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+        "required": ["ok", "status", "job_id", "kind", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
+		"properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string", "enum": ["retorrent", "daily_candidates"]}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
       },
       "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object", "description": "The raw durable snapshot is never returned. The API exposes only {redacted:true,sha256:<digest>}."}, "output_summary": {"type": "object", "description": "Recursively redacted step output evidence."}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
       "Event": {"type": "object", "required": ["id", "job_id", "sequence", "type", "actor_type", "payload", "hash", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "sequence": {"type": "integer"}, "type": {"type": "string"}, "actor_type": {"type": "string"}, "actor_id": {"type": "string"}, "payload": {"type": "object"}, "previous_hash": {"type": "string"}, "hash": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}},

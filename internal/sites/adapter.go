@@ -38,10 +38,41 @@ type DownloadedTorrent struct {
 	Hashes      torrentmeta.InfoHashes `json:"hashes"`
 }
 
+type CandidateScanRequest struct {
+	Limit int `json:"limit"`
+	Page  int `json:"page"`
+}
+
+type SourceCandidate struct {
+	Tracker          string     `json:"tracker"`
+	TorrentID        string     `json:"torrent_id"`
+	DetailsURL       string     `json:"details_url"`
+	Title            string     `json:"title"`
+	SizeBytes        int64      `json:"size_bytes,omitempty"`
+	PublishedAt      *time.Time `json:"published_at,omitempty"`
+	PromotionLabels  []string   `json:"promotion_labels"`
+	Free             bool       `json:"free"`
+	Downloadable     bool       `json:"downloadable"`
+	DownloadBlockers []string   `json:"download_blockers"`
+}
+
+type CandidateScanEvidence struct {
+	SiteCode  string            `json:"site_code"`
+	Page      int               `json:"page"`
+	Limit     int               `json:"limit"`
+	Items     []SourceCandidate `json:"items"`
+	ScannedAt time.Time         `json:"scanned_at"`
+}
+
 type SourceAdapter interface {
 	SiteCode() string
 	Inspect(context.Context, SourceReference) (SourceInfo, error)
 	Download(context.Context, SourceReference) (DownloadedTorrent, error)
+}
+
+type SourceCandidateAdapter interface {
+	SiteCode() string
+	ListCandidates(context.Context, CandidateScanRequest) (CandidateScanEvidence, error)
 }
 
 type AdapterError struct {
@@ -73,11 +104,12 @@ func ErrorDetails(err error) (code, message string, temporary bool) {
 }
 
 type Registry struct {
-	adapters map[string]SourceAdapter
+	adapters          map[string]SourceAdapter
+	candidateAdapters map[string]SourceCandidateAdapter
 }
 
 func NewRegistry(adapters ...SourceAdapter) (*Registry, error) {
-	registry := &Registry{adapters: map[string]SourceAdapter{}}
+	registry := &Registry{adapters: map[string]SourceAdapter{}, candidateAdapters: map[string]SourceCandidateAdapter{}}
 	for _, adapter := range adapters {
 		if err := registry.Register(adapter); err != nil {
 			return nil, err
@@ -98,7 +130,22 @@ func (registry *Registry) Register(adapter SourceAdapter) error {
 		return fmt.Errorf("site adapter %s is already registered", code)
 	}
 	registry.adapters[code] = adapter
+	if candidateAdapter, ok := adapter.(SourceCandidateAdapter); ok {
+		registry.candidateAdapters[code] = candidateAdapter
+	}
 	return nil
+}
+
+func (registry *Registry) ListCandidates(ctx context.Context, siteCode string, request CandidateScanRequest) (CandidateScanEvidence, error) {
+	code := strings.ToUpper(strings.TrimSpace(siteCode))
+	adapter, exists := registry.candidateAdapters[code]
+	if !exists {
+		return CandidateScanEvidence{}, NewAdapterError(
+			"source_candidate_adapter_unavailable",
+			fmt.Sprintf("candidate listing adapter for %s is not implemented", code), false, nil,
+		)
+	}
+	return adapter.ListCandidates(ctx, request)
 }
 
 func (registry *Registry) Inspect(ctx context.Context, reference SourceReference) (SourceInfo, error) {

@@ -89,6 +89,7 @@ var downloadableArtifactKinds = map[string]struct{}{
 	"target_torrent_receipt": {}, "preupload_duplicate_check": {}, "target_upload_receipt": {},
 	"target_torrent_download_receipt": {}, "target_injection_receipt": {},
 	"target_seed_observation": {}, "job_summary": {},
+	"candidate_scan": {}, "candidate_evaluation": {}, "candidate_digest": {}, "candidate_summary": {},
 }
 
 func (a jobsAPI) artifactContent(w http.ResponseWriter, r *http.Request) {
@@ -168,8 +169,8 @@ func (a jobsAPI) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
-	if kind != "" && kind != "retorrent" {
-		writeProblem(w, http.StatusBadRequest, "invalid_kind", "only retorrent jobs are available in this build")
+	if kind != "" && kind != "retorrent" && kind != "daily_candidates" {
+		writeProblem(w, http.StatusBadRequest, "invalid_kind", "kind must be retorrent or daily_candidates")
 		return
 	}
 	filter := workflow.ListJobsFilter{Status: status, Kind: kind, Limit: limit}
@@ -221,7 +222,7 @@ func (a jobsAPI) summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": jobOK(job.Status), "status": job.Status, "job_id": id,
+		"ok": jobOK(job.Status), "status": job.Status, "job_id": id, "kind": job.Kind,
 		"current_step": job.CurrentStep, "blockers": redactJSON(job.Blockers),
 		"next_actions": redactJSON(job.NextActions), "resume_state": redactJSON(job.ResumeState),
 		"summary": redactJSON(job.Summary), "steps": redactSteps(steps), "artifacts": redactArtifacts(artifacts),
@@ -246,8 +247,8 @@ func (a jobsAPI) create(w http.ResponseWriter, r *http.Request) {
 	if request.Kind == "" {
 		request.Kind = "retorrent"
 	}
-	if request.Kind != "retorrent" {
-		writeProblem(w, http.StatusBadRequest, "unsupported_job_kind", "only retorrent jobs are available in this build")
+	if request.Kind != "retorrent" && request.Kind != "daily_candidates" {
+		writeProblem(w, http.StatusBadRequest, "unsupported_job_kind", "kind must be retorrent or daily_candidates")
 		return
 	}
 	job, err := a.service.CreateJob(r.Context(), workflow.CreateJobInput{
@@ -520,6 +521,8 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusNotFound, "not_found", "job was not found")
 	case errors.Is(err, workflow.ErrConflict):
 		writeProblem(w, http.StatusConflict, "state_conflict", err.Error())
+	case errors.Is(err, workflow.ErrUnsupportedKind):
+		writeProblem(w, http.StatusBadRequest, "unsupported_job_kind", err.Error())
 	default:
 		writeProblem(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
 	}

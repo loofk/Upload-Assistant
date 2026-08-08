@@ -19,6 +19,7 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
+	"github.com/loofk/upload-assistant/v2/internal/candidates"
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
@@ -107,6 +108,14 @@ func serve(args []string) error {
 		return fmt.Errorf("ensure retorrent workflow: %w", err)
 	}
 	jobService := workflow.NewService(jobStore, definition, workflowID)
+	candidateDefinition := workflow.DailyCandidatesDefinition()
+	candidateWorkflowID, err := jobStore.EnsureDefinition(ctx, candidateDefinition)
+	if err != nil {
+		return fmt.Errorf("ensure daily candidate workflow: %w", err)
+	}
+	if err := jobService.RegisterDefinition(candidateDefinition, candidateWorkflowID); err != nil {
+		return fmt.Errorf("register daily candidate workflow: %w", err)
+	}
 	authStore := security.NewAuthStore(pool)
 	keyring, createdMasterKey, err := security.LoadOrCreateKeyring(cfg.MasterKeyFile)
 	if err != nil {
@@ -128,6 +137,7 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize artifact store: %w", err)
 	}
+	candidateStore := candidates.NewStore(pool)
 	sourceRegistry, err := buildSourceRegistry(integrationStore)
 	if err != nil {
 		return fmt.Errorf("initialize source adapters: %w", err)
@@ -179,6 +189,7 @@ func serve(args []string) error {
 		worker.WithTargetInjection(downloaderManager, artifactStore),
 		worker.WithTargetSeedVerification(downloaderManager, artifactStore),
 		worker.WithSummary(artifactStore),
+		worker.WithDailyCandidates(ruleStore, sourceRegistry, targetDuplicateRegistry, candidateStore, artifactStore),
 	)
 	go jobRunner.Run(ctx)
 
@@ -190,6 +201,7 @@ func serve(args []string) error {
 		Integrations: integrationStore,
 		Downloaders:  downloaderManager,
 		Artifacts:    artifactStore,
+		Candidates:   candidateStore,
 		DataDir:      cfg.DataDir,
 		Logger:       logger,
 		Build:        buildinfo.Current(),

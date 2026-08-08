@@ -3,21 +3,55 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
-type Service struct {
-	store      *Store
+type registeredWorkflow struct {
 	definition Definition
-	workflowID string
+	versionID  string
+}
+
+type Service struct {
+	store       *Store
+	defaultKind string
+	workflows   map[string]registeredWorkflow
 }
 
 func NewService(store *Store, definition Definition, workflowID string) *Service {
-	return &Service{store: store, definition: definition, workflowID: workflowID}
+	service := &Service{store: store, defaultKind: definition.Name, workflows: make(map[string]registeredWorkflow)}
+	_ = service.RegisterDefinition(definition, workflowID)
+	return service
+}
+
+func (s *Service) RegisterDefinition(definition Definition, workflowID string) error {
+	if s == nil || s.store == nil {
+		return fmt.Errorf("workflow service store is required")
+	}
+	if definition.Name == "" || workflowID == "" {
+		return fmt.Errorf("workflow name and version id are required")
+	}
+	if _, _, err := definition.MarshalAndHash(); err != nil {
+		return err
+	}
+	if _, exists := s.workflows[definition.Name]; exists {
+		return fmt.Errorf("workflow kind %s is already registered", definition.Name)
+	}
+	s.workflows[definition.Name] = registeredWorkflow{definition: definition, versionID: workflowID}
+	return nil
 }
 
 func (s *Service) CreateJob(ctx context.Context, input CreateJobInput) (Job, error) {
-	return s.store.CreateJob(ctx, s.workflowID, s.definition, input)
+	kind := input.Kind
+	if kind == "" {
+		kind = s.defaultKind
+		input.Kind = kind
+	}
+	registered, exists := s.workflows[kind]
+	if !exists {
+		return Job{}, fmt.Errorf("%w: %s", ErrUnsupportedKind, kind)
+	}
+	return s.store.CreateJob(ctx, registered.versionID, registered.definition, input)
 }
 
 func (s *Service) GetJob(ctx context.Context, id string) (Job, error) {

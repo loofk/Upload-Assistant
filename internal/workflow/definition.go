@@ -48,6 +48,20 @@ func RetorrentDefinition() Definition {
 	}
 }
 
+func DailyCandidatesDefinition() Definition {
+	return Definition{
+		Name:    "daily_candidates",
+		Version: 1,
+		Steps: []StepDefinition{
+			{Key: "candidate_rules", Required: true, GateKind: "active_rules"},
+			{Key: "candidate_scan", Required: true},
+			{Key: "candidate_evaluate", Required: true, GateKind: "duplicate_check"},
+			{Key: "candidate_rank", Required: true},
+			{Key: "candidate_summary", Required: true},
+		},
+	}
+}
+
 func (d Definition) MarshalAndHash() ([]byte, string, error) {
 	if d.Name == "" || d.Version <= 0 || len(d.Steps) == 0 {
 		return nil, "", fmt.Errorf("invalid workflow definition")

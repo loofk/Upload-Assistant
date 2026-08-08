@@ -28,6 +28,16 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 
 技能不会代表用户接受站规或确认 live 上传。`accept_rules` 必须绑定当前生效规则指纹和人工 obligation；`confirm_upload` 必须在最终查重和不可变上传包可审阅后由用户显式提供。
 
+## 每日候选
+
+每日候选也是 PostgreSQL 持久任务，不是同步抓取请求：
+
+- `POST /api/v2/candidates/daily` 创建 `daily_candidates` job；`candidate_rules`、`candidate_scan`、`candidate_evaluate`、`candidate_rank`、`candidate_summary` 五步均可审计和恢复。
+- `GET /api/v2/candidates/daily` 读取按日期持久化的候选、排序、推荐理由、风险、阻塞、metadata 和目标站查重证据。
+- `POST /api/v2/candidates/{candidate_id}/retorrent-job` 只创建安全的未确认转种 job；它不会推断 `accept_rules`，并固定以 `confirm_upload=false` 开始。
+
+当前阶段由 API 或 Web 手动触发每日扫描。常驻定时调度和主动推送仍属于后续能力；在它们完成前，不应把“每天自动推送”报告为已完成。
+
 ## 开发验收
 
 ```bash

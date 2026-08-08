@@ -38,3 +38,19 @@ func TestDefinitionHashIsStable(t *testing.T) {
 		t.Fatal("workflow definition serialization is not stable")
 	}
 }
+
+func TestDailyCandidatesDefinitionHasAuditableBoundaries(t *testing.T) {
+	definition := DailyCandidatesDefinition()
+	want := []string{"candidate_rules", "candidate_scan", "candidate_evaluate", "candidate_rank", "candidate_summary"}
+	if definition.Name != "daily_candidates" || len(definition.Steps) != len(want) {
+		t.Fatalf("daily candidate definition = %s/%d", definition.Name, len(definition.Steps))
+	}
+	for index, key := range want {
+		if definition.Steps[index].Key != key || !definition.Steps[index].Required {
+			t.Fatalf("step %d = %#v, want required %s", index, definition.Steps[index], key)
+		}
+	}
+	if definition.Steps[0].GateKind != "active_rules" || definition.Steps[2].GateKind != "duplicate_check" {
+		t.Fatalf("candidate gates = %q/%q", definition.Steps[0].GateKind, definition.Steps[2].GateKind)
+	}
+}

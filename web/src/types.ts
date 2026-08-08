@@ -105,6 +105,7 @@ export interface JobSummaryEnvelope {
   ok: boolean;
   status: JobStatus;
   job_id: string;
+	kind: string;
   current_step?: string;
   blockers: Blocker[];
   next_actions: NextAction[];
@@ -216,4 +217,67 @@ export interface SiteCredential {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface DailyCandidatePayload {
+  source?: {
+    tracker?: string;
+    torrent_id?: string;
+    details_url?: string;
+    title?: string;
+    size_bytes?: number;
+    published_at?: string;
+    promotion_labels?: string[];
+    free?: boolean;
+    downloadable?: boolean;
+  };
+  metadata?: {
+    name?: string;
+    imdb_id?: string;
+    tmdb_id?: string;
+    tmdb_type?: string;
+    douban_id?: string;
+    anidb_id?: string;
+  };
+  duplicate_check?: {duplicate?: boolean; result_count?: number};
+  ready?: boolean;
+  score?: number;
+  recommendation_reasons?: string[];
+  risks?: Blocker[];
+  blockers?: Blocker[];
+  next_actions?: NextAction[];
+}
+
+export interface DailyCandidate {
+  id: string;
+  discovery_job_id?: string;
+  submitted_job_id?: string;
+  source_site: string;
+  target_site: string;
+  source_torrent_id: string;
+  recommendation_date: string;
+  rank?: number;
+  score: number;
+  payload: DailyCandidatePayload;
+  status: "candidate" | "blocked" | "submitted" | "expired";
+  discovered_at: string;
+  expires_at: string;
+  updated_at: string;
+  submitted_at?: string;
+  retorrent_action?: {
+    method: "POST";
+    path: string;
+    requires: string[];
+  };
+}
+
+export interface DailyCandidateListEnvelope {
+  ok: true;
+  status: "ready";
+  date: string;
+  count: number;
+  ready_count: number;
+  candidates: DailyCandidate[];
+  blockers: Blocker[];
+  next_actions: NextAction[];
 }

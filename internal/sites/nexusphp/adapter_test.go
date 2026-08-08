@@ -82,6 +82,37 @@ func TestAdapterDownloadsAndHashesTorrent(t *testing.T) {
 	}
 }
 
+func TestAdapterListsCandidateRowsWithPromotionAndDownloadability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/torrents.php" || r.URL.Query().Get("page") != "0" {
+			t.Fatalf("unexpected listing request %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		if cookie, err := r.Cookie("session"); err != nil || cookie.Value != "cookie-value" {
+			t.Fatalf("cookie = %#v/%v", cookie, err)
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, `<!doctype html><table>
+			<tr data-size-bytes="5368709120"><td><a href="details.php?id=101&amp;hit=1"><b>Fixture Anime S01</b></a></td><td>FREE</td><td><time datetime="2026-08-08T06:30:00Z"></time></td></tr>
+			<tr><td><a href="/details.php?id=102">Fixture Movie 2026</a></td><td>2.5 GiB</td><td>2026-08-08 12:30</td></tr>
+		</table>`)
+	}))
+	defer server.Close()
+
+	adapter := newTestAdapter(t, server.URL, map[string]string{"cookie": "session=cookie-value", "passkey": "private"})
+	result, err := adapter.ListCandidates(context.Background(), sites.CandidateScanRequest{Limit: 10, Page: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Items[0].TorrentID != "101" || result.Items[0].Title != "Fixture Anime S01" ||
+		result.Items[0].SizeBytes != 5368709120 || !result.Items[0].Free || !result.Items[0].Downloadable ||
+		result.Items[1].SizeBytes != 2684354560 || result.Items[1].PublishedAt == nil {
+		t.Fatalf("candidate scan = %#v", result)
+	}
+	if strings.Contains(result.Items[0].DetailsURL, "private") {
+		t.Fatal("candidate details URL exposed passkey")
+	}
+}
+
 func TestAdapterBlocksLoginAndSanitizesPasskeyRequestFailure(t *testing.T) {
 	loginServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
