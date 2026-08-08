@@ -31,14 +31,36 @@ type Executor interface {
 	Execute(context.Context, Execution) (json.RawMessage, error)
 }
 
+type Blocker struct {
+	Code         string `json:"code"`
+	Message      string `json:"message"`
+	SiteCode     string `json:"site_code,omitempty"`
+	ObligationID string `json:"obligation_id,omitempty"`
+}
+
+type NextAction struct {
+	Action      string         `json:"action"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
 type BlockError struct {
 	Code        string
 	Message     string
-	NextActions []string
+	Blockers    []Blocker
+	NextActions []NextAction
 	ResumeState map[string]any
 }
 
-func (e *BlockError) Error() string { return e.Message }
+func (e *BlockError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	if len(e.Blockers) > 0 {
+		return e.Blockers[0].Message
+	}
+	return "workflow step is blocked"
+}
 
 type Runner struct {
 	runtime   Runtime
@@ -49,14 +71,27 @@ type Runner struct {
 	logger    *slog.Logger
 }
 
-func New(runtime Runtime, owner string, logger *slog.Logger) *Runner {
-	return &Runner{
+type Option func(*Runner)
+
+func WithRuleProvider(provider RuleProvider) Option {
+	return func(runner *Runner) {
+		runner.executors["source_rules"] = ruleGateExecutor{provider: provider, role: "source"}
+		runner.executors["target_rules"] = ruleGateExecutor{provider: provider, role: "target"}
+	}
+}
+
+func New(runtime Runtime, owner string, logger *slog.Logger, options ...Option) *Runner {
+	runner := &Runner{
 		runtime: runtime, owner: owner, logger: logger,
 		lease: 30 * time.Second, poll: time.Second,
 		executors: map[string]Executor{
 			"source_parse": sourceParseExecutor{},
 		},
 	}
+	for _, option := range options {
+		option(runner)
+	}
+	return runner
 }
 
 func (r *Runner) Run(ctx context.Context) {
@@ -111,12 +146,22 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	}
 	var blocked *BlockError
 	if errors.As(executeErr, &blocked) {
-		blockers := mustJSON([]map[string]string{{"code": blocked.Code, "message": blocked.Message}})
-		nextActions := make([]map[string]string, 0, len(blocked.NextActions))
-		for _, action := range blocked.NextActions {
-			nextActions = append(nextActions, map[string]string{"action": action})
+		blockers := blocked.Blockers
+		if len(blockers) == 0 {
+			blockers = []Blocker{{Code: blocked.Code, Message: blocked.Message}}
 		}
-		_, err = r.runtime.BlockStep(ctx, job.ID, r.owner, attempt.ID, blockers, mustJSON(nextActions), mustJSON(blocked.ResumeState), actor)
+		nextActions := blocked.NextActions
+		if nextActions == nil {
+			nextActions = []NextAction{}
+		}
+		resumeState := blocked.ResumeState
+		if resumeState == nil {
+			resumeState = map[string]any{}
+		}
+		_, err = r.runtime.BlockStep(
+			ctx, job.ID, r.owner, attempt.ID,
+			mustJSON(blockers), mustJSON(nextActions), mustJSON(resumeState), actor,
+		)
 		return err
 	}
 	blockers := mustJSON([]map[string]string{{"code": "step_execution_failed", "message": executeErr.Error()}})
@@ -150,19 +195,22 @@ func (sourceParseExecutor) Execute(_ context.Context, execution Execution) (json
 		Target    string `json:"target"`
 	}
 	if err := json.Unmarshal(execution.Job.Input, &input); err != nil {
-		return nil, &BlockError{Code: "invalid_job_input", Message: "job input is not valid JSON", NextActions: []string{"replace_job_input"}}
+		return nil, &BlockError{
+			Code: "invalid_job_input", Message: "job input is not valid JSON",
+			NextActions: []NextAction{{Action: "replace_job_input"}},
+		}
 	}
 	reference, err := sites.ParseSourceReference(input.SourceURL)
 	if err != nil {
 		return nil, &BlockError{
-			Code: "invalid_source_url", Message: err.Error(), NextActions: []string{"provide_supported_source_url"},
+			Code: "invalid_source_url", Message: err.Error(), NextActions: []NextAction{{Action: "provide_supported_source_url"}},
 			ResumeState: map[string]any{"required": []string{"source_url"}},
 		}
 	}
 	target := stringsUpperTrim(input.Target)
 	if target == "" {
 		return nil, &BlockError{
-			Code: "target_required", Message: "target site is required", NextActions: []string{"provide_target_site"},
+			Code: "target_required", Message: "target site is required", NextActions: []NextAction{{Action: "provide_target_site"}},
 			ResumeState: map[string]any{"required": []string{"target"}},
 		}
 	}

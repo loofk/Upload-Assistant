@@ -104,7 +104,7 @@ func serve(args []string) error {
 	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
-	jobRunner := worker.New(jobService, workerID, logger)
+	jobRunner := worker.New(jobService, workerID, logger, worker.WithRuleProvider(ruleStore))
 	go jobRunner.Run(ctx)
 
 	handler := server.New(server.Dependencies{

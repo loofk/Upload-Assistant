@@ -95,6 +95,19 @@ type Review struct {
 	Fingerprint string `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"`
 }
 
+// Policy is the executable, immutable portion of a rule document. Review
+// metadata and the original Markdown body are deliberately excluded.
+type Policy struct {
+	SchemaVersion int          `json:"schema_version"`
+	Site          Site         `json:"site"`
+	Source        Source       `json:"source"`
+	Automation    Automation   `json:"automation"`
+	Limits        Limits       `json:"limits"`
+	Seeding       Seeding      `json:"seeding"`
+	Transfer      Transfer     `json:"transfer"`
+	Obligations   []Obligation `json:"obligations"`
+}
+
 func ParseMarkdown(raw []byte) (Document, error) {
 	normalized := bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	frontMatter, body, format, err := splitFrontMatter(normalized)
@@ -227,22 +240,24 @@ func (d Document) Fingerprint() (string, error) {
 }
 
 func (d Document) PolicyJSON() ([]byte, error) {
-	policy := struct {
-		SchemaVersion int          `json:"schema_version"`
-		Site          Site         `json:"site"`
-		Source        Source       `json:"source"`
-		Automation    Automation   `json:"automation"`
-		Limits        Limits       `json:"limits"`
-		Seeding       Seeding      `json:"seeding"`
-		Transfer      Transfer     `json:"transfer"`
-		Obligations   []Obligation `json:"obligations"`
-	}{
+	policy := Policy{
 		SchemaVersion: d.SchemaVersion, Site: d.Site, Source: d.Source,
 		Automation: d.Automation, Limits: d.Limits, Seeding: d.Seeding,
 		Transfer: d.Transfer, Obligations: d.Obligations,
 	}
 	policy.Source.TextSHA256 = sha256Hex([]byte(d.Body))
 	return json.Marshal(policy)
+}
+
+func ParsePolicy(raw []byte) (Policy, error) {
+	var policy Policy
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		return Policy{}, fmt.Errorf("decode executable rule policy: %w", err)
+	}
+	if policy.SchemaVersion != 1 || !siteCodePattern.MatchString(policy.Site.Code) {
+		return Policy{}, fmt.Errorf("invalid executable rule policy")
+	}
+	return policy, nil
 }
 
 func splitFrontMatter(raw []byte) ([]byte, []byte, string, error) {
