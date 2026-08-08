@@ -1,0 +1,246 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Upload Assistant API",
+    "version": "2.0.0-dev",
+    "description": "Local-first Chinese PT retorrent automation with durable steps, rule gates, and auditable evidence."
+  },
+  "servers": [{"url": "http://127.0.0.1:8080"}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPIDocument",
+        "security": [],
+        "responses": {"200": {"description": "OpenAPI document"}}
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "getLiveness",
+        "security": [],
+        "responses": {"200": {"description": "Process is alive", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}}}
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "getReadiness",
+        "security": [],
+        "responses": {
+          "200": {"description": "Service is ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}},
+          "503": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/api/v2/version": {
+      "get": {
+        "operationId": "getVersion",
+        "security": [],
+        "responses": {"200": {"description": "Build information", "content": {"application/json": {"schema": {"type": "object"}}}}}
+      }
+    },
+    "/api/v2/tools": {
+      "get": {
+        "operationId": "listAITools",
+        "responses": {"200": {"description": "Compact AI tool definitions", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ToolsResponse"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs": {
+      "post": {
+        "operationId": "createRetorrentJob",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateJobRequest"}}}},
+        "responses": {
+          "202": {"description": "Durable job accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "401": {"$ref": "#/components/responses/Problem"},
+          "409": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/api/v2/jobs/{job_id}": {
+      "get": {
+        "operationId": "getJobStatus",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "responses": {"200": {"description": "Job status", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/summary": {
+      "get": {
+        "operationId": "getJobSummary",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "responses": {"200": {"description": "Job summary and evidence", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobSummaryEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/steps": {
+      "get": {
+        "operationId": "listJobSteps",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "responses": {"200": {"description": "Durable workflow steps", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "job_id", "steps"], "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}}}}}}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/events": {
+      "get": {
+        "operationId": "listJobEvents",
+        "parameters": [
+          {"$ref": "#/components/parameters/JobID"},
+          {"name": "after", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}}
+        ],
+        "responses": {"200": {"description": "Hash-chained audit events", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "job_id", "events", "next_cursor"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "job_id": {"type": "string", "format": "uuid"}, "events": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}}, "next_cursor": {"type": "integer"}}}}}}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/artifacts": {
+      "get": {
+        "operationId": "listJobArtifacts",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "responses": {"200": {"description": "Artifact evidence", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "job_id", "artifacts"], "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}}}}}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/pause": {
+      "post": {"operationId": "pauseJob", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job paused", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/jobs/{job_id}/resume": {
+      "post": {
+        "operationId": "resumeJob",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResumeJobRequest"}}}},
+        "responses": {"200": {"description": "Job queued for recovery", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/cancel": {
+      "post": {"operationId": "cancelJob", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/sites": {
+      "get": {"operationId": "listSites", "responses": {"200": {"description": "Site adapters and active rule fingerprints", "content": {"application/json": {"schema": {"type": "object"}}}}}}
+    },
+    "/api/v2/sites/{site_code}/rules": {
+      "get": {"operationId": "listSiteRuleRevisions", "parameters": [{"$ref": "#/components/parameters/SiteCode"}], "responses": {"200": {"description": "Rule revision history", "content": {"application/json": {"schema": {"type": "object"}}}}}}
+    },
+    "/api/v2/sites/{site_code}/rules/active": {
+      "get": {"operationId": "getActiveSiteRules", "parameters": [{"$ref": "#/components/parameters/SiteCode"}], "responses": {"200": {"description": "Active approved rule revision", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/site-rules/import": {
+      "post": {
+        "operationId": "importSiteRuleRevision",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["markdown"], "properties": {"markdown": {"type": "string", "minLength": 1}}}}}},
+        "responses": {"201": {"description": "Immutable draft imported", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/site-rules/{revision_id}": {
+      "get": {"operationId": "getSiteRuleRevision", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Rule revision", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/site-rules/{revision_id}/markdown": {
+      "get": {"operationId": "getSiteRuleMarkdown", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Checksum-verified Markdown", "content": {"text/markdown": {"schema": {"type": "string"}}}}}}
+    },
+    "/api/v2/site-rules/{revision_id}/approve": {
+      "post": {
+        "operationId": "approveSiteRuleRevision",
+        "parameters": [{"$ref": "#/components/parameters/RevisionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["fingerprint"], "properties": {"fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "comment": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "Rule revision approved", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/site-rules/{revision_id}/activate": {
+      "post": {"operationId": "activateSiteRuleRevision", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Approved revision activated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "ua_API_token"}
+    },
+    "parameters": {
+      "JobID": {"name": "job_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "RevisionID": {"name": "revision_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "SiteCode": {"name": "site_code", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Z0-9_-]+$"}},
+      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 200}}
+    },
+    "responses": {
+      "Problem": {"description": "Structured API problem", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": ["ok", "status", "service", "version"],
+        "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "service": {"type": "string"}, "version": {"type": "string"}, "checks": {"type": "object", "additionalProperties": {"type": "string"}}}
+      },
+      "JobStatus": {"type": "string", "enum": ["draft", "queued", "running", "paused", "blocked", "failed", "complete", "cancelled"]},
+      "StepStatus": {"type": "string", "enum": ["pending", "ready", "running", "paused", "blocked", "failed", "complete", "skipped", "cancelled"]},
+      "Blocker": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "site_code": {"type": "string"}, "obligation_id": {"type": "string"}},
+        "additionalProperties": true
+      },
+      "NextAction": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {"action": {"type": "string"}, "description": {"type": "string"}, "parameters": {"type": "object", "additionalProperties": true}},
+        "additionalProperties": true
+      },
+      "ObligationAcceptance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["confirmed", "evidence"],
+        "properties": {"confirmed": {"type": "boolean"}, "evidence": {"type": "string", "description": "Non-empty per-job human evidence is required for blocking manual obligations."}}
+      },
+      "RuleAcceptance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accepted", "fingerprint"],
+        "properties": {
+          "accepted": {"type": "boolean", "const": true},
+          "fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+          "obligations": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/ObligationAcceptance"}}
+        }
+      },
+      "RetorrentInput": {
+        "type": "object",
+        "required": ["source_url", "target"],
+        "properties": {
+          "source_url": {"type": "string", "format": "uri"},
+          "target": {"type": "string", "description": "Uppercase target tracker code."},
+          "accept_rules": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/RuleAcceptance"}}
+        },
+        "additionalProperties": true
+      },
+      "CreateJobRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["input"],
+        "properties": {"kind": {"type": "string", "const": "retorrent", "default": "retorrent"}, "execution_mode": {"type": "string", "enum": ["auto", "step"], "default": "auto"}, "stop_after_step": {"type": "string"}, "input": {"$ref": "#/components/schemas/RetorrentInput"}}
+      },
+      "ResumeJobRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"resume_state": {"type": "object", "additionalProperties": true, "default": {}}}
+      },
+      "Job": {
+        "type": "object",
+        "required": ["id", "kind", "status", "execution_mode", "input", "blockers", "next_actions", "resume_state", "summary", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "execution_mode": {"type": "string", "enum": ["auto", "step"]}, "current_step": {"type": "string"},
+          "input": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"type": "object"},
+          "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "JobEnvelope": {
+        "type": "object",
+        "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "job"],
+        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"type": "object"}, "job": {"$ref": "#/components/schemas/Job"}}
+      },
+      "JobSummaryEnvelope": {
+        "type": "object",
+        "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
+        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"type": "object"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+      },
+      "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object"}, "output_summary": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
+      "Event": {"type": "object", "required": ["id", "job_id", "sequence", "type", "actor_type", "payload", "hash", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "sequence": {"type": "integer"}, "type": {"type": "string"}, "actor_type": {"type": "string"}, "actor_id": {"type": "string"}, "payload": {"type": "object"}, "previous_hash": {"type": "string"}, "hash": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}},
+      "Artifact": {"type": "object", "required": ["id", "job_id", "kind", "storage_backend", "storage_path", "filename", "size_bytes", "sha256", "metadata", "expires_at", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "storage_backend": {"type": "string"}, "storage_path": {"type": "string"}, "filename": {"type": "string"}, "mime_type": {"type": "string"}, "size_bytes": {"type": "integer"}, "sha256": {"type": "string"}, "metadata": {"type": "object"}, "expires_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}}},
+      "RuleEnvelope": {"type": "object", "required": ["ok", "status", "site_code", "rule_revision_id", "fingerprint", "revision", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string", "enum": ["draft", "approved", "retired"]}, "site_code": {"type": "string"}, "rule_revision_id": {"type": "string", "format": "uuid"}, "fingerprint": {"type": "string"}, "revision": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}},
+      "Tool": {"type": "object", "required": ["name", "description", "method", "path", "required_scopes", "safety_level", "input_schema"], "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "method": {"type": "string"}, "path": {"type": "string"}, "required_scopes": {"type": "array", "items": {"type": "string"}}, "safety_level": {"type": "string"}, "input_schema": {"type": "object"}}},
+      "ToolsResponse": {"type": "object", "required": ["ok", "status", "api_version", "count", "tools", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "api_version": {"type": "string"}, "count": {"type": "integer"}, "tools": {"type": "array", "items": {"$ref": "#/components/schemas/Tool"}}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}}},
+      "Problem": {"type": "object", "required": ["ok", "status", "error", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean", "const": false}, "status": {"type": "string", "const": "failed"}, "error": {"type": "object", "required": ["code", "detail"], "properties": {"code": {"type": "string"}, "detail": {"type": "string"}}}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}}
+    }
+  }
+}

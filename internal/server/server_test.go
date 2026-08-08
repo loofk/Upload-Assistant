@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -37,6 +38,58 @@ func TestLivenessDoesNotDependOnDatabase(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/live", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestOpenAPIAndToolContracts(t *testing.T) {
+	var document struct {
+		OpenAPI string                    `json:"openapi"`
+		Paths   map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
+		t.Fatalf("embedded OpenAPI is invalid JSON: %v", err)
+	}
+	if document.OpenAPI != "3.1.0" {
+		t.Fatalf("openapi = %s", document.OpenAPI)
+	}
+	requiredPaths := []string{
+		"/openapi.json", "/api/v2/tools", "/api/v2/jobs",
+		"/api/v2/jobs/{job_id}", "/api/v2/jobs/{job_id}/summary",
+		"/api/v2/jobs/{job_id}/resume", "/api/v2/sites/{site_code}/rules/active",
+		"/api/v2/site-rules/{revision_id}/approve",
+	}
+	for _, path := range requiredPaths {
+		if _, exists := document.Paths[path]; !exists {
+			t.Errorf("OpenAPI path %s is missing", path)
+		}
+	}
+
+	tools := toolDefinitions()
+	if len(tools) != 12 {
+		t.Fatalf("tool count = %d, want 12", len(tools))
+	}
+	seen := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		if tool.Name == "" || tool.Method == "" || tool.Path == "" || tool.InputSchema == nil || len(tool.RequiredScopes) == 0 {
+			t.Errorf("incomplete tool definition: %#v", tool)
+		}
+		if _, exists := seen[tool.Name]; exists {
+			t.Errorf("duplicate tool name %s", tool.Name)
+		}
+		seen[tool.Name] = struct{}{}
+		if _, exists := document.Paths[tool.Path]; !exists {
+			t.Errorf("tool %s references undocumented path %s", tool.Name, tool.Path)
+		}
+	}
+
+	handler := New(Dependencies{
+		Database: fakeDatabase{}, DataDir: t.TempDir(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Build: buildinfo.Info{Version: "test"},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.oai.openapi+json;version=3.1" {
+		t.Fatalf("OpenAPI HTTP response = %d/%s", response.Code, response.Header().Get("Content-Type"))
 	}
 }
 

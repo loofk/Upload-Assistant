@@ -57,12 +57,44 @@ func registerJobRoutes(mux *http.ServeMux, service JobService) {
 	api := jobsAPI{service: service}
 	mux.HandleFunc("POST /api/v2/jobs", api.create)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}", api.get)
+	mux.HandleFunc("GET /api/v2/jobs/{job_id}/summary", api.summary)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/steps", api.steps)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/events", api.events)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts", api.artifacts)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/pause", api.pause)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/resume", api.resume)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/cancel", api.cancel)
+}
+
+func (a jobsAPI) summary(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
+	id, ok := jobID(w, r)
+	if !ok {
+		return
+	}
+	job, err := a.service.GetJob(r.Context(), id)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	steps, err := a.service.ListSteps(r.Context(), id)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	artifacts, err := a.service.ListArtifacts(r.Context(), id)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": jobOK(job.Status), "status": job.Status, "job_id": id,
+		"current_step": job.CurrentStep, "blockers": job.Blockers,
+		"next_actions": job.NextActions, "resume_state": job.ResumeState,
+		"summary": job.Summary, "steps": steps, "artifacts": artifacts,
+	})
 }
 
 func (a jobsAPI) create(w http.ResponseWriter, r *http.Request) {
@@ -263,10 +295,14 @@ func (a jobsAPI) cancel(w http.ResponseWriter, r *http.Request) {
 
 func envelopeFor(job workflow.Job) jobEnvelope {
 	return jobEnvelope{
-		OK: job.Status != workflow.JobFailed, Status: job.Status, JobID: job.ID,
+		OK: jobOK(job.Status), Status: job.Status, JobID: job.ID,
 		CurrentStep: job.CurrentStep, Blockers: job.Blockers, NextActions: job.NextActions,
 		ResumeState: job.ResumeState, Summary: job.Summary, Job: job,
 	}
+}
+
+func jobOK(status workflow.JobStatus) bool {
+	return status != workflow.JobBlocked && status != workflow.JobFailed && status != workflow.JobCancelled
 }
 
 func jobID(w http.ResponseWriter, r *http.Request) (string, bool) {
