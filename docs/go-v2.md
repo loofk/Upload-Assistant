@@ -22,6 +22,39 @@ docker compose -f docker-compose.go.yml exec upload-assistant upload-assistant a
 
 Compose 默认只把 HTTP 端口绑定到 `127.0.0.1`。远程访问应通过具备 TLS 和访问控制的隧道或反向代理，不能把服务无认证暴露到公网。
 
+## 原生 Go CLI
+
+`upload-assistant cli` 是新 API 的本地客户端，默认输出服务端结构化 JSON，不依赖 Python。token 不接受命令行参数，只从 `UA_API_TOKEN`、`UA_API_TOKEN_FILE`、`--token-file` 或 TTY 隐式输入读取。非 loopback 的明文 HTTP 默认拒绝，远程服务应使用 HTTPS；确有受控网络需求时才显式传 `--allow-insecure-http`。
+
+```bash
+export UA_API_URL=http://127.0.0.1:8080
+export UA_API_TOKEN_FILE=/run/secrets/upload-assistant-api-token
+
+upload-assistant cli health
+upload-assistant cli jobs list --limit 20
+upload-assistant cli jobs summary <job-id>
+upload-assistant cli candidates list --source U2 --target MTEAM
+upload-assistant cli integrations list downloaders
+upload-assistant cli shell
+```
+
+创建任务默认使用 `execution_mode=step`，适合逐步审计。未指定 idempotency key 时 CLI 会为单次新意图生成随机 key；自动化重试应显式使用稳定的 `--idempotency-key`。
+
+```bash
+upload-assistant cli retorrent create \
+  --source-url 'https://u2.dmhy.org/details.php?id=60635' \
+  --target MTEAM \
+  --downloader box --save-path /downloads \
+  --screenshot-profile default --image-host imgbb \
+  --idempotency-key operator-request-20260808-01
+
+upload-assistant cli jobs resume <job-id> \
+  --accept-rule U2=<reviewed-fingerprint> \
+  --obligation U2:<obligation-id>=<human-evidence>
+```
+
+live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新提交源站和目标站的精确规则 fingerprint；CLI 只是减少误操作，服务端仍会重新验证规则、人工 obligation、查重、不可变上传包与做种 gate。
+
 旧版配置迁移使用独立的只读挂载。默认读取宿主机 `./data`，可在启动前设置：
 
 ```bash

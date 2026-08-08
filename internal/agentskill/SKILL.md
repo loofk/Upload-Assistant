@@ -15,7 +15,9 @@ Use the service as an auditable workflow controller. Treat every rule, duplicate
 4. Load authenticated `GET /api/v2/tools` for the current tool catalog.
 5. Send the operator-provided token as `Authorization: Bearer <token>`.
 
-Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use environment variables such as `UA_BASE_URL` and `UA_API_TOKEN`. Never put tokens in command arguments, URLs, prompts, logs, reports, or repository files. Never search the filesystem for credentials.
+Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use `upload-assistant cli` with `UA_API_URL` and `UA_API_TOKEN_FILE`; `UA_API_TOKEN` is also supported for a controlled process environment. Never put tokens in command arguments, URLs, logs, reports, or repository files. Never search the filesystem for credentials. The CLI blocks non-loopback plaintext HTTP unless the operator explicitly allows it.
+
+The native CLI returns the same structured JSON as the API. Use `jobs summary`, `jobs steps`, `jobs events`, and `jobs artifacts` for audit reads; use `jobs pause`, `jobs resume`, `jobs retry`, and `jobs cancel` only for the matching operator intent. The interactive `shell` uses the same command parser and safety checks. For live consent, pass exact `--accept-rule SITE=FINGERPRINT` and `--obligation SITE:ID=EVIDENCE` values; `--confirm-upload` never infers them.
 
 ## Choose an Operation
 

@@ -20,6 +20,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/candidates"
+	"github.com/loofk/upload-assistant/v2/internal/clientcli"
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
@@ -44,7 +45,9 @@ import (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		if !errors.Is(err, clientcli.ErrReported) {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		os.Exit(1)
 	}
 }
@@ -63,6 +66,10 @@ func run(args []string) error {
 		return migrate(args)
 	case "admin":
 		return admin(args)
+	case "cli":
+		return clientcli.Run(context.Background(), args, clientcli.Streams{
+			In: os.Stdin, Out: os.Stdout, Err: os.Stderr, Getenv: os.Getenv, ReadSecret: readAPIToken,
+		})
 	case "version", "--version", "-version":
 		fmt.Println(buildinfo.Current().String())
 		return nil
@@ -72,6 +79,19 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}
+}
+
+func readAPIToken(prompt string) (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", errors.New("API token is unavailable without a terminal; set UA_API_TOKEN or use --token-file")
+	}
+	fmt.Fprint(os.Stderr, prompt)
+	token, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	return string(token), nil
 }
 
 func serve(args []string) error {
@@ -397,5 +417,6 @@ Usage:
   upload-assistant serve [--listen address]
   upload-assistant migrate
   upload-assistant admin bootstrap --username <name>
+  upload-assistant cli [--api-url URL] [--token-file FILE] <command>
   upload-assistant version`)
 }
