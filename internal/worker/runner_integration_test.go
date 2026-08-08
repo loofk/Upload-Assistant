@@ -146,6 +146,9 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		TorrentID: "98765", DetailsURL: "https://kp.m-team.cc/details/98765",
 		ResponseSHA256: strings.Repeat("e", 64), SubmittedAt: time.Unix(3, 0).UTC(),
 	}}
+	targetTorrentDownloader := &fakeTargetTorrentDownloader{result: targetTorrentDownloadResult(
+		t, targetTorrentMetainfo("https://tracker.m-team.cc/announce/fixture-passkey", "MTEAM", 13, nil),
+	)}
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithRuleProvider(integrationRuleProvider{revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule}}),
@@ -179,6 +182,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithTargetUploads(targetUploader, targetDuplicates, integrationRuleProvider{
 			revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule},
 		}, artifactStore),
+		WithTargetTorrentDownloads(targetTorrentDownloader, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -336,6 +340,20 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	}
 	if targetDuplicates.calls != 2 || targetUploader.calls != 1 || !targetUploader.request.Confirmed {
 		t.Fatalf("target upload calls = duplicates:%d uploader:%d confirmed:%t", targetDuplicates.calls, targetUploader.calls, targetUploader.request.Confirmed)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target torrent download RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_inject" {
+		t.Fatalf("target-torrent-download job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 14 || storedArtifacts[12].Kind != "target_downloaded_torrent" || storedArtifacts[13].Kind != "target_torrent_download_receipt" {
+		t.Fatalf("target-torrent-download artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if targetTorrentDownloader.calls != 1 || targetTorrentDownloader.request.TorrentID != "98765" || targetTorrentDownloader.request.UploadReceiptSHA256 == "" {
+		t.Fatalf("target torrent download calls/request = %d/%#v", targetTorrentDownloader.calls, targetTorrentDownloader.request)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

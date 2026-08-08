@@ -148,6 +148,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize target upload adapters: %w", err)
 	}
+	targetTorrentDownloadRegistry, err := sites.NewTargetTorrentDownloadRegistry(mteamClient)
+	if err != nil {
+		return fmt.Errorf("initialize target torrent download adapters: %w", err)
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	jobRunner := worker.New(
@@ -171,6 +175,7 @@ func serve(args []string) error {
 			artifactStore,
 		),
 		worker.WithTargetUploads(targetUploadRegistry, targetDuplicateRegistry, ruleStore, artifactStore),
+		worker.WithTargetTorrentDownloads(targetTorrentDownloadRegistry, artifactStore),
 	)
 	go jobRunner.Run(ctx)
 

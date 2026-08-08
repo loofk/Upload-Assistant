@@ -153,6 +153,7 @@ func (client *Client) DuplicateCheck(ctx context.Context, query DuplicateQuery, 
 type apiConfig struct {
 	Endpoint       string         `json:"endpoint,omitempty"`
 	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
+	DownloadHosts  []string       `json:"download_hosts,omitempty"`
 	Options        map[string]any `json:"options,omitempty"`
 }
 
@@ -177,6 +178,9 @@ func parseAPIConfig(body json.RawMessage) (apiConfig, *url.URL, error) {
 	}
 	if config.TimeoutSeconds < 1 || config.TimeoutSeconds > 300 {
 		return apiConfig{}, nil, fmt.Errorf("MTEAM API timeout must be between 1 and 300 seconds")
+	}
+	if err := validateDownloadHosts(config.DownloadHosts); err != nil {
+		return apiConfig{}, nil, err
 	}
 	parsed, err := url.Parse(strings.TrimRight(config.Endpoint, "/"))
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
