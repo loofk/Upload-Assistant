@@ -257,6 +257,7 @@
           "target": {"type": "string", "description": "Uppercase target tracker code."},
           "accept_rules": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/RuleAcceptance"}},
           "downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
+          "target_downloader": {"$ref": "#/components/schemas/RetorrentDownloader", "description": "Target seeding settings. Defaults to the source downloader and the verified parent save path; skip_checking and paused must remain false."},
           "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
           "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
           "target_package": {"$ref": "#/components/schemas/MTeamPackageOptions"},
@@ -278,7 +279,7 @@
           "download_limit_bytes_per_second": {"type": "integer", "minimum": 0, "default": 0},
           "upload_limit_bytes_per_second": {"type": "integer", "minimum": 0, "default": 0}
         },
-        "description": "Source-download settings. An active rule revision can impose a stricter rate cap, which always wins. These fields can also be supplied in resume_state after a configuration block."
+        "description": "Source-download or target-seeding settings. An active site rule revision can impose a stricter rate cap, which always wins. Target injection always requires skip_checking=false and paused=false. These fields can also be supplied in resume_state after a configuration block."
       },
       "RetorrentScreenshots": {
         "type": "object",

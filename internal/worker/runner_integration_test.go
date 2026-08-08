@@ -92,7 +92,8 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	if err := os.MkdirAll(localContentRoot, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(localContentRoot, "video.mkv"), []byte("fixture-video"), 0o640); err != nil {
+	localContentFile := filepath.Join(localContentRoot, "video.mkv")
+	if err := os.WriteFile(localContentFile, []byte("fixture-video"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	source := fakeSourceProvider{
@@ -103,10 +104,10 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		},
 	}
 	downloader := &fakeDownloaderProvider{
-		addResult: downloaders.AddEvidence{
+		addResults: []downloaders.AddEvidence{{
 			DownloaderName: "fixture-box", Adapter: "qbittorrent",
 			Result: qbittorrent.AddResult{Hashes: hashes},
-		},
+		}},
 		inspection: downloaders.TorrentEvidence{
 			DownloaderName: "fixture-box", Adapter: "qbittorrent",
 			Torrent: qbittorrent.Torrent{
@@ -114,8 +115,8 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 				TotalSize: 100, Completed: 50, AmountLeft: 50,
 			},
 		},
-		files: downloadFilesEvidence(hashes.V1SHA1, "/remote/downloads/release", localContentRoot, []qbittorrent.TorrentFile{{
-			Index: 0, Name: "release/video.mkv", Size: 13, Progress: 1, Priority: 1, Availability: 1,
+		files: downloadFilesEvidence(hashes.V1SHA1, "/remote/downloads/video.mkv", localContentFile, []qbittorrent.TorrentFile{{
+			Index: 0, Name: "video.mkv", Size: 13, Progress: 1, Priority: 1, Availability: 1,
 		}}),
 	}
 	imageHost := &fakeImageHostProvider{
@@ -146,9 +147,13 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		TorrentID: "98765", DetailsURL: "https://kp.m-team.cc/details/98765",
 		ResponseSHA256: strings.Repeat("e", 64), SubmittedAt: time.Unix(3, 0).UTC(),
 	}}
-	targetTorrentDownloader := &fakeTargetTorrentDownloader{result: targetTorrentDownloadResult(
-		t, targetTorrentMetainfo("https://tracker.m-team.cc/announce/fixture-passkey", "MTEAM", 13, nil),
-	)}
+	downloadedTargetTorrent := targetTorrentMetainfo("https://tracker.m-team.cc/announce/fixture-passkey", "MTEAM", 13, nil)
+	targetTorrentDownloader := &fakeTargetTorrentDownloader{result: targetTorrentDownloadResult(t, downloadedTargetTorrent)}
+	targetInspection, err := torrentmeta.Inspect(downloadedTargetTorrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloader.addResults = append(downloader.addResults, targetAddEvidence(downloadedTargetTorrent, targetInspection, "fixture-box"))
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithRuleProvider(integrationRuleProvider{revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule}}),
@@ -183,6 +188,8 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 			revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule},
 		}, artifactStore),
 		WithTargetTorrentDownloads(targetTorrentDownloader, artifactStore),
+		WithTargetInjection(downloader, artifactStore),
+		WithTargetSeedVerification(downloader, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -354,6 +361,46 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	}
 	if targetTorrentDownloader.calls != 1 || targetTorrentDownloader.request.TorrentID != "98765" || targetTorrentDownloader.request.UploadReceiptSHA256 == "" {
 		t.Fatalf("target torrent download calls/request = %d/%#v", targetTorrentDownloader.calls, targetTorrentDownloader.request)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target injection RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_seed_verify" {
+		t.Fatalf("target-injection job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 15 || storedArtifacts[14].Kind != "target_injection_receipt" {
+		t.Fatalf("target-injection artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if downloader.addCalls != 2 || downloader.addOptions.SavePath != "/remote/downloads" || downloader.addOptions.SkipChecking || downloader.addOptions.Paused {
+		t.Fatalf("target injection calls/options = %d/%#v", downloader.addCalls, downloader.addOptions)
+	}
+	targetSeedEvidence := downloaders.TorrentEvidence{
+		DownloaderName: "fixture-box", Adapter: "qbittorrent", ConfigurationSHA256: strings.Repeat("d", 64),
+		RemoteSavePath: "/remote/downloads", RemoteContentPath: "/remote/downloads/video.mkv",
+		Torrent: qbittorrent.Torrent{
+			Hash: targetInspection.Hashes.V1SHA1, Name: "video.mkv", State: "uploading", Progress: 1,
+			Size: 13, TotalSize: 13, Completed: 13, AmountLeft: 0, DownloadLimit: -1, UploadLimit: -1,
+			SavePath: "/remote/downloads", ContentPath: "/remote/downloads/video.mkv", Category: "mteam", Tags: "retorrent,mteam",
+		},
+	}
+	downloader.inspection = targetSeedEvidence
+	downloader.files = downloaders.TorrentFilesEvidence{
+		DownloaderName: "fixture-box", Adapter: "qbittorrent", Torrent: targetSeedEvidence,
+		Files:     []qbittorrent.TorrentFile{{Index: 0, Name: "video.mkv", Size: 13, Progress: 1, Priority: 1, Seed: true}},
+		FileCount: 1, TotalSize: 13,
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target seed verification RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "summary" {
+		t.Fatalf("target-seed job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 16 || storedArtifacts[15].Kind != "target_seed_observation" {
+		t.Fatalf("target-seed artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

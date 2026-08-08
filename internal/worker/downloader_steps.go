@@ -70,7 +70,8 @@ type downloaderControl struct {
 }
 
 type retorrentRuntimeControls struct {
-	Downloader downloaderControl `json:"downloader"`
+	Downloader       downloaderControl `json:"downloader"`
+	TargetDownloader downloaderControl `json:"target_downloader"`
 }
 
 type downloaderSnapshot struct {

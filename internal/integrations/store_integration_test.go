@@ -113,7 +113,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRuntimeDownloader() error = %v", err)
 	}
-	if runtimeDownloader.Credentials["password"] != "encrypted-password" || runtimeDownloader.EndpointConfig.Endpoint != "http://host.docker.internal:8080" {
+	if runtimeDownloader.Credentials["password"] != "encrypted-password" || runtimeDownloader.EndpointConfig.Endpoint != "http://host.docker.internal:8080" ||
+		len(runtimeDownloader.ConfigurationSHA256) != 64 {
 		t.Fatalf("runtime downloader did not decrypt expected configuration")
 	}
 	if err := store.RecordDownloaderHealth(ctx, downloader.Name, "ready", map[string]any{"webapi_version": "test"}, actor); err != nil {

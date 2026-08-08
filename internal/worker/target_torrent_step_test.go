@@ -164,7 +164,8 @@ func targetTorrentExecution(t *testing.T, store *artifacts.LocalStore, sourceTor
 					"sha256": sourceFile.SHA256, "hashes": sourceHashes,
 				},
 				"content_resolve": map[string]any{
-					"resolved": true, "local_root": contentRoot, "file_count": 1, "total_size_bytes": 3,
+					"resolved": true, "downloader_name": "box", "remote_root": "/remote/downloads/video.mkv",
+					"local_root": contentRoot, "file_count": 1, "total_size_bytes": 3,
 					"manifest_artifact_id": "manifest-id", "manifest_sha256": manifestFile.SHA256,
 					"manifest_storage_path": manifestFile.RelativePath,
 				},
@@ -181,6 +182,7 @@ func targetTorrentExecution(t *testing.T, store *artifacts.LocalStore, sourceTor
 				"target_rules": map[string]any{
 					"site_code": "MTEAM", "role": "target", "rule_revision_id": "rule-id",
 					"fingerprint": strings.Repeat("f", 64), "accepted": true, "acceptance_sha256": strings.Repeat("a", 64),
+					"limits": map[string]any{"upload": "2MiB/s"}, "seeding": map[string]any{"minimum_time_hours": 1, "minimum_ratio": 1.0},
 				},
 			},
 		})},

@@ -16,15 +16,23 @@ import (
 type fakeDownloaderProvider struct {
 	addOptions qbittorrent.AddOptions
 	addBytes   []byte
+	addName    string
+	addCalls   int
 	addResult  downloaders.AddEvidence
+	addResults []downloaders.AddEvidence
 	inspection downloaders.TorrentEvidence
 	files      downloaders.TorrentFilesEvidence
 	err        error
 }
 
-func (provider *fakeDownloaderProvider) Add(_ context.Context, _ string, metainfo []byte, options qbittorrent.AddOptions, _ workflow.Actor) (downloaders.AddEvidence, error) {
+func (provider *fakeDownloaderProvider) Add(_ context.Context, name string, metainfo []byte, options qbittorrent.AddOptions, _ workflow.Actor) (downloaders.AddEvidence, error) {
+	provider.addCalls++
+	provider.addName = name
 	provider.addBytes = append([]byte(nil), metainfo...)
 	provider.addOptions = options
+	if len(provider.addResults) >= provider.addCalls {
+		return provider.addResults[provider.addCalls-1], provider.err
+	}
 	return provider.addResult, provider.err
 }
 

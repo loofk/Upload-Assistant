@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -382,6 +383,13 @@ func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeD
 		runtime.CredentialFields = append(runtime.CredentialFields, field)
 	}
 	slices.Sort(runtime.CredentialFields)
+	configurationHash := sha256.New()
+	_, _ = configurationHash.Write([]byte(runtime.ID + "\x00" + runtime.Name + "\x00" + runtime.Adapter + "\x00" + runtime.UpdatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + secretID + "\x00"))
+	_, _ = configurationHash.Write(runtime.Config)
+	for _, mapping := range runtime.PathMappings {
+		_, _ = configurationHash.Write([]byte("\x00" + mapping.RemotePath + "\x00" + mapping.LocalPath + "\x00" + strconv.Itoa(mapping.Priority)))
+	}
+	runtime.ConfigurationSHA256 = hex.EncodeToString(configurationHash.Sum(nil))
 	return runtime, nil
 }
 

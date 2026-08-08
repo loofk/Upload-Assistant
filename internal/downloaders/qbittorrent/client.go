@@ -74,6 +74,8 @@ type Torrent struct {
 	Tags          string  `json:"tags"`
 	AddedOn       int64   `json:"added_on"`
 	CompletionOn  int64   `json:"completion_on"`
+	TimeActive    int64   `json:"time_active"`
+	SeedingTime   int64   `json:"seeding_time"`
 }
 
 type TorrentFile struct {

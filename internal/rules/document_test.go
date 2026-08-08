@@ -93,6 +93,16 @@ func TestRuleTextSHA256MismatchIsRejected(t *testing.T) {
 	}
 }
 
+func TestNegativeSeedingRequirementIsRejectedInDocumentAndPolicy(t *testing.T) {
+	raw := strings.Replace(testRuleMarkdown(false), "minimum_time_hours: 72", "minimum_time_hours: -1", 1)
+	if _, err := ParseMarkdown([]byte(raw)); err == nil {
+		t.Fatal("ParseMarkdown() accepted a negative minimum seeding time")
+	}
+	if _, err := ParsePolicy([]byte(`{"schema_version":1,"site":{"code":"MTEAM"},"seeding":{"minimum_ratio":-1}}`)); err == nil {
+		t.Fatal("ParsePolicy() accepted a negative minimum seeding ratio")
+	}
+}
+
 func testRuleMarkdown(complete bool) string {
 	completeValue := "false"
 	if complete {

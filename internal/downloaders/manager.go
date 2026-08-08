@@ -28,22 +28,24 @@ type Manager struct {
 }
 
 type TorrentEvidence struct {
-	DownloaderName    string                    `json:"downloader_name"`
-	Adapter           string                    `json:"adapter"`
-	Torrent           qbittorrent.Torrent       `json:"torrent"`
-	RemoteSavePath    string                    `json:"remote_save_path"`
-	RemoteContentPath string                    `json:"remote_content_path"`
-	LocalContentPath  string                    `json:"local_content_path,omitempty"`
-	PathMapping       *integrations.PathMapping `json:"path_mapping,omitempty"`
+	DownloaderName      string                    `json:"downloader_name"`
+	Adapter             string                    `json:"adapter"`
+	ConfigurationSHA256 string                    `json:"configuration_sha256"`
+	Torrent             qbittorrent.Torrent       `json:"torrent"`
+	RemoteSavePath      string                    `json:"remote_save_path"`
+	RemoteContentPath   string                    `json:"remote_content_path"`
+	LocalContentPath    string                    `json:"local_content_path,omitempty"`
+	PathMapping         *integrations.PathMapping `json:"path_mapping,omitempty"`
 }
 
 type AddEvidence struct {
-	DownloaderName string                `json:"downloader_name"`
-	Adapter        string                `json:"adapter"`
-	TorrentBytes   int                   `json:"torrent_bytes"`
-	TorrentSHA256  string                `json:"torrent_sha256"`
-	Result         qbittorrent.AddResult `json:"result"`
-	Observed       *TorrentEvidence      `json:"observed,omitempty"`
+	DownloaderName      string                `json:"downloader_name"`
+	Adapter             string                `json:"adapter"`
+	ConfigurationSHA256 string                `json:"configuration_sha256"`
+	TorrentBytes        int                   `json:"torrent_bytes"`
+	TorrentSHA256       string                `json:"torrent_sha256"`
+	Result              qbittorrent.AddResult `json:"result"`
+	Observed            *TorrentEvidence      `json:"observed,omitempty"`
 }
 
 type TorrentFilesEvidence struct {
@@ -148,7 +150,7 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	}
 	torrentSHA := sha256.Sum256(metainfo)
 	evidence := AddEvidence{
-		DownloaderName: runtime.Name, Adapter: runtime.Adapter, TorrentBytes: len(metainfo),
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter, ConfigurationSHA256: runtime.ConfigurationSHA256, TorrentBytes: len(metainfo),
 		TorrentSHA256: hex.EncodeToString(torrentSHA[:]), Result: result,
 	}
 	if result.Observed != nil {
@@ -157,7 +159,8 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	}
 	if err := manager.store.AuditDownloaderAction(ctx, name, "torrent.add", map[string]any{
 		"torrent_bytes": evidence.TorrentBytes, "torrent_sha256": evidence.TorrentSHA256,
-		"v1_infohash": result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
+		"configuration_sha256": evidence.ConfigurationSHA256,
+		"v1_infohash":          result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
 		"observed_hash": observedHash(result.Observed), "save_path": options.SavePath,
 		"category": options.Category, "tags": options.Tags,
 		"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
@@ -231,7 +234,7 @@ func (manager *Manager) qbittorrentClient(ctx context.Context, name string) (int
 
 func buildTorrentEvidence(runtime integrations.RuntimeDownloader, torrent qbittorrent.Torrent) TorrentEvidence {
 	evidence := TorrentEvidence{
-		DownloaderName: runtime.Name, Adapter: runtime.Adapter, Torrent: torrent,
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter, ConfigurationSHA256: runtime.ConfigurationSHA256, Torrent: torrent,
 		RemoteSavePath: torrent.SavePath, RemoteContentPath: torrent.ContentPath,
 	}
 	for _, mapping := range runtime.PathMappings {

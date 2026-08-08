@@ -55,8 +55,9 @@ type Downloader struct {
 
 type RuntimeDownloader struct {
 	Downloader
-	EndpointConfig EndpointConfig    `json:"-"`
-	Credentials    map[string]string `json:"-"`
+	EndpointConfig      EndpointConfig    `json:"-"`
+	ConfigurationSHA256 string            `json:"-"`
+	Credentials         map[string]string `json:"-"`
 }
 
 type ImageHostInput struct {

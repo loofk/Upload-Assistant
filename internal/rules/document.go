@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"strings"
@@ -183,6 +184,9 @@ func (d Document) Validate() error {
 	if d.Source.Scope == "" || d.Body == "" {
 		return fmt.Errorf("source scope and original rule body are required")
 	}
+	if err := validateSeeding(d.Seeding); err != nil {
+		return err
+	}
 	bodyHash := sha256Hex([]byte(d.Body))
 	if d.Source.TextSHA256 != "" && !strings.EqualFold(d.Source.TextSHA256, bodyHash) {
 		return fmt.Errorf("source text SHA-256 does not match the Markdown body")
@@ -257,7 +261,20 @@ func ParsePolicy(raw []byte) (Policy, error) {
 	if policy.SchemaVersion != 1 || !siteCodePattern.MatchString(policy.Site.Code) {
 		return Policy{}, fmt.Errorf("invalid executable rule policy")
 	}
+	if err := validateSeeding(policy.Seeding); err != nil {
+		return Policy{}, err
+	}
 	return policy, nil
+}
+
+func validateSeeding(seeding Seeding) error {
+	if seeding.MinimumTimeHours < 0 || seeding.MinimumTimeHours > 10*365*24 {
+		return fmt.Errorf("minimum seeding time must be between 0 and 87600 hours")
+	}
+	if math.IsNaN(seeding.MinimumRatio) || math.IsInf(seeding.MinimumRatio, 0) || seeding.MinimumRatio < 0 || seeding.MinimumRatio > 1_000_000 {
+		return fmt.Errorf("minimum seeding ratio must be between 0 and 1000000")
+	}
+	return nil
 }
 
 func splitFrontMatter(raw []byte) ([]byte, []byte, string, error) {
