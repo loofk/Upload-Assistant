@@ -125,6 +125,20 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if err != nil || len(imageHost.CredentialFields) != 1 {
 		t.Fatalf("UpsertImageHost() imageHost/error = %#v/%v", imageHost, err)
 	}
+	runtimeImageHost, err := store.GetRuntimeImageHost(ctx, "imgbb-"+nameSuffix)
+	if err != nil || runtimeImageHost.Credentials["api_key"] != "encrypted-image-key" || runtimeImageHost.EndpointConfig.Endpoint != "https://api.imgbb.com/1/upload" {
+		t.Fatalf("GetRuntimeImageHost() runtime/error = %#v/%v", runtimeImageHost, err)
+	}
+	if err := store.RecordImageHostHealth(ctx, imageHost.Name, "ready", map[string]any{"adapter": "imgbb"}, actor); err != nil {
+		t.Fatal(err)
+	}
+	afterHealth, err := store.GetRuntimeImageHost(ctx, imageHost.Name)
+	if err != nil || !afterHealth.UpdatedAt.Equal(runtimeImageHost.UpdatedAt) {
+		t.Fatalf("image-host health changed configuration revision: before=%s after=%s error=%v", runtimeImageHost.UpdatedAt, afterHealth.UpdatedAt, err)
+	}
+	if err := store.AuditImageHostAction(ctx, imageHost.Name, "image.upload", map[string]any{"source_sha256": "fixture"}, actor); err != nil {
+		t.Fatal(err)
+	}
 
 	first, err := store.CreateScreenshotProfile(ctx, ScreenshotProfileInput{
 		Name: "default-" + nameSuffix, Enabled: &enabled,

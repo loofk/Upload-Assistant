@@ -81,6 +81,12 @@ type ImageHost struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
+type RuntimeImageHost struct {
+	ImageHost
+	EndpointConfig EndpointConfig    `json:"-"`
+	Credentials    map[string]string `json:"-"`
+}
+
 type ScreenshotProfileInput struct {
 	Name    string         `json:"name"`
 	Enabled *bool          `json:"enabled,omitempty"`

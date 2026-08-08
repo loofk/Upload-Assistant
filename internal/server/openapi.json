@@ -258,6 +258,7 @@
           "accept_rules": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/RuleAcceptance"}},
           "downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
           "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
+          "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
           "confirm_upload": {"type": "boolean", "default": false, "description": "A later live target upload gate requires an explicit true value; it is never inferred."}
         },
         "additionalProperties": true
@@ -281,6 +282,10 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {"profile": {"type": "string", "default": "default", "description": "Latest enabled immutable screenshot profile revision."}}
+      },
+      "RetorrentImageHost": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"name": {"type": "string", "default": "default", "description": "Configured imgbb/PTPimg integration name."}}
       },
       "CreateJobRequest": {
         "type": "object",

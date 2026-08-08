@@ -21,6 +21,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
+	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
@@ -114,6 +115,7 @@ func serve(args []string) error {
 	secretStore := security.NewSecretStore(pool, keyring)
 	integrationStore := integrations.NewStore(pool, secretStore)
 	downloaderManager := downloaders.NewManager(integrationStore)
+	imageHostManager := imagehosts.NewManager(integrationStore, nil)
 	ruleStore, err := rules.NewStore(pool, cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
@@ -140,6 +142,7 @@ func serve(args []string) error {
 			media.NewFFmpegScreenshots(cfg.FFmpegBinary, cfg.FFprobeBinary, 5*time.Minute),
 			artifactStore,
 		),
+		worker.WithImageHosts(imageHostManager, artifactStore),
 	)
 	go jobRunner.Run(ctx)
 

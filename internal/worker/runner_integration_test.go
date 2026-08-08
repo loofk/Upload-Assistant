@@ -15,6 +15,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
@@ -106,6 +107,17 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 			Index: 0, Name: "release/video.mkv", Size: 13, Progress: 1, Priority: 1, Availability: 1,
 		}}),
 	}
+	imageHost := &fakeImageHostProvider{
+		snapshot: imagehosts.HostSnapshot{
+			ID: "host-id", Name: "default", Adapter: "imgbb",
+			ConfigSHA256: "fixture-config-sha", ConfigurationTime: time.Unix(1, 0).UTC(),
+		},
+		result: imagehosts.UploadEvidence{
+			ImageHostID: "host-id", ImageHostName: "default", Adapter: "imgbb",
+			ConfigSHA256: "fixture-config-sha", ConfigurationTime: time.Unix(1, 0).UTC(),
+			Result: imagehosts.UploadResult{URL: "https://i.ibb.co/fixture/image.png", ViewerURL: "https://ibb.co/fixture"},
+		},
+	}
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithRuleProvider(fakeRuleProvider{revision: rule}),
@@ -132,6 +144,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 			}},
 			artifactStore,
 		),
+		WithImageHosts(imageHost, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -224,6 +237,17 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 5 || storedArtifacts[4].Kind != "screenshot" {
 		t.Fatalf("screenshot artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("image upload RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_package" {
+		t.Fatalf("image-upload job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 6 || storedArtifacts[5].Kind != "image_upload_receipt" {
+		t.Fatalf("image-upload artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

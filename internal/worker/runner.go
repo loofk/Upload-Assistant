@@ -20,6 +20,7 @@ type Runtime interface {
 	BlockStep(context.Context, string, string, string, json.RawMessage, json.RawMessage, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	FailStep(context.Context, string, string, string, json.RawMessage, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	RegisterArtifact(context.Context, workflow.RegisterArtifactInput) (workflow.Artifact, error)
+	ListArtifacts(context.Context, string) ([]workflow.Artifact, error)
 }
 
 type Execution struct {

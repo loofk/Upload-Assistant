@@ -369,7 +369,7 @@ func (s *Store) RecordDownloaderHealth(ctx context.Context, name, status string,
 	defer func() { _ = tx.Rollback(ctx) }()
 	var downloaderID string
 	err = tx.QueryRow(ctx, `
-		UPDATE downloaders SET health_status = $2, last_health_check_at = now(), updated_at = now()
+		UPDATE downloaders SET health_status = $2, last_health_check_at = now()
 		WHERE name = $1 RETURNING id::text`, name, status).Scan(&downloaderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -377,11 +377,9 @@ func (s *Store) RecordDownloaderHealth(ctx context.Context, name, status string,
 	if err != nil {
 		return fmt.Errorf("update downloader health: %w", err)
 	}
-	if details == nil {
-		details = map[string]any{}
-	}
-	details["status"] = status
-	if err := audit(ctx, tx, actor, "downloader.health", "downloader", downloaderID, details); err != nil {
+	payload := copyMap(details)
+	payload["status"] = status
+	if err := audit(ctx, tx, actor, "downloader.health", "downloader", downloaderID, payload); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -514,6 +512,99 @@ func (s *Store) ListImageHosts(ctx context.Context) ([]ImageHost, error) {
 		return nil, fmt.Errorf("iterate image hosts: %w", err)
 	}
 	return result, nil
+}
+
+func (s *Store) GetRuntimeImageHost(ctx context.Context, name string) (RuntimeImageHost, error) {
+	name = strings.TrimSpace(name)
+	var runtime RuntimeImageHost
+	var secretID string
+	var healthChecked pgtype.Timestamptz
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, adapter, enabled, priority, config, COALESCE(secret_id::text, ''),
+		       health_status, last_health_check_at, created_at, updated_at
+		FROM image_hosts WHERE name = $1`, name).Scan(
+		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.Priority,
+		&runtime.Config, &secretID, &runtime.HealthStatus, &healthChecked,
+		&runtime.CreatedAt, &runtime.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeImageHost{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeImageHost{}, fmt.Errorf("load runtime image host: %w", err)
+	}
+	if !runtime.Enabled {
+		return RuntimeImageHost{}, fmt.Errorf("%w: image host is disabled", ErrValidation)
+	}
+	runtime.LastHealthCheck = timePointer(healthChecked)
+	if err := json.Unmarshal(runtime.Config, &runtime.EndpointConfig); err != nil {
+		return RuntimeImageHost{}, fmt.Errorf("decode runtime image host config: %w", err)
+	}
+	if secretID != "" {
+		plaintext, err := s.secrets.Get(ctx, secretID, "image_hosts."+runtime.Name+".credentials")
+		if err != nil {
+			return RuntimeImageHost{}, err
+		}
+		if err := json.Unmarshal(plaintext, &runtime.Credentials); err != nil {
+			return RuntimeImageHost{}, fmt.Errorf("decode runtime image host credentials: %w", err)
+		}
+	} else {
+		runtime.Credentials = map[string]string{}
+	}
+	return runtime, nil
+}
+
+func (s *Store) RecordImageHostHealth(ctx context.Context, name, status string, details map[string]any, actor workflow.Actor) error {
+	if status != "ready" && status != "failed" && status != "unknown" {
+		return fmt.Errorf("%w: invalid image host health status", ErrValidation)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin image host health update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var imageHostID string
+	err = tx.QueryRow(ctx, `
+		UPDATE image_hosts SET health_status = $2, last_health_check_at = now()
+		WHERE name = $1 RETURNING id::text`, name, status).Scan(&imageHostID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("update image host health: %w", err)
+	}
+	payload := copyMap(details)
+	payload["status"] = status
+	if err := audit(ctx, tx, actor, "image_host.health", "image_host", imageHostID, payload); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) AuditImageHostAction(ctx context.Context, name, action string, details map[string]any, actor workflow.Actor) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin image host action audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var imageHostID string
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM image_hosts WHERE name = $1 FOR UPDATE", name).Scan(&imageHostID); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock image host for action audit: %w", err)
+	}
+	if err := audit(ctx, tx, actor, "image_host."+action, "image_host", imageHostID, copyMap(details)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func copyMap(input map[string]any) map[string]any {
+	result := make(map[string]any, len(input)+1)
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *Store) CreateScreenshotProfile(ctx context.Context, input ScreenshotProfileInput, actor workflow.Actor) (ScreenshotProfile, error) {
