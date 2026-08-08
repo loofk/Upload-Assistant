@@ -44,7 +44,7 @@ docker compose ps
 - AI 工具：`GET /api/v2/tools`
 - 适配器能力契约：`GET /api/v2/adapters`（带稳定 SHA-256，明确 callable/config-only、operations 与 gates）
 - 安全回放：`POST /api/v2/jobs/{job_id}/replay`（只复制非授权输入，重新执行全部 gate）
-- 未知结果对账：普通 retry/resume/replay 会被硬拒绝；续跑必须绑定当前 attempt 和人工证据 SHA-256，已确认上传成功时只读恢复回执而不重复上传
+- 未知结果对账：目标站与图床普通 retry/resume/replay 会被硬拒绝；续跑必须绑定当前 attempt 和人工证据 SHA-256，已确认上传成功时只恢复本地回执而不重复上传
 - Agent 发现：`GET /.well-known/upload-assistant.json`
 - Agent Skill：`GET /.well-known/upload-assistant/SKILL.md`
 

@@ -377,7 +377,7 @@ function JobDetail({
       {canResume && <section className="resume-panel">
         <div className="section-title"><div><p className="eyebrow">RECOVERY INPUT</p><h2>恢复参数</h2></div><span>提交后会写入审计事件</span></div>
         <textarea aria-label="resume_state JSON" spellCheck={false} value={resumeText} onChange={(event) => setResumeText(event.target.value)} />
-		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>verified_not_applied 会重新查重并再次要求上传确认；verified_uploaded 还必须填写目标种子 ID 与模板中的 submitted torrent SHA，Worker 只读查证该 ID，绝不再次上传。</span></div>}
+		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>目标站 verified_uploaded 必须绑定目标种子 ID 与 submitted torrent SHA；图床 verified_uploaded 必须绑定服务器生成的 pending evidence SHA。两者都只恢复本地回执，绝不再次上传。</span></div>}
         {confirmRequired && <label className="confirm-live">
           <input type="checkbox" checked={confirmUpload} onChange={(event) => setConfirmUpload(event.target.checked)} />
           <span><strong>我已人工复核目标站规则、最终查重与不可变上传包，并确认执行 live 上传。</strong><small>此确认不会被系统或 AI 自动推断。</small></span>
@@ -411,6 +411,9 @@ function reconciliationInputReady(raw: string): boolean {
 			typeof value.evidence_sha256 === "string" && /^[a-f0-9]{64}$/.test(value.evidence_sha256) && typeof value.observed_at === "string" && value.observed_at.length > 0;
 		if (!baseReady) return false;
 		if (value.decision === "verified_uploaded") {
+			if (value.blocker_code === "image_upload_outcome_unknown") {
+				return typeof value.pending_evidence_sha256 === "string" && /^[a-f0-9]{64}$/.test(value.pending_evidence_sha256);
+			}
 			return typeof value.observed_torrent_id === "string" && /^[0-9]{1,20}$/.test(value.observed_torrent_id) &&
 				typeof value.submitted_torrent_sha256 === "string" && /^[a-f0-9]{64}$/.test(value.submitted_torrent_sha256);
 		}

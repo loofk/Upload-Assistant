@@ -262,24 +262,24 @@
       }
     },
     "/api/v2/jobs/{job_id}/pause": {
-      "post": {"operationId": "pauseJob", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job paused", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+      "post": {"operationId": "pauseJob", "description": "Pauses at a durable boundary. In-flight image_upload and target_upload external writes reject mid-step interruption.", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job paused", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/jobs/{job_id}/resume": {
       "post": {
         "operationId": "resumeJob",
-		"description": "Queues a paused, blocked, or failed job. Unknown remote-write outcomes and partial downloader writes require an explicit attempt-bound reconciliation decision; a generic retry is rejected with reconciliation_required.",
+		"description": "Queues a paused, blocked, or failed job. Unknown target/image upload outcomes and partial downloader writes require an explicit attempt-bound reconciliation decision; a generic retry is rejected with reconciliation_required.",
         "parameters": [{"$ref": "#/components/parameters/JobID"}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResumeJobRequest"}}}},
         "responses": {"200": {"description": "Job queued for recovery", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/api/v2/jobs/{job_id}/cancel": {
-      "post": {"operationId": "cancelJob", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+      "post": {"operationId": "cancelJob", "description": "Cancels without deleting evidence. In-flight image_upload and target_upload external writes reject mid-step interruption.", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/jobs/{job_id}/replay": {
       "post": {
         "operationId": "replayJob",
-        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs, reconciliation-required or unknown external outcomes, active recovery, and jobs with a completed target upload are rejected.",
+        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs, reconciliation-required or unknown external outcomes, active recovery, and jobs with completed target/image uploads or image receipts are rejected.",
         "parameters": [{"$ref": "#/components/parameters/JobID"}, {"$ref": "#/components/parameters/IdempotencyKey"}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReplayJobRequest"}}}},
         "responses": {
@@ -810,7 +810,7 @@
 		"type": "object", "additionalProperties": false,
 		"required": ["blocker_code", "attempt_id", "decision", "confirmed", "evidence_sha256", "observed_at"],
 		"properties": {
-		  "blocker_code": {"type": "string", "enum": ["target_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"]},
+		  "blocker_code": {"type": "string", "enum": ["target_upload_outcome_unknown", "image_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"]},
 		  "attempt_id": {"type": "string", "format": "uuid", "description": "Exact latest blocked/failed attempt returned by the attempts API."},
 		  "decision": {"type": "string", "enum": ["verified_not_applied", "verified_uploaded", "verified_remote_state"]},
 		  "confirmed": {"type": "boolean", "const": true},
@@ -818,11 +818,14 @@
 		  "observed_at": {"type": "string", "format": "date-time"},
 		  "observed_hash": {"type": "string", "description": "Required for a downloader partial add and must match the exact hash in the persisted reconciliation template."},
 		  "observed_torrent_id": {"type": "string", "pattern": "^[0-9]{1,20}$", "description": "Required for verified_uploaded; the worker performs a fresh read-only target search and must observe this exact torrent id."},
-		  "submitted_torrent_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Required for verified_uploaded and must equal the immutable submitted target torrent SHA-256 in the persisted reconciliation template."}
+		  "submitted_torrent_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Required for target verified_uploaded and must equal the immutable submitted target torrent SHA-256 in the persisted reconciliation template."},
+		  "pending_evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Required for image verified_uploaded and must equal the server-generated pending image evidence SHA-256 in the persisted reconciliation template."}
 		},
 		"oneOf": [
 		  {"properties": {"blocker_code": {"const": "target_upload_outcome_unknown"}, "decision": {"const": "verified_not_applied"}}},
 		  {"required": ["observed_torrent_id", "submitted_torrent_sha256"], "properties": {"blocker_code": {"const": "target_upload_outcome_unknown"}, "decision": {"const": "verified_uploaded"}}},
+		  {"properties": {"blocker_code": {"const": "image_upload_outcome_unknown"}, "decision": {"const": "verified_not_applied"}}},
+		  {"required": ["pending_evidence_sha256"], "properties": {"blocker_code": {"const": "image_upload_outcome_unknown"}, "decision": {"const": "verified_uploaded"}}},
 		  {"required": ["observed_hash"], "properties": {"blocker_code": {"const": "downloader_partial_add_requires_reconciliation"}, "decision": {"const": "verified_remote_state"}}}
 		]
 	  },

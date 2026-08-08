@@ -125,11 +125,11 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	imageHost := &fakeImageHostProvider{
 		snapshot: imagehosts.HostSnapshot{
 			ID: "host-id", Name: "default", Adapter: "imgbb",
-			ConfigSHA256: "fixture-config-sha", ConfigurationTime: time.Unix(1, 0).UTC(),
+			ConfigSHA256: strings.Repeat("c", 64), ConfigurationTime: time.Unix(1, 0).UTC(),
 		},
 		result: imagehosts.UploadEvidence{
 			ImageHostID: "host-id", ImageHostName: "default", Adapter: "imgbb",
-			ConfigSHA256: "fixture-config-sha", ConfigurationTime: time.Unix(1, 0).UTC(),
+			ConfigSHA256: strings.Repeat("c", 64), ConfigurationTime: time.Unix(1, 0).UTC(),
 			Result: imagehosts.UploadResult{URL: "https://i.ibb.co/fixture/image.png", ViewerURL: "https://ibb.co/fixture"},
 		},
 	}

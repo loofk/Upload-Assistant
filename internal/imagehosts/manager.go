@@ -20,7 +20,10 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
-var ErrAdapterUnavailable = errors.New("image host adapter is not implemented")
+var (
+	ErrAdapterUnavailable   = errors.New("image host adapter is not implemented")
+	ErrUploadOutcomeUnknown = errors.New("image host upload outcome is unknown")
+)
 
 const (
 	maxImageBytes    = 32 << 20
@@ -120,6 +123,15 @@ func (manager *Manager) Upload(ctx context.Context, name string, image Image, ac
 	if err != nil {
 		return UploadEvidence{}, err
 	}
+	configHash := sha256.Sum256(runtime.Config)
+	configurationSHA := hex.EncodeToString(configHash[:])
+	if err := manager.store.AuditImageHostAction(ctx, name, "image.upload_intent", map[string]any{
+		"adapter": runtime.Adapter, "source_filename": image.Filename,
+		"source_size_bytes": len(image.Bytes), "source_sha256": strings.ToLower(image.SHA256),
+		"config_sha256": configurationSHA,
+	}, actor); err != nil {
+		return UploadEvidence{}, fmt.Errorf("persist image upload intent: %w", err)
+	}
 	var result UploadResult
 	switch runtime.Adapter {
 	case "imgbb":
@@ -133,12 +145,14 @@ func (manager *Manager) Upload(ctx context.Context, name string, image Image, ac
 		manager.recordHealth(ctx, name, "failed", map[string]any{"adapter": runtime.Adapter, "error": safeMessage(err.Error())}, actor)
 		return UploadEvidence{}, err
 	}
-	configHash := sha256.Sum256(runtime.Config)
 	evidence := UploadEvidence{
 		ImageHostID: runtime.ID, ImageHostName: runtime.Name, Adapter: runtime.Adapter,
-		ConfigSHA256: hex.EncodeToString(configHash[:]), ConfigurationTime: runtime.UpdatedAt,
+		ConfigSHA256: configurationSHA, ConfigurationTime: runtime.UpdatedAt,
 		SourceFilename: image.Filename, SourceMIMEType: image.MIMEType,
 		SourceSizeBytes: int64(len(image.Bytes)), SourceSHA256: strings.ToLower(image.SHA256), Result: result,
+	}
+	if err := ValidateUploadEvidence(evidence, image); err != nil {
+		return evidence, fmt.Errorf("%w: successful response evidence is invalid", ErrUploadOutcomeUnknown)
 	}
 	if err := manager.store.AuditImageHostAction(ctx, name, "image.upload", map[string]any{
 		"adapter": runtime.Adapter, "source_filename": image.Filename,
@@ -146,7 +160,7 @@ func (manager *Manager) Upload(ctx context.Context, name string, image Image, ac
 		"config_sha256": evidence.ConfigSHA256, "remote_id": result.RemoteID,
 		"url_host": urlHost(result.URL),
 	}, actor); err != nil {
-		return UploadEvidence{}, err
+		return evidence, fmt.Errorf("%w: persist image upload result audit", ErrUploadOutcomeUnknown)
 	}
 	manager.recordHealth(ctx, name, "ready", map[string]any{"adapter": runtime.Adapter}, actor)
 	return evidence, nil
@@ -178,11 +192,11 @@ func (manager *Manager) uploadImgBB(ctx context.Context, endpoint *url.URL, cred
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(responseBody, &response); err != nil || !response.Success || response.Status < 200 || response.Status >= 300 {
-		return UploadResult{}, fmt.Errorf("imgbb returned an unsuccessful or invalid response")
+		return UploadResult{}, fmt.Errorf("%w: imgbb returned an unsuccessful or invalid success response", ErrUploadOutcomeUnknown)
 	}
 	rawURL := firstNonEmpty(response.Data.Image.URL, response.Data.URL, response.Data.DisplayURL)
 	if err := validatePublicImageURL(rawURL, []string{"i.ibb.co", "ibb.co"}); err != nil {
-		return UploadResult{}, fmt.Errorf("imgbb response URL is invalid: %w", err)
+		return UploadResult{}, fmt.Errorf("%w: imgbb response URL is invalid", ErrUploadOutcomeUnknown)
 	}
 	result := UploadResult{URL: rawURL, RemoteID: response.Data.ID}
 	if validatePublicImageURL(response.Data.ViewerURL, []string{"ibb.co"}) == nil {
@@ -208,7 +222,7 @@ func (manager *Manager) uploadPTPImg(ctx context.Context, endpoint *url.URL, cre
 		Ext  string `json:"ext"`
 	}
 	if err := json.Unmarshal(responseBody, &response); err != nil || len(response) == 0 || !ptpCodePattern.MatchString(response[0].Code) || !extensionPattern.MatchString(response[0].Ext) {
-		return UploadResult{}, fmt.Errorf("ptpimg returned an unsuccessful or invalid response")
+		return UploadResult{}, fmt.Errorf("%w: ptpimg returned an unsuccessful or invalid success response", ErrUploadOutcomeUnknown)
 	}
 	imageURL := "https://ptpimg.me/" + response[0].Code + "." + strings.ToLower(response[0].Ext)
 	return UploadResult{URL: imageURL, ViewerURL: imageURL, RemoteID: response[0].Code, Extension: strings.ToLower(response[0].Ext)}, nil
@@ -246,14 +260,17 @@ func (manager *Manager) multipart(ctx context.Context, endpoint *url.URL, fields
 	}
 	response, err := manager.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("image host request failed")
+		return nil, fmt.Errorf("%w: image host request ended without a response", ErrUploadOutcomeUnknown)
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil || len(responseBody) > maxResponseBytes {
-		return nil, fmt.Errorf("image host response is unreadable or too large")
+		return nil, fmt.Errorf("%w: image host response is unreadable or too large", ErrUploadOutcomeUnknown)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if response.StatusCode >= 500 {
+			return nil, fmt.Errorf("%w: image host returned HTTP %d", ErrUploadOutcomeUnknown, response.StatusCode)
+		}
 		return nil, fmt.Errorf("image host returned HTTP %d", response.StatusCode)
 	}
 	return responseBody, nil
@@ -275,6 +292,44 @@ func validateImage(image Image) error {
 	digest := sha256.Sum256(image.Bytes)
 	if !strings.EqualFold(image.SHA256, hex.EncodeToString(digest[:])) {
 		return fmt.Errorf("image SHA-256 does not match its bytes")
+	}
+	return nil
+}
+
+func ValidateUploadEvidence(evidence UploadEvidence, image Image) error {
+	if err := validateImage(image); err != nil {
+		return err
+	}
+	if evidence.ImageHostID == "" || evidence.ImageHostName == "" || len(evidence.ConfigSHA256) != sha256.Size*2 ||
+		evidence.ConfigurationTime.IsZero() || evidence.SourceFilename != image.Filename ||
+		evidence.SourceMIMEType != image.MIMEType || evidence.SourceSizeBytes != int64(len(image.Bytes)) ||
+		!strings.EqualFold(evidence.SourceSHA256, image.SHA256) || evidence.Result.URL == "" {
+		return fmt.Errorf("image upload evidence is incomplete or bound to another source")
+	}
+	switch evidence.Adapter {
+	case "imgbb":
+		if err := validatePublicImageURL(evidence.Result.URL, []string{"i.ibb.co", "ibb.co"}); err != nil {
+			return err
+		}
+		if evidence.Result.ViewerURL != "" {
+			if err := validatePublicImageURL(evidence.Result.ViewerURL, []string{"ibb.co"}); err != nil {
+				return err
+			}
+		}
+		if evidence.Result.ThumbnailURL != "" {
+			if err := validatePublicImageURL(evidence.Result.ThumbnailURL, []string{"i.ibb.co", "ibb.co"}); err != nil {
+				return err
+			}
+		}
+	case "ptpimg":
+		if err := validatePublicImageURL(evidence.Result.URL, []string{"ptpimg.me"}); err != nil {
+			return err
+		}
+		if evidence.Result.ViewerURL != "" && evidence.Result.ViewerURL != evidence.Result.URL {
+			return fmt.Errorf("ptpimg viewer URL does not match the image URL")
+		}
+	default:
+		return fmt.Errorf("unsupported image upload evidence adapter")
 	}
 	return nil
 }

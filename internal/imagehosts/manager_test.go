@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,9 +16,10 @@ import (
 )
 
 type fakeConfigurationStore struct {
-	runtime integrations.RuntimeImageHost
-	health  string
-	actions []string
+	runtime     integrations.RuntimeImageHost
+	health      string
+	actions     []string
+	failAuditAt int
 }
 
 func (store *fakeConfigurationStore) GetRuntimeImageHost(context.Context, string) (integrations.RuntimeImageHost, error) {
@@ -29,6 +31,9 @@ func (store *fakeConfigurationStore) RecordImageHostHealth(_ context.Context, _ 
 }
 func (store *fakeConfigurationStore) AuditImageHostAction(_ context.Context, _ string, action string, _ map[string]any, _ workflow.Actor) error {
 	store.actions = append(store.actions, action)
+	if len(store.actions) == store.failAuditAt {
+		return errors.New("fixture audit unavailable")
+	}
 	return nil
 }
 
@@ -64,7 +69,8 @@ func TestManagerUploadsImgBBWithoutLeakingKeyIntoURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evidence.Result.URL != "https://i.ibb.co/path/image.png" || evidence.Result.ViewerURL != "https://ibb.co/image-id" || store.health != "ready" || len(store.actions) != 1 {
+	if evidence.Result.URL != "https://i.ibb.co/path/image.png" || evidence.Result.ViewerURL != "https://ibb.co/image-id" || store.health != "ready" ||
+		len(store.actions) != 2 || store.actions[0] != "image.upload_intent" || store.actions[1] != "image.upload" {
 		t.Fatalf("upload evidence/store = %#v/%#v", evidence, store)
 	}
 }
@@ -92,6 +98,38 @@ func TestManagerUploadsPTPImgContract(t *testing.T) {
 	}
 	if evidence.Result.URL != "https://ptpimg.me/abc123.png" || evidence.Result.RemoteID != "abc123" {
 		t.Fatalf("upload evidence = %#v", evidence)
+	}
+}
+
+func TestManagerReturnsKnownEvidenceWhenResultAuditFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true, "status": 200,
+			"data": map[string]any{
+				"id": "image-id", "url": "https://i.ibb.co/path/image.png",
+				"image": map[string]any{"url": "https://i.ibb.co/path/image.png"},
+			},
+		})
+	}))
+	defer server.Close()
+	store := runtimeStore("imgbb", server.URL, map[string]string{"api_key": "imgbb-secret"})
+	store.failAuditAt = 2
+	evidence, err := NewManager(store, nil).Upload(context.Background(), "primary", fixtureImage(), workflow.Actor{Type: "test", ID: "image"})
+	if !errors.Is(err, ErrUploadOutcomeUnknown) || evidence.Result.URL != "https://i.ibb.co/path/image.png" || len(store.actions) != 2 {
+		t.Fatalf("partial image evidence/error/actions = %#v/%v/%#v", evidence, err, store.actions)
+	}
+}
+
+func TestManagerClassifiesInvalidSuccessResponseAsUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true,"status":200}`))
+	}))
+	defer server.Close()
+	store := runtimeStore("imgbb", server.URL, map[string]string{"api_key": "imgbb-secret"})
+	_, err := NewManager(store, nil).Upload(context.Background(), "primary", fixtureImage(), workflow.Actor{Type: "test", ID: "image"})
+	if !errors.Is(err, ErrUploadOutcomeUnknown) || len(store.actions) != 1 {
+		t.Fatalf("invalid success response error/actions = %v/%#v", err, store.actions)
 	}
 }
 

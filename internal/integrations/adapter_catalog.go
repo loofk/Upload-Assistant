@@ -84,13 +84,13 @@ var adapterCatalog = []AdapterCapability{
 	{
 		ID: "image_host/imgbb", Kind: "image_host", Adapter: "imgbb", DisplayName: "imgbb",
 		RuntimeSupported: true, Operations: []string{"snapshot_configuration", "upload_image"}, CredentialFields: []string{"api_key"},
-		SafetyGates: []string{"bounded_image", "configuration_snapshot", "source_sha256", "verified_https_result"},
+		SafetyGates: []string{"bounded_image", "configuration_snapshot", "source_sha256", "upload_outcome_reconciliation", "verified_https_result"},
 		Constraints: []string{"PNG, JPEG, or WebP up to 32 MiB", "redirects are disabled and returned image hosts are allowlisted"},
 	},
 	{
 		ID: "image_host/ptpimg", Kind: "image_host", Adapter: "ptpimg", DisplayName: "PTPimg",
 		RuntimeSupported: true, Operations: []string{"snapshot_configuration", "upload_image"}, CredentialFields: []string{"api_key"},
-		SafetyGates: []string{"bounded_image", "configuration_snapshot", "source_sha256", "verified_https_result"},
+		SafetyGates: []string{"bounded_image", "configuration_snapshot", "source_sha256", "upload_outcome_reconciliation", "verified_https_result"},
 		Constraints: []string{"PNG, JPEG, or WebP up to 32 MiB", "redirects are disabled and returned images must use ptpimg.me"},
 	},
 	{

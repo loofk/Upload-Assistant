@@ -234,19 +234,21 @@ func (s *Store) ReplayJob(
 	} else if blocker != "" {
 		return Job{}, fmt.Errorf("%w: blocker %s requires reconciliation on the original job", ErrReplayUnsafe, blocker)
 	}
-	if activeVerifiedUploadRecovery(originalResumeState) {
+	if activeVerifiedExternalRecovery(originalResumeState) {
 		return Job{}, fmt.Errorf("%w: verified_uploaded recovery must finish or be cancelled on the original job", ErrReplayUnsafe)
 	}
-	var targetUploadCompleted bool
+	var externalWriteCompleted bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM job_steps
-			WHERE job_id = $1 AND step_key = 'target_upload' AND status = 'complete'
-		)`, originalJobID).Scan(&targetUploadCompleted); err != nil {
+			WHERE job_id = $1 AND step_key IN ('image_upload', 'target_upload') AND status = 'complete'
+		) OR EXISTS(
+			SELECT 1 FROM artifacts WHERE job_id = $1 AND kind = 'image_upload_receipt'
+		)`, originalJobID).Scan(&externalWriteCompleted); err != nil {
 		return Job{}, fmt.Errorf("inspect replay external writes: %w", err)
 	}
-	if targetUploadCompleted {
-		return Job{}, fmt.Errorf("%w: a completed target upload cannot be replayed from the beginning", ErrReplayUnsafe)
+	if externalWriteCompleted {
+		return Job{}, fmt.Errorf("%w: a completed external upload step cannot be replayed from the beginning", ErrReplayUnsafe)
 	}
 	var replayJobID string
 	err = tx.QueryRow(ctx, `
@@ -340,15 +342,18 @@ func unsafeReplayBlocker(body json.RawMessage) (string, error) {
 	return "", nil
 }
 
-func activeVerifiedUploadRecovery(body json.RawMessage) bool {
+func activeVerifiedExternalRecovery(body json.RawMessage) bool {
 	var state struct {
 		Reconciliation struct {
 			BlockerCode string `json:"blocker_code"`
 			Decision    string `json:"decision"`
 		} `json:"reconciliation"`
 	}
-	return json.Unmarshal(body, &state) == nil && state.Reconciliation.BlockerCode == "target_upload_outcome_unknown" &&
-		state.Reconciliation.Decision == "verified_uploaded"
+	if json.Unmarshal(body, &state) != nil || state.Reconciliation.Decision != "verified_uploaded" {
+		return false
+	}
+	return state.Reconciliation.BlockerCode == "target_upload_outcome_unknown" ||
+		state.Reconciliation.BlockerCode == "image_upload_outcome_unknown"
 }
 
 func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
@@ -678,17 +683,52 @@ func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Durat
 	}
 	if previousStatus == JobRunning {
 		var stepID, stepKey, attemptID string
+		var attemptSnapshot json.RawMessage
 		recoveryErr := tx.QueryRow(ctx, `
-			SELECT js.id::text, js.step_key, sa.id::text
+			SELECT js.id::text, js.step_key, sa.id::text, sa.input_snapshot
 			FROM job_steps js
 			JOIN step_attempts sa ON sa.job_step_id = js.id AND sa.status = 'running'
 			WHERE js.job_id = $1 AND js.status = 'running'
 			ORDER BY sa.started_at DESC LIMIT 1
-			FOR UPDATE OF js, sa`, id).Scan(&stepID, &stepKey, &attemptID)
+			FOR UPDATE OF js, sa`, id).Scan(&stepID, &stepKey, &attemptID, &attemptSnapshot)
 		if recoveryErr != nil && !errors.Is(recoveryErr, pgx.ErrNoRows) {
 			return Job{}, fmt.Errorf("lock expired step attempt: %w", recoveryErr)
 		}
 		if recoveryErr == nil {
+			if stepKey == "target_upload" || stepKey == "image_upload" {
+				blockers, nextActions, resumeState, prepareErr := expiredExternalWriteReconciliation(stepKey, attemptID, attemptSnapshot)
+				if prepareErr != nil {
+					return Job{}, prepareErr
+				}
+				if _, err := tx.Exec(ctx, `
+					UPDATE step_attempts
+					SET status = 'blocked', error_code = $2, error_message = $3, finished_at = now()
+					WHERE id = $1`, attemptID, firstBlockerCode(blockers), string(blockers)); err != nil {
+					return Job{}, fmt.Errorf("block expired external-write attempt: %w", err)
+				}
+				if _, err := tx.Exec(ctx, `
+					UPDATE job_steps SET status = 'blocked', blockers = $2, next_actions = $3,
+					       resume_state = $4, finished_at = now(), updated_at = now()
+					WHERE id = $1`, stepID, blockers, nextActions, resumeState); err != nil {
+					return Job{}, fmt.Errorf("block expired external-write step: %w", err)
+				}
+				if _, err := tx.Exec(ctx, `
+					UPDATE jobs SET status = 'blocked', blockers = $2, next_actions = $3, resume_state = $4,
+					       lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL, updated_at = now()
+					WHERE id = $1`, id, blockers, nextActions, resumeState); err != nil {
+					return Job{}, fmt.Errorf("block expired external-write job: %w", err)
+				}
+				if _, err := appendEvent(ctx, tx, id, stepID, attemptID, "step.blocked", actor, map[string]any{
+					"step_key": stepKey, "reason": "worker_lease_expired_unknown_outcome",
+					"previous_lease_owner": previousLeaseOwner, "blockers": json.RawMessage(blockers),
+				}); err != nil {
+					return Job{}, err
+				}
+				if err := tx.Commit(ctx); err != nil {
+					return Job{}, fmt.Errorf("commit external-write lease reconciliation: %w", err)
+				}
+				return Job{}, ErrNotFound
+			}
 			if _, err := tx.Exec(ctx, `
 				UPDATE step_attempts
 				SET status = 'failed', error_code = 'worker_lease_expired',
@@ -726,6 +766,44 @@ func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Durat
 		return Job{}, fmt.Errorf("commit claim transaction: %w", err)
 	}
 	return s.GetJob(ctx, id)
+}
+
+func expiredExternalWriteReconciliation(stepKey, attemptID string, snapshot json.RawMessage) (json.RawMessage, json.RawMessage, json.RawMessage, error) {
+	blockerCode := "image_upload_outcome_unknown"
+	action := "reconcile_image_upload"
+	message := "worker lease expired during image upload; inspect unrecorded screenshots before any retry"
+	resume := map[string]any{}
+	if stepKey == "target_upload" {
+		blockerCode = "target_upload_outcome_unknown"
+		action = "reconcile_target_upload"
+		message = "worker lease expired during target upload; inspect the target site before any retry"
+		resume["confirm_upload"] = false
+		var frozen struct {
+			PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
+		}
+		var targetTorrent struct {
+			SHA256 string `json:"target_torrent_sha256"`
+		}
+		if json.Unmarshal(snapshot, &frozen) == nil && json.Unmarshal(frozen.PreviousSteps["target_torrent"], &targetTorrent) == nil && targetTorrent.SHA256 != "" {
+			resume["target_upload"] = map[string]any{
+				"outcome": "unreconciled", "submitted_torrent_sha256": strings.ToLower(targetTorrent.SHA256),
+			}
+		}
+	}
+	blockers, _ := json.Marshal([]map[string]string{{"code": blockerCode, "message": message}})
+	nextActions, _ := json.Marshal([]map[string]any{{
+		"action": action, "description": "Do not retry blindly; reconcile the expired external write attempt.",
+		"parameters": map[string]any{"attempt_id": attemptID, "step_key": stepKey},
+	}})
+	resumeBody, err := json.Marshal(resume)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	resumeBody, err = addReconciliationTemplate(blockers, nextActions, resumeBody, attemptID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("prepare expired external-write reconciliation: %w", err)
+	}
+	return blockers, nextActions, resumeBody, nil
 }
 
 func (s *Store) Heartbeat(ctx context.Context, jobID, owner string, lease time.Duration) error {
@@ -1069,6 +1147,7 @@ type reconciliationInput struct {
 	ObservedHash           string `json:"observed_hash,omitempty"`
 	ObservedTorrentID      string `json:"observed_torrent_id,omitempty"`
 	SubmittedTorrentSHA256 string `json:"submitted_torrent_sha256,omitempty"`
+	PendingEvidenceSHA256  string `json:"pending_evidence_sha256,omitempty"`
 }
 
 func addReconciliationTemplate(blockers, nextActions, resumeState json.RawMessage, attemptID string) (json.RawMessage, error) {
@@ -1092,6 +1171,21 @@ func addReconciliationTemplate(blockers, nextActions, resumeState json.RawMessag
 		}
 		if json.Unmarshal(resumeState, &current) == nil && current.TargetUpload.SubmittedTorrentSHA256 != "" {
 			template["required_submitted_torrent_sha256"] = strings.ToLower(strings.TrimSpace(current.TargetUpload.SubmittedTorrentSHA256))
+		}
+	}
+	if blockerCode == "image_upload_outcome_unknown" {
+		var current map[string]json.RawMessage
+		if json.Unmarshal(resumeState, &current) == nil {
+			var imageState map[string]json.RawMessage
+			if json.Unmarshal(current["image_upload"], &imageState) == nil {
+				if pending, exists := imageState["pending_evidence"]; exists {
+					canonical, canonicalErr := canonicalJSON(pending)
+					if canonicalErr != nil {
+						return nil, canonicalErr
+					}
+					template["required_pending_evidence_sha256"] = sha256Hex(canonical)
+				}
+			}
 		}
 	}
 	if blockerCode == "downloader_partial_add_requires_reconciliation" {
@@ -1126,7 +1220,7 @@ func validateResumeReconciliation(
 		return nil, fmt.Errorf("inspect current reconciliation state: %w", err)
 	}
 	if blockerCode == "" {
-		if activeVerifiedUploadRecovery(currentResumeState) {
+		if activeVerifiedExternalRecovery(currentResumeState) {
 			var proposed map[string]json.RawMessage
 			if err := json.Unmarshal(proposedResumeState, &proposed); err != nil || proposed == nil {
 				return nil, fmt.Errorf("%w: recovery resume state must be a JSON object", ErrReconciliation)
@@ -1173,6 +1267,7 @@ func validateResumeReconciliation(
 		AttemptID                      string `json:"attempt_id"`
 		RequiredObservedHash           string `json:"required_observed_hash"`
 		RequiredSubmittedTorrentSHA256 string `json:"required_submitted_torrent_sha256"`
+		RequiredPendingEvidenceSHA256  string `json:"required_pending_evidence_sha256"`
 	}
 	if err := json.Unmarshal(current["reconciliation"], &template); err != nil || template.BlockerCode != blockerCode || template.AttemptID != currentAttemptID {
 		return nil, fmt.Errorf("%w: persisted reconciliation template is missing or stale", ErrReconciliation)
@@ -1191,6 +1286,17 @@ func validateResumeReconciliation(
 		default:
 			return nil, fmt.Errorf("%w: target upload reconciliation only supports verified_not_applied or verified_uploaded", ErrReconciliation)
 		}
+	case "image_upload_outcome_unknown":
+		switch reconciliation.Decision {
+		case "verified_not_applied":
+		case "verified_uploaded":
+			if template.RequiredPendingEvidenceSHA256 == "" ||
+				reconciliation.PendingEvidenceSHA256 != template.RequiredPendingEvidenceSHA256 {
+				return nil, fmt.Errorf("%w: verified_uploaded must bind the exact pending image evidence SHA-256", ErrReconciliation)
+			}
+		default:
+			return nil, fmt.Errorf("%w: image upload reconciliation only supports verified_not_applied or verified_uploaded", ErrReconciliation)
+		}
 	case "downloader_partial_add_requires_reconciliation":
 		if reconciliation.Decision != "verified_remote_state" || template.RequiredObservedHash == "" ||
 			!strings.EqualFold(reconciliation.ObservedHash, template.RequiredObservedHash) {
@@ -1206,6 +1312,7 @@ func validateResumeReconciliation(
 		"observed_hash":            strings.ToLower(strings.TrimSpace(reconciliation.ObservedHash)),
 		"observed_torrent_id":      strings.TrimSpace(reconciliation.ObservedTorrentID),
 		"submitted_torrent_sha256": strings.ToLower(strings.TrimSpace(reconciliation.SubmittedTorrentSHA256)),
+		"pending_evidence_sha256":  strings.ToLower(strings.TrimSpace(reconciliation.PendingEvidenceSHA256)),
 		"reconciliation_sha256":    sha256Hex(reconciliationHashBody),
 	}, nil
 }
@@ -1261,6 +1368,10 @@ func (s *Store) transitionJob(
 	}
 	if !containsStatus(allowed, current) {
 		return Job{}, fmt.Errorf("%w: cannot transition job from %s to %s", ErrConflict, current, target)
+	}
+	if current == JobRunning && (currentStepKey == "target_upload" || currentStepKey == "image_upload") &&
+		(target == JobPaused || target == JobCancelled) {
+		return Job{}, fmt.Errorf("%w: %s is an in-flight external write and can only stop at a step boundary", ErrConflict, currentStepKey)
 	}
 	var reconciliationAudit map[string]any
 	if target == JobQueued {
