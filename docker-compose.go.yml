@@ -21,6 +21,7 @@ services:
       - ua-net
 
   upload-assistant:
+    platform: linux/amd64
     image: ghcr.io/loofk/upload-assistant:v2-dev
     build:
       context: .
@@ -40,6 +41,7 @@ services:
       UA_DATA_DIR: /data
       UA_MASTER_KEY_FILE: /data/master-keys
       UA_LOG_LEVEL: ${UA_LOG_LEVEL:-info}
+      UA_MKBRR_BIN: /usr/local/bin/mkbrr
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

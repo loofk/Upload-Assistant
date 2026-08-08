@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
 	"github.com/loofk/upload-assistant/v2/internal/sites/nexusphp"
+	"github.com/loofk/upload-assistant/v2/internal/torrentmaker"
 	"github.com/loofk/upload-assistant/v2/internal/worker"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 	"golang.org/x/term"
@@ -138,6 +140,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize target duplicate adapters: %w", err)
 	}
+	targetTorrentRegistry, err := sites.NewTargetTorrentRegistry(mteam.NewTorrentAdapter())
+	if err != nil {
+		return fmt.Errorf("initialize target torrent adapters: %w", err)
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	jobRunner := worker.New(
@@ -155,6 +161,11 @@ func serve(args []string) error {
 		worker.WithImageHosts(imageHostManager, artifactStore),
 		worker.WithTargetPackages(targetPackageRegistry, artifactStore),
 		worker.WithTargetDuplicateChecks(targetDuplicateRegistry, artifactStore),
+		worker.WithTargetTorrents(
+			targetTorrentRegistry,
+			torrentmaker.NewMkbrr(cfg.MkbrrBinary, filepath.Join(cfg.DataDir, "tmp"), 0),
+			artifactStore,
+		),
 	)
 	go jobRunner.Run(ctx)
 

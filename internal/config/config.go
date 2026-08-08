@@ -30,6 +30,7 @@ type Config struct {
 	MediaInfoBinary  string
 	FFmpegBinary     string
 	FFprobeBinary    string
+	MkbrrBinary      string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -52,6 +53,7 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		MediaInfoBinary:  envOrDefault(lookup, "UA_MEDIAINFO_BIN", "mediainfo"),
 		FFmpegBinary:     envOrDefault(lookup, "UA_FFMPEG_BIN", "ffmpeg"),
 		FFprobeBinary:    envOrDefault(lookup, "UA_FFPROBE_BIN", "ffprobe"),
+		MkbrrBinary:      envOrDefault(lookup, "UA_MKBRR_BIN", "mkbrr"),
 	}
 	cfg.MasterKeyFile = filepath.Clean(envOrDefault(lookup, "UA_MASTER_KEY_FILE", filepath.Join(cfg.DataDir, "master-keys")))
 	if cfg.DatabaseURL == "" {
@@ -70,6 +72,7 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		{variable: "UA_MEDIAINFO_BIN", binary: cfg.MediaInfoBinary},
 		{variable: "UA_FFMPEG_BIN", binary: cfg.FFmpegBinary},
 		{variable: "UA_FFPROBE_BIN", binary: cfg.FFprobeBinary},
+		{variable: "UA_MKBRR_BIN", binary: cfg.MkbrrBinary},
 	} {
 		if strings.ContainsAny(binaryConfig.binary, "\r\n\x00") || strings.TrimSpace(binaryConfig.binary) == "" {
 			return Config{}, fmt.Errorf("%s must be a binary name or absolute path", binaryConfig.variable)

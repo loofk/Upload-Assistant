@@ -19,8 +19,10 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
+	"github.com/loofk/upload-assistant/v2/internal/torrentmaker"
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -48,18 +50,24 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	}
 	service := workflow.NewService(store, definition, workflowID)
 
-	metainfo := []byte("d8:announce14:https://t.test4:infod4:name7:fixtureee")
+	metainfo := targetTorrentMetainfo("https://t.test", "U2", 13, nil)
 	hashes, err := torrentmeta.Hashes(metainfo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rule := testRuleRevision(t, "source", true)
+	targetRule := integrationTargetRuleRevision(t)
 	input := mustJSON(map[string]any{
 		"source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM",
 		"accept_rules": map[string]any{"U2": map[string]any{
 			"accepted": true, "fingerprint": rule.Fingerprint,
 			"obligations": map[string]any{"repost-permission": map[string]any{
 				"confirmed": true, "evidence": "Fixture confirms source-side permission was reviewed.",
+			}},
+		}, "MTEAM": map[string]any{
+			"accepted": true, "fingerprint": targetRule.Fingerprint,
+			"obligations": map[string]any{"repost-permission": map[string]any{
+				"confirmed": true, "evidence": "Fixture confirms target-side upload obligations were reviewed.",
 			}},
 		}},
 		"downloader": map[string]any{"name": "fixture-box", "save_path": "/remote/downloads"},
@@ -124,9 +132,17 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("a", 64),
 		Query: mteam.DuplicateQuery{IMDbID: "tt1234567"}, Candidates: []mteam.DuplicateCandidate{}, CheckedAt: time.Unix(1, 0).UTC(),
 	}}
+	targetTorrentProfiles, err := sites.NewTargetTorrentRegistry(mteam.NewTorrentAdapter())
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetTorrentMaker := &fakeTargetTorrentMaker{result: torrentmaker.Result{
+		Torrent: targetTorrentMetainfo("https://fake.tracker", "MTEAM", 13, nil),
+		Tool:    "mkbrr", Version: "mkbrr version: v1.23.0", Verification: "100.00%",
+	}}
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
-		WithRuleProvider(fakeRuleProvider{revision: rule}),
+		WithRuleProvider(integrationRuleProvider{revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule}}),
 		WithSourceAdapters(source, artifactStore),
 		WithDownloader(downloader, artifactStore, allowedContentRoot),
 		WithMetadata(artifactStore),
@@ -153,6 +169,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithImageHosts(imageHost, artifactStore),
 		WithTargetPackages(mustTargetPackageRegistry(t), artifactStore),
 		WithTargetDuplicateChecks(targetDuplicates, artifactStore),
+		WithTargetTorrents(targetTorrentProfiles, targetTorrentMaker, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -279,10 +296,60 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	if err != nil || len(storedArtifacts) != 8 || storedArtifacts[7].Kind != "duplicate_check" {
 		t.Fatalf("target-duplicate artifacts/error = %#v/%v", storedArtifacts, err)
 	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target rules RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_torrent" {
+		t.Fatalf("target-rules job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target torrent RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_upload" {
+		t.Fatalf("target-torrent job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 10 || storedArtifacts[8].Kind != "target_torrent" || storedArtifacts[9].Kind != "target_torrent_receipt" {
+		t.Fatalf("target-torrent artifacts/error = %#v/%v", storedArtifacts, err)
+	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {
 		t.Fatalf("event chain/error = %d/%v", len(events), err)
 	}
+}
+
+type integrationRuleProvider struct {
+	revisions map[string]rules.Revision
+}
+
+func (provider integrationRuleProvider) Active(_ context.Context, siteCode string) (rules.Revision, error) {
+	revision, exists := provider.revisions[siteCode]
+	if !exists {
+		return rules.Revision{}, rules.ErrNotFound
+	}
+	return revision, nil
+}
+
+func integrationTargetRuleRevision(t *testing.T) rules.Revision {
+	t.Helper()
+	revision := testRuleRevision(t, "target", true)
+	var policy rules.Policy
+	if err := json.Unmarshal(revision.Policy, &policy); err != nil {
+		t.Fatal(err)
+	}
+	policy.Site.Code, policy.Site.DisplayName = "MTEAM", "M-Team"
+	policy.Source.URL = "https://wiki.m-team.cc/zh-tw/site-rules"
+	body, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.ID = "6ebaf982-1d6e-4eb3-a22e-c79038ca1851"
+	revision.SiteCode = "MTEAM"
+	revision.Fingerprint = strings.Repeat("9", 64)
+	revision.Policy = body
+	return revision
 }
 
 func mustTargetPackageRegistry(t *testing.T) *sites.TargetPackageRegistry {

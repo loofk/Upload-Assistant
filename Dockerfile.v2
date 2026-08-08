@@ -15,6 +15,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -X github.com/loofk/upload-assistant/v2/internal/buildinfo.version=${VERSION:-dev} -X github.com/loofk/upload-assistant/v2/internal/buildinfo.commit=${COMMIT:-unknown} -X github.com/loofk/upload-assistant/v2/internal/buildinfo.builtAt=${BUILT_AT:-unknown}" \
     -o /out/upload-assistant ./cmd/upload-assistant
 
+FROM ghcr.io/autobrr/mkbrr:v1.23.0@sha256:41cbe35d5d2faf09efb5e3ec3846b258b13f68851baaf0ae8465176f627bf1b6 AS mkbrr
+
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,6 +33,7 @@ RUN groupadd --gid 1000 upload-assistant \
     && chown -R upload-assistant:upload-assistant /data /downloads
 
 COPY --from=go-builder /out/upload-assistant /usr/local/bin/upload-assistant
+COPY --from=mkbrr /usr/local/bin/mkbrr /usr/local/bin/mkbrr
 
 USER 1000:1000
 EXPOSE 8080
