@@ -1,8 +1,8 @@
-name: Python Code Analysis Comment
+name: Legacy Python Code Analysis Comment
 
 on:
   workflow_run:
-    workflows: ["Python Code Analysis"]
+    workflows: ["Legacy Python Code Analysis (manual)"]
     types:
       - completed
 

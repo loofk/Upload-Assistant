@@ -1,13 +1,6 @@
-name: Python Code Analysis
+name: Legacy Python Code Analysis (manual)
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    branches:
-      - master
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:

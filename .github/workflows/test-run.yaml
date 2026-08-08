@@ -1,9 +1,6 @@
-name: Run upload test
+name: Legacy Python upload test (manual)
 
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
 
 jobs:

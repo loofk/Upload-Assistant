@@ -105,6 +105,14 @@ func TestGoV2CIAndPublicDocumentationAreTheDefault(t *testing.T) {
 			t.Errorf("default developer workflow still routes to legacy target %q", forbidden)
 		}
 	}
+	legacyPythonCI := string(readFile(t, filepath.Join(root, ".github", "workflows", "python-code-analysis.yml")))
+	legacyUploadCI := string(readFile(t, filepath.Join(root, ".github", "workflows", "test-run.yaml")))
+	if strings.Contains(legacyPythonCI, "push:") || strings.Contains(legacyPythonCI, "pull_request:") || !strings.Contains(legacyPythonCI, "workflow_dispatch:") {
+		t.Fatal("legacy Python analysis must remain manual-only")
+	}
+	if strings.Contains(legacyUploadCI, "release:") || !strings.Contains(legacyUploadCI, "workflow_dispatch:") {
+		t.Fatal("legacy Python upload test must not run as part of a Go v2 release")
+	}
 }
 
 func repositoryRoot(t *testing.T) string {
