@@ -257,6 +257,7 @@
           "target": {"type": "string", "description": "Uppercase target tracker code."},
           "accept_rules": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/RuleAcceptance"}},
           "downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
+          "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
           "confirm_upload": {"type": "boolean", "default": false, "description": "A later live target upload gate requires an explicit true value; it is never inferred."}
         },
         "additionalProperties": true
@@ -275,6 +276,11 @@
           "upload_limit_bytes_per_second": {"type": "integer", "minimum": 0, "default": 0}
         },
         "description": "Source-download settings. An active rule revision can impose a stricter rate cap, which always wins. These fields can also be supplied in resume_state after a configuration block."
+      },
+      "RetorrentScreenshots": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"profile": {"type": "string", "default": "default", "description": "Latest enabled immutable screenshot profile revision."}}
       },
       "CreateJobRequest": {
         "type": "object",
@@ -315,7 +321,19 @@
       "AddTorrentRequest": {"type": "object", "additionalProperties": false, "required": ["torrent_base64"], "properties": {"torrent_base64": {"type": "string", "contentEncoding": "base64", "writeOnly": true}, "save_path": {"type": "string"}, "category": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "skip_checking": {"type": "boolean"}, "paused": {"type": "boolean"}, "upload_limit": {"type": "integer", "minimum": 0}, "download_limit": {"type": "integer", "minimum": 0}}},
       "SetTorrentLimitsRequest": {"type": "object", "additionalProperties": false, "required": ["download_limit", "upload_limit"], "properties": {"download_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}, "upload_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}}},
       "ImageHostInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string"}, "enabled": {"type": "boolean", "default": true}, "priority": {"type": "integer", "default": 100}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}}},
-      "ScreenshotProfileInput": {"type": "object", "additionalProperties": false, "required": ["name", "config"], "properties": {"name": {"type": "string"}, "enabled": {"type": "boolean", "default": true}, "config": {"type": "object", "additionalProperties": true}}},
+      "ScreenshotConfig": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "count": {"type": "integer", "minimum": 1, "maximum": 20, "default": 6},
+          "format": {"type": "string", "enum": ["png", "jpg", "webp"], "default": "png"},
+          "width": {"type": "integer", "minimum": 320, "maximum": 3840, "description": "Omit or use 0 to preserve source width."},
+          "quality": {"type": "integer", "minimum": 1, "maximum": 100, "default": 90},
+          "start_percent": {"type": "number", "minimum": 0, "exclusiveMaximum": 0.5, "default": 0.1},
+          "end_percent": {"type": "number", "exclusiveMinimum": 0.5, "maximum": 1, "default": 0.9},
+          "comparison": {"type": "boolean", "default": false}
+        }
+      },
+      "ScreenshotProfileInput": {"type": "object", "additionalProperties": false, "required": ["name", "config"], "properties": {"name": {"type": "string"}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/ScreenshotConfig"}}},
       "RuleEnvelope": {"type": "object", "required": ["ok", "status", "site_code", "rule_revision_id", "fingerprint", "revision", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string", "enum": ["draft", "approved", "retired"]}, "site_code": {"type": "string"}, "rule_revision_id": {"type": "string", "format": "uuid"}, "fingerprint": {"type": "string"}, "revision": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}},
       "Tool": {"type": "object", "required": ["name", "description", "method", "path", "required_scopes", "safety_level", "input_schema"], "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "method": {"type": "string"}, "path": {"type": "string"}, "required_scopes": {"type": "array", "items": {"type": "string"}}, "safety_level": {"type": "string"}, "input_schema": {"type": "object"}}},
       "ToolsResponse": {"type": "object", "required": ["ok", "status", "api_version", "count", "tools", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "api_version": {"type": "string"}, "count": {"type": "integer"}, "tools": {"type": "array", "items": {"$ref": "#/components/schemas/Tool"}}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}}},

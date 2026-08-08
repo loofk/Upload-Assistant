@@ -527,9 +527,9 @@ func (s *Store) CreateScreenshotProfile(ctx context.Context, input ScreenshotPro
 	if containsSecretLikeKey(input.Config) {
 		return ScreenshotProfile{}, fmt.Errorf("%w: screenshot config must not contain secrets", ErrValidation)
 	}
-	config, err := json.Marshal(input.Config)
+	_, config, err := normalizeScreenshotConfig(input.Config)
 	if err != nil {
-		return ScreenshotProfile{}, fmt.Errorf("%w: serialize screenshot config: %v", ErrValidation, err)
+		return ScreenshotProfile{}, err
 	}
 	enabled := true
 	if input.Enabled != nil {
@@ -584,6 +584,28 @@ func (s *Store) ListScreenshotProfiles(ctx context.Context) ([]ScreenshotProfile
 		return nil, fmt.Errorf("iterate screenshot profiles: %w", err)
 	}
 	return result, nil
+}
+
+func (s *Store) GetRuntimeScreenshotProfile(ctx context.Context, name string) (RuntimeScreenshotProfile, error) {
+	name = strings.TrimSpace(name)
+	var runtime RuntimeScreenshotProfile
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, revision, enabled, config, created_at
+		FROM screenshot_profiles
+		WHERE name = $1 AND enabled = true
+		ORDER BY revision DESC LIMIT 1`, name).Scan(
+		&runtime.ID, &runtime.Name, &runtime.Revision, &runtime.Enabled, &runtime.Config, &runtime.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeScreenshotProfile{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeScreenshotProfile{}, fmt.Errorf("load runtime screenshot profile: %w", err)
+	}
+	if err := json.Unmarshal(runtime.Config, &runtime.ScreenshotConfig); err != nil {
+		return RuntimeScreenshotProfile{}, fmt.Errorf("decode runtime screenshot profile: %w", err)
+	}
+	return runtime, nil
 }
 
 func (s *Store) loadMappings(ctx context.Context, downloaderID string) ([]PathMapping, error) {

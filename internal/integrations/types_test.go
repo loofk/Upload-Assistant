@@ -46,3 +46,20 @@ func TestValidateMappingsRequiresNormalizedAbsolutePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeScreenshotConfig(t *testing.T) {
+	config, body, err := normalizeScreenshotConfig(map[string]any{"count": 8, "format": "WEBP", "width": 1920})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Count != 8 || config.Format != "webp" || config.Quality != 90 || config.StartPercent != 0.1 || !json.Valid(body) {
+		t.Fatalf("normalized screenshot config = %#v body=%s", config, body)
+	}
+	for _, input := range []map[string]any{
+		{"count": 30}, {"format": "bmp"}, {"width": 100}, {"unknown": true},
+	} {
+		if _, _, err := normalizeScreenshotConfig(input); !errors.Is(err, ErrValidation) {
+			t.Fatalf("normalizeScreenshotConfig(%#v) error = %v", input, err)
+		}
+	}
+}

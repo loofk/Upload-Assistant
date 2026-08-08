@@ -28,6 +28,8 @@ type Config struct {
 	DatabaseMaxLife  time.Duration
 	MasterKeyFile    string
 	MediaInfoBinary  string
+	FFmpegBinary     string
+	FFprobeBinary    string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -48,6 +50,8 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		DatabaseMaxIdle:  5 * time.Minute,
 		DatabaseMaxLife:  30 * time.Minute,
 		MediaInfoBinary:  envOrDefault(lookup, "UA_MEDIAINFO_BIN", "mediainfo"),
+		FFmpegBinary:     envOrDefault(lookup, "UA_FFMPEG_BIN", "ffmpeg"),
+		FFprobeBinary:    envOrDefault(lookup, "UA_FFPROBE_BIN", "ffprobe"),
 	}
 	cfg.MasterKeyFile = filepath.Clean(envOrDefault(lookup, "UA_MASTER_KEY_FILE", filepath.Join(cfg.DataDir, "master-keys")))
 	if cfg.DatabaseURL == "" {
@@ -59,11 +63,20 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 	if !filepath.IsAbs(cfg.MasterKeyFile) {
 		return Config{}, fmt.Errorf("UA_MASTER_KEY_FILE must be an absolute path: %s", cfg.MasterKeyFile)
 	}
-	if strings.ContainsAny(cfg.MediaInfoBinary, "\r\n\x00") || strings.TrimSpace(cfg.MediaInfoBinary) == "" {
-		return Config{}, fmt.Errorf("UA_MEDIAINFO_BIN must be a binary name or absolute path")
-	}
-	if strings.ContainsAny(cfg.MediaInfoBinary, `/\\`) && !filepath.IsAbs(cfg.MediaInfoBinary) {
-		return Config{}, fmt.Errorf("UA_MEDIAINFO_BIN path must be absolute: %s", cfg.MediaInfoBinary)
+	for _, binaryConfig := range []struct {
+		variable string
+		binary   string
+	}{
+		{variable: "UA_MEDIAINFO_BIN", binary: cfg.MediaInfoBinary},
+		{variable: "UA_FFMPEG_BIN", binary: cfg.FFmpegBinary},
+		{variable: "UA_FFPROBE_BIN", binary: cfg.FFprobeBinary},
+	} {
+		if strings.ContainsAny(binaryConfig.binary, "\r\n\x00") || strings.TrimSpace(binaryConfig.binary) == "" {
+			return Config{}, fmt.Errorf("%s must be a binary name or absolute path", binaryConfig.variable)
+		}
+		if strings.ContainsAny(binaryConfig.binary, `/\\`) && !filepath.IsAbs(binaryConfig.binary) {
+			return Config{}, fmt.Errorf("%s path must be absolute: %s", binaryConfig.variable, binaryConfig.binary)
+		}
 	}
 	switch cfg.LogLevel {
 	case "debug", "info", "warn", "error":

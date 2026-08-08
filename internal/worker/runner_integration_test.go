@@ -15,6 +15,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
@@ -114,6 +115,23 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithMediaInfo(&fakeMediaInspector{result: media.Inspection{
 			Tool: "mediainfo", Version: "fixture", Document: json.RawMessage(`{"media":{"track":[]}}`), DurationMS: 1,
 		}}, artifactStore),
+		WithScreenshots(
+			fakeScreenshotProfiles{profile: integrations.RuntimeScreenshotProfile{
+				ScreenshotProfile: integrations.ScreenshotProfile{
+					ID: "profile-id", Name: "default", Revision: 1, Enabled: true,
+					Config: json.RawMessage(`{"count":1,"format":"png","quality":90,"start_percent":0.1,"end_percent":0.9}`),
+				},
+				ScreenshotConfig: integrations.ScreenshotConfig{Count: 1, Format: "png", Quality: 90, StartPercent: 0.1, EndPercent: 0.9},
+			}},
+			&fakeScreenshotGenerator{batch: media.ScreenshotBatch{
+				Tool: "ffmpeg", Version: "fixture", DurationSeconds: 100,
+				Screenshots: []media.Screenshot{{
+					Index: 1, Timestamp: 50, Format: "png", Filename: "screenshot-01.png",
+					MIMEType: "image/png", Bytes: []byte("\x89PNG\r\n\x1a\nfixture"), SizeBytes: 15,
+				}},
+			}},
+			artifactStore,
+		),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -195,6 +213,17 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 4 || storedArtifacts[3].Kind != "mediainfo" {
 		t.Fatalf("media-info artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("screenshots RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "image_upload" {
+		t.Fatalf("screenshots job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 5 || storedArtifacts[4].Kind != "screenshot" {
+		t.Fatalf("screenshot artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

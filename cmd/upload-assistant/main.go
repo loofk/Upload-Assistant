@@ -135,6 +135,11 @@ func serve(args []string) error {
 		worker.WithDownloader(downloaderManager, artifactStore),
 		worker.WithMetadata(artifactStore),
 		worker.WithMediaInfo(media.NewMediaInfo(cfg.MediaInfoBinary, 2*time.Minute), artifactStore),
+		worker.WithScreenshots(
+			integrationStore,
+			media.NewFFmpegScreenshots(cfg.FFmpegBinary, cfg.FFprobeBinary, 5*time.Minute),
+			artifactStore,
+		),
 	)
 	go jobRunner.Run(ctx)
 

@@ -96,6 +96,70 @@ type ScreenshotProfile struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
+type ScreenshotConfig struct {
+	Count        int     `json:"count"`
+	Format       string  `json:"format"`
+	Width        int     `json:"width,omitempty"`
+	Quality      int     `json:"quality,omitempty"`
+	StartPercent float64 `json:"start_percent,omitempty"`
+	EndPercent   float64 `json:"end_percent,omitempty"`
+	Comparison   bool    `json:"comparison,omitempty"`
+}
+
+type RuntimeScreenshotProfile struct {
+	ScreenshotProfile
+	ScreenshotConfig ScreenshotConfig `json:"-"`
+}
+
+func normalizeScreenshotConfig(input map[string]any) (ScreenshotConfig, []byte, error) {
+	body, err := json.Marshal(input)
+	if err != nil {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: serialize screenshot config: %v", ErrValidation, err)
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	var config ScreenshotConfig
+	if err := decoder.Decode(&config); err != nil {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: invalid screenshot config: %v", ErrValidation, err)
+	}
+	if config.Count == 0 {
+		config.Count = 6
+	}
+	config.Format = strings.ToLower(strings.TrimSpace(config.Format))
+	if config.Format == "" {
+		config.Format = "png"
+	}
+	if config.Quality == 0 {
+		config.Quality = 90
+	}
+	if config.StartPercent == 0 {
+		config.StartPercent = 0.1
+	}
+	if config.EndPercent == 0 {
+		config.EndPercent = 0.9
+	}
+	if config.Count < 1 || config.Count > 20 {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: screenshot count must be between 1 and 20", ErrValidation)
+	}
+	if config.Format != "png" && config.Format != "jpg" && config.Format != "webp" {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: screenshot format must be png, jpg, or webp", ErrValidation)
+	}
+	if config.Width != 0 && (config.Width < 320 || config.Width > 3840) {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: screenshot width must be 0 or between 320 and 3840", ErrValidation)
+	}
+	if config.Quality < 1 || config.Quality > 100 {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: screenshot quality must be between 1 and 100", ErrValidation)
+	}
+	if config.StartPercent < 0 || config.StartPercent >= 0.5 || config.EndPercent <= 0.5 || config.EndPercent > 1 || config.StartPercent >= config.EndPercent {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: screenshot percentages must satisfy 0 <= start < 0.5 < end <= 1", ErrValidation)
+	}
+	normalized, err := json.Marshal(config)
+	if err != nil {
+		return ScreenshotConfig{}, nil, fmt.Errorf("%w: serialize normalized screenshot config: %v", ErrValidation, err)
+	}
+	return config, normalized, nil
+}
+
 type SiteCredential struct {
 	ID        string    `json:"id"`
 	SiteCode  string    `json:"site_code"`

@@ -140,6 +140,10 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if err != nil || second.Revision != first.Revision+1 {
 		t.Fatalf("screenshot revisions = %d/%d error=%v", first.Revision, second.Revision, err)
 	}
+	runtimeScreenshot, err := store.GetRuntimeScreenshotProfile(ctx, "default-"+nameSuffix)
+	if err != nil || runtimeScreenshot.Revision != second.Revision || runtimeScreenshot.ScreenshotConfig.Count != 8 || runtimeScreenshot.ScreenshotConfig.Format != "webp" {
+		t.Fatalf("runtime screenshot profile/error = %#v/%v", runtimeScreenshot, err)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT secret_id::text FROM site_credentials WHERE id = $1
