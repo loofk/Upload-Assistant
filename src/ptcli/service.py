@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
+import hmac
 import json
 import os
 import pprint
+import queue
 import re
 import shlex
 import shutil
@@ -31,6 +34,18 @@ from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, HARD_MAX_CANDIDATE_SCA
 from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload, summary_check_payload
 from src.ptcli.cli import target_upload_payload as cli_target_upload_payload
 from src.ptcli.config import load_config, resolve_client_config
+from src.ptcli.contracts import (
+    CORE_AGENT_TOOL_NAMES,
+    PUBLIC_SCHEMA_VERSION,
+    compact_deployment_payload,
+    compact_goal_progress_payload,
+    compact_job_list_payload,
+    compact_job_payload,
+    compact_readiness_payload,
+    compact_tool_schema,
+    error_envelope,
+    response_envelope_schema,
+)
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list
@@ -47,12 +62,20 @@ from src.ptcli.policies import (
     qbit_limits_for_tracker,
 )
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
+from src.ptcli.site_rule_docs import (
+    approve_site_rule_document,
+    compile_site_policy_snapshot,
+    default_site_policy_snapshot_path,
+    inspect_site_rule_documents,
+    validate_site_rule_document,
+)
 from src.ptcli.source import fetch_source_info, resolve_source_reference, source_details_url
 from src.ptcli.target import build_mteam_upload_preflight, create_mteam_upload_torrent_candidate, write_mteam_prepare_package
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 DEFAULT_SERVICE_PORT = 8080
 JOB_SCHEMA_VERSION = 1
+AGENT_MANIFEST_SCHEMA_VERSION = "ptcli.agent_manifest.v1"
 DEFAULT_JOB_POLL_AFTER_SECONDS = 5
 DEFAULT_MAX_CONCURRENT_JOBS = 1
 DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
@@ -188,15 +211,28 @@ class ServiceError(Exception):
 class JobStore:
     """Tiny file-backed job store for long-running ptcli service tasks."""
 
-    def __init__(self, root: str | Path | None = None, *, run_inline: bool = False, recover_interrupted: bool = True, max_concurrent_jobs: int | None = None) -> None:
+    def __init__(
+        self,
+        root: str | Path | None = None,
+        *,
+        run_inline: bool = False,
+        recover_interrupted: bool = True,
+        max_concurrent_jobs: int | None = None,
+        compact_create_results: bool = False,
+    ) -> None:
         self.root = _resolve_job_dir(root)
         self.run_inline = run_inline
         self.max_concurrent_jobs = _resolve_max_concurrent_jobs(max_concurrent_jobs)
+        self.compact_create_results = compact_create_results
         self._lock = threading.Lock()
-        self._run_slots = threading.BoundedSemaphore(self.max_concurrent_jobs)
+        self._runner_queue: queue.Queue[tuple[str, Callable[[], dict[str, Any]]]] = queue.Queue()
+        self._workers: list[threading.Thread] = []
+        self._public_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self.root.mkdir(parents=True, exist_ok=True)
         if recover_interrupted:
             self.recover_interrupted_jobs()
+        if not self.run_inline:
+            self._start_workers()
 
     def create(self, kind: str, request: dict[str, Any], command_argv: list[str], runner: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         job_id = uuid.uuid4().hex
@@ -226,13 +262,83 @@ class JobStore:
         if self.run_inline:
             self._run(job_id, runner)
         else:
-            thread = threading.Thread(target=self._run_when_slot_available, args=(job_id, runner), daemon=True)
-            thread.start()
-        return self.get(job_id)
+            self._runner_queue.put((job_id, runner))
+        return self.get_compact(job_id) if self.compact_create_results else self.get(job_id)
 
     def get(self, job_id: str) -> dict[str, Any]:
+        _validate_job_id(job_id)
+        path = self.root / f"{job_id}.json"
+        if not path.is_file():
+            raise ServiceError(f"Job not found: {job_id}", status=HTTPStatus.NOT_FOUND)
+        job = json.loads(path.read_text(encoding="utf-8"))
+        version = int(job.get("_revision") or 0)
+        cached = self._public_cache.get(job_id)
+        if cached and cached[0] == version:
+            return copy.deepcopy(cached[1])
+        payload = _job_public_payload(job, self._job_lineage(job))
+        self._public_cache[job_id] = (version, payload)
+        return copy.deepcopy(payload)
+
+    def get_compact(self, job_id: str) -> dict[str, Any]:
+        """Return the O(1) public status projection used by the HTTP API."""
+        return compact_job_payload(self._read(job_id), include_summary=False)
+
+    def summary_compact(self, job_id: str) -> dict[str, Any]:
+        """Return bounded terminal/recovery evidence without rebuilding handoffs."""
         job = self._read(job_id)
-        return _job_public_payload(job, self._job_lineage(job))
+        summary_payload = None
+        summary_file = _job_summary_file(job)
+        if summary_file:
+            path = Path(summary_file).expanduser()
+            if path.is_file():
+                try:
+                    loaded = json.loads(path.read_text(encoding="utf-8"))
+                    summary_payload = loaded if isinstance(loaded, dict) else None
+                except (OSError, json.JSONDecodeError):
+                    summary_payload = None
+        if _job_live_evidence_required(job, summary_payload):
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            stored_audit = result.get("live_validation_completion_audit") if isinstance(result.get("live_validation_completion_audit"), dict) else None
+            job["_public_completion"] = stored_audit or _job_live_validation_completion_audit(job, summary_payload)
+        return compact_job_payload(job, include_summary=True)
+
+    def list_compact(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        request = request or {}
+        status_filter = str(request.get("status") or "").strip()
+        kind_filter = str(request.get("kind") or "").strip()
+        limit = _bounded_int(request.get("limit"), default=20, minimum=1, maximum=100)
+        jobs: list[dict[str, Any]] = []
+        status_counts: dict[str, int] = {}
+        total = 0
+        for path in sorted(self.root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+            try:
+                job = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            status = str(job.get("status") or "unknown")
+            kind = str(job.get("kind") or "")
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status_filter and status != status_filter:
+                continue
+            if kind_filter and kind != kind_filter:
+                continue
+            total += 1
+            if len(jobs) < limit:
+                jobs.append(job)
+        return compact_job_list_payload(
+            {
+                "status": "ok",
+                "ok": True,
+                "total": total,
+                "limit": limit,
+                "filters": {"status": status_filter or None, "kind": kind_filter or None},
+                "status_counts": status_counts,
+                "queue": _job_queue_summary(status_counts, self.max_concurrent_jobs),
+                "jobs": jobs,
+                "blockers": [],
+                "next_actions": [],
+            }
+        )
 
     def recover_interrupted_jobs(self) -> dict[str, Any]:
         recovered: list[dict[str, Any]] = []
@@ -302,7 +408,48 @@ class JobStore:
                 continue
             total += 1
             if len(jobs) < limit:
-                jobs.append(_job_list_item(job, self._job_lineage(job)))
+                jobs.append(self.get(str(job.get("job_id"))))
+        if not any(str(job.get("kind") or "").startswith("ptcli.daily_candidates") for job in all_jobs):
+            queue_control = _job_list_queue_control(jobs, total, limit, status_counts, status_filter=status_filter or None, kind_filter=kind_filter or None)
+            job_list_next_call = _job_list_next_call(queue_control)
+            empty_daily: dict[str, Any] = {}
+            return {
+                "status": "ok",
+                "ok": True,
+                "count": len(jobs),
+                "total": total,
+                "limit": limit,
+                "filters": {"status": status_filter or None, "kind": kind_filter or None},
+                "status_counts": status_counts,
+                "queue": _job_queue_summary(status_counts, self.max_concurrent_jobs),
+                "job_queue_control": queue_control,
+                "job_list_next_call": job_list_next_call,
+                "job_list_final_decision": _job_list_final_decision(queue_control, job_list_next_call, empty_daily),
+                "daily_candidate_batch_summary": empty_daily,
+                "daily_candidate_batch_gate": empty_daily,
+                "daily_candidate_submission_plan": empty_daily,
+                "daily_candidate_execution_summary": empty_daily,
+                "daily_candidate_refill_plan": empty_daily,
+                "daily_candidate_batch_sequence": empty_daily,
+                "daily_candidate_approval_sequence": empty_daily,
+                "daily_candidate_batch_execution_context": empty_daily,
+                "daily_candidate_final_report": empty_daily,
+                "daily_candidate_tracking_report": empty_daily,
+                "daily_candidate_completion_gate": empty_daily,
+                "daily_candidate_batch_target_report": empty_daily,
+                "daily_candidate_batch_fulfillment_report": empty_daily,
+                "daily_candidate_batch_publish_payload": empty_daily,
+                "daily_candidate_submitted_jobs_report": empty_daily,
+                "daily_candidate_batch_next_call": empty_daily,
+                "daily_candidate_submission_gate": empty_daily,
+                "daily_candidate_approval_final_report": empty_daily,
+                "daily_candidate_user_approval_package": empty_daily,
+                "daily_candidate_batch_final_decision": empty_daily,
+                "daily_candidate_completion_final_decision": empty_daily,
+                "next_call": job_list_next_call,
+                "jobs": jobs,
+                "next_actions": _job_list_next_actions(jobs, total, limit),
+            }
         daily_batch_summary = _daily_candidate_jobs_batch_summary(all_jobs, filters={"status": status_filter or None, "kind": kind_filter or None}, limit=limit, visible_count=len(jobs), total=total)
         daily_batch_gate = _daily_candidate_batch_gate(daily_batch_summary)
         daily_submission_plan = _daily_candidate_batch_submission_plan(daily_batch_summary, daily_batch_gate)
@@ -791,9 +938,19 @@ class JobStore:
         self._write(job)
         return self.get(job_id)
 
-    def _run_when_slot_available(self, job_id: str, runner: Callable[[], dict[str, Any]]) -> None:
-        with self._run_slots:
-            self._run(job_id, runner)
+    def _start_workers(self) -> None:
+        for index in range(self.max_concurrent_jobs):
+            worker = threading.Thread(target=self._worker_loop, name=f"ptcli-job-worker-{index + 1}", daemon=True)
+            worker.start()
+            self._workers.append(worker)
+
+    def _worker_loop(self) -> None:
+        while True:
+            job_id, runner = self._runner_queue.get()
+            try:
+                self._run(job_id, runner)
+            finally:
+                self._runner_queue.task_done()
 
     def _run(self, job_id: str, runner: Callable[[], dict[str, Any]]) -> None:
         job = self._read(job_id)
@@ -863,17 +1020,19 @@ class JobStore:
     def _write(self, job: dict[str, Any]) -> None:
         job_id = str(job["job_id"])
         _validate_job_id(job_id)
+        job["_revision"] = int(job.get("_revision") or 0) + 1
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / f"{job_id}.json"
         tmp_path = path.with_suffix(".json.tmp")
         with self._lock:
+            self._public_cache.pop(job_id, None)
             tmp_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp_path.replace(path)
 
 
 def run_service(host: str, port: int, *, api_token: str | None = None, job_dir: str | None = None, max_concurrent_jobs: int | None = None) -> None:
     """Run the local ptcli JSON API service."""
-    job_store = JobStore(job_dir, max_concurrent_jobs=max_concurrent_jobs)
+    job_store = JobStore(job_dir, max_concurrent_jobs=max_concurrent_jobs, compact_create_results=True)
     handler = _handler_class(api_token, job_store)
     server = ThreadingHTTPServer((host, port), handler)
     print(f"ptcli service listening on http://{host}:{port}")
@@ -963,24 +1122,24 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return
             if path == "/v1/deployment/check":
                 if not self._authorized():
-                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
                     return
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
-                self._send_json(HTTPStatus.OK, deployment_check_payload(query))
+                self._send_json(HTTPStatus.OK, public_deployment_check_payload(query))
                 return
             if path == "/v1/readiness/bundle":
                 if not self._authorized():
-                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
                     return
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
-                self._send_json(HTTPStatus.OK, readiness_bundle_payload(query))
+                self._send_json(HTTPStatus.OK, public_readiness_bundle_payload(query))
                 return
             if path == "/v1/goal/progress":
                 if not self._authorized():
-                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
                     return
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
-                self._send_json(HTTPStatus.OK, goal_progress_payload(query))
+                self._send_json(HTTPStatus.OK, public_goal_progress_payload(query))
                 return
             if path == "/v1/site-policies":
                 if not self._authorized():
@@ -991,6 +1150,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                     self._send_json(HTTPStatus.OK, site_policies_payload(query))
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
+            if path == "/v1/site-rule-documents":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, site_rule_documents_payload(query))
+                except ServiceError as exc:
+                    self._send_json(exc.status, error_envelope(str(exc)))
                 return
             if path == "/v1/site-policies/verify":
                 if not self._authorized():
@@ -1023,10 +1192,10 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return
             if path == "/v1/jobs":
                 if not self._authorized():
-                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
                     return
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
-                self._send_json(HTTPStatus.OK, job_store.list(query))
+                self._send_json(HTTPStatus.OK, job_store.list_compact(query))
                 return
             if path == "/v1/jobs/candidates/daily/batch":
                 if not self._authorized():
@@ -1037,18 +1206,18 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return
             if path.startswith("/v1/jobs/"):
                 if not self._authorized():
-                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
                     return
                 try:
                     self._send_json(HTTPStatus.OK, self._job_get(path))
                 except ServiceError as exc:
-                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                    self._send_json(exc.status, error_envelope(str(exc)))
                 return
-            self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "message": "Endpoint not found."})
+            self._send_json(HTTPStatus.NOT_FOUND, error_envelope("Endpoint not found."))
 
         def do_POST(self) -> None:  # noqa: N802
             if not self._authorized():
-                self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                self._send_json(HTTPStatus.UNAUTHORIZED, error_envelope("Unauthorized."))
                 return
             path = urlparse(self.path).path
             handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -1061,6 +1230,9 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/site-policies": site_policies_payload,
                 "/v1/site-policies/rule-review": site_policy_rule_review_payload,
                 "/v1/site-policies/verify": site_policy_verify_payload,
+                "/v1/site-rule-documents/validate": site_rule_document_validate_payload,
+                "/v1/site-rule-documents/review": site_rule_document_review_payload,
+                "/v1/site-rule-documents/compile": site_rule_documents_compile_payload,
                 "/v1/qbit/inspect": lambda payload: asyncio.run(qbit_inspect_payload(payload)),
                 "/v1/qbit/match": lambda payload: asyncio.run(qbit_match_payload(payload)),
                 "/v1/qbit/export": lambda payload: asyncio.run(qbit_export_payload(payload)),
@@ -1072,8 +1244,8 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/target/package/prepare": target_package_prepare_payload,
                 "/v1/target/upload/preflight": target_upload_preflight_payload,
                 "/v1/target/upload": lambda payload: asyncio.run(target_upload_service_payload(payload)),
-                "/v1/readiness/bundle": readiness_bundle_payload,
-                "/v1/goal/progress": goal_progress_payload,
+                "/v1/readiness/bundle": public_readiness_bundle_payload,
+                "/v1/goal/progress": public_goal_progress_payload,
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
@@ -1095,45 +1267,52 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             }
             if path.startswith("/v1/jobs/candidates/") and path.endswith("/submit"):
                 try:
-                    self._send_json(HTTPStatus.OK, self._candidate_submit(path, self._read_json()))
+                    self._send_json(HTTPStatus.ACCEPTED, compact_job_payload(self._candidate_submit(path, self._read_json())))
                 except ServiceError as exc:
-                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                    self._send_json(exc.status, error_envelope(str(exc)))
                 return
             if path.startswith("/v1/jobs/retorrent/check/") and path.endswith("/submit"):
                 try:
-                    self._send_json(HTTPStatus.OK, self._retorrent_check_submit(path, self._read_json()))
+                    self._send_json(HTTPStatus.ACCEPTED, compact_job_payload(self._retorrent_check_submit(path, self._read_json())))
                 except ServiceError as exc:
-                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                    self._send_json(exc.status, error_envelope(str(exc)))
                 return
             if path.startswith("/v1/jobs/") and path.endswith("/resume"):
                 try:
-                    self._send_json(HTTPStatus.ACCEPTED, self._job_resume(path, self._read_optional_json()))
+                    self._send_json(HTTPStatus.ACCEPTED, compact_job_payload(self._job_resume(path, self._read_optional_json())))
                 except ServiceError as exc:
-                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                    self._send_json(exc.status, error_envelope(str(exc)))
                 return
             if path.startswith("/v1/jobs/") and path.endswith("/cancel"):
                 try:
-                    self._send_json(HTTPStatus.OK, self._job_cancel(path, self._read_optional_json()))
+                    self._send_json(HTTPStatus.OK, compact_job_payload(self._job_cancel(path, self._read_optional_json())))
                 except ServiceError as exc:
-                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                    self._send_json(exc.status, error_envelope(str(exc)))
                 return
             handler = handlers.get(path)
             if handler is None:
-                self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "message": "Endpoint not found."})
+                self._send_json(HTTPStatus.NOT_FOUND, error_envelope("Endpoint not found."))
                 return
             try:
-                self._send_json(HTTPStatus.OK, handler(self._read_json()))
+                result = handler(self._read_json())
+                if path.startswith("/v1/jobs/") and result.get("job_id"):
+                    result = compact_job_payload(result)
+                    self._send_json(HTTPStatus.ACCEPTED, result)
+                elif path == "/v1/jobs/retorrent/from-url/check-and-submit":
+                    self._send_json(HTTPStatus.OK, compact_job_payload(result))
+                else:
+                    self._send_json(HTTPStatus.OK, result)
             except ServiceError as exc:
-                self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                self._send_json(exc.status, error_envelope(str(exc)))
             except Exception as exc:
-                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"status": "error", "message": str(exc)})
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, error_envelope(str(exc)))
 
         def _job_get(self, path: str) -> dict[str, Any]:
             parts = path.strip("/").split("/")
             if len(parts) == 3 and parts[:2] == ["v1", "jobs"]:
-                return job_store.get(parts[2])
+                return job_store.get_compact(parts[2])
             if len(parts) == 4 and parts[:2] == ["v1", "jobs"] and parts[3] == "summary":
-                return job_store.summary(parts[2])
+                return job_store.summary_compact(parts[2])
             raise ServiceError("Job endpoint not found.", status=HTTPStatus.NOT_FOUND)
 
         def _job_resume(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1166,10 +1345,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
         def _authorized(self) -> bool:
             if not api_token:
                 return True
-            return self.headers.get("Authorization", "") == f"Bearer {api_token}"
+            return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {api_token}")
 
         def _read_json(self) -> dict[str, Any]:
-            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError as exc:
+                raise ServiceError("Invalid Content-Length header.") from exc
             if length <= 0:
                 raise ServiceError("JSON request body is required.")
             if length > 1024 * 1024:
@@ -1183,7 +1365,10 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             return payload
 
         def _read_optional_json(self) -> dict[str, Any]:
-            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError as exc:
+                raise ServiceError("Invalid Content-Length header.") from exc
             if length <= 0:
                 return {}
             if length > 1024 * 1024:
@@ -1213,6 +1398,37 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             return f"{proto}://{host}".rstrip("/")
 
     return PtcliServiceHandler
+
+
+def _public_detail_requested(request: dict[str, Any] | None) -> bool:
+    request = request if isinstance(request, dict) else {}
+    view = str(request.get("view") or "").strip().lower()
+    return _truthy(request.get("detail")) or view in {"detail", "full", "legacy", "raw"}
+
+
+def public_deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """HTTP projection: compact by default, legacy detail only by explicit opt-in."""
+    request = request if isinstance(request, dict) else {}
+    payload = deployment_check_payload(request)
+    return payload if _public_detail_requested(request) else compact_deployment_payload(payload)
+
+
+def public_readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """HTTP projection for the no-execution seedbox operator handoff."""
+    request = request if isinstance(request, dict) else {}
+    payload = readiness_bundle_payload(request)
+    return payload if _public_detail_requested(request) else compact_readiness_payload(payload)
+
+
+def public_goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """HTTP projection for progress routing; the evidence tree is detail-only."""
+    request = request if isinstance(request, dict) else {}
+    detail_request = {**request, "brief": False, "view": "full"}
+    payload = goal_progress_payload(detail_request)
+    if _public_detail_requested(request):
+        return payload
+    summary = payload.get("progress_summary") if isinstance(payload.get("progress_summary"), dict) else payload
+    return compact_goal_progress_payload(summary)
 
 
 def summary_check_service_payload(request: dict[str, Any]) -> dict[str, Any]:
@@ -6431,6 +6647,90 @@ def site_policy_verify_payload(request: dict[str, Any] | None = None) -> dict[st
     }
 
 
+def site_rule_documents_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """List local private rule documents without reading trackers or changing files."""
+    request = request if isinstance(request, dict) else {}
+    return inspect_site_rule_documents(_site_rule_documents_dir(request))
+
+
+def site_rule_document_validate_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate one rule document inside the configured private rules directory."""
+    request = request if isinstance(request, dict) else {}
+    return validate_site_rule_document(_site_rule_document_path(request))
+
+
+def site_rule_document_review_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Preview or persist approval only after explicit human confirmation."""
+    request = request if isinstance(request, dict) else {}
+    approve = _truthy(request.get("approve"))
+    human_confirmed = _truthy(request.get("human_confirmed"))
+    if not approve or not human_confirmed:
+        return {
+            "schema_version": 1,
+            "kind": "ptcli.site_rule_document_review",
+            "status": "blocked",
+            "ok": False,
+            "ready": False,
+            "written": False,
+            "blockers": ["approve=true and human_confirmed=true are required after a human reviews the complete rule text and structured extraction."],
+            "next_actions": ["Resolve document obligations, complete human review, then resubmit without inventing approval evidence."],
+            "safety": {"contacts_trackers": False, "live_upload": False, "human_approval_required": True, "silent_approval_forbidden": True},
+        }
+    write = _truthy(request.get("write")) and _truthy(request.get("confirm_write"))
+    return approve_site_rule_document(
+        _site_rule_document_path(request),
+        reviewer=str(request.get("reviewer") or ""),
+        reviewed_at=str(request.get("reviewed_at") or ""),
+        write=write,
+    )
+
+
+def site_rule_documents_compile_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compile all approved documents; partial snapshots are never written."""
+    request = request if isinstance(request, dict) else {}
+    write = _truthy(request.get("write")) and _truthy(request.get("confirm_write"))
+    output = request.get("output") or request.get("output_path")
+    output_path = _site_rule_output_path(str(output)) if output else default_site_policy_snapshot_path().resolve()
+    return compile_site_policy_snapshot(_site_rule_documents_dir(request), output_path=output_path, write=write)
+
+
+def _site_rule_documents_dir(request: dict[str, Any]) -> Path:
+    configured = Path(os.environ.get("PTCLI_SITE_RULES_DIR") or "data/site-rules").expanduser().resolve()
+    if request.get("rules_dir"):
+        requested = Path(str(request["rules_dir"])).expanduser().resolve()
+        if requested != configured:
+            raise ServiceError("HTTP rule-document access is limited to PTCLI_SITE_RULES_DIR.", status=HTTPStatus.BAD_REQUEST)
+    return configured
+
+
+def _site_rule_document_path(request: dict[str, Any]) -> Path:
+    rules_dir = _site_rule_documents_dir(request)
+    tracker = str(request.get("tracker") or "").strip().upper()
+    raw_path = request.get("file") or request.get("path")
+    if raw_path:
+        candidate = Path(str(raw_path)).expanduser()
+        candidate = candidate.resolve() if candidate.is_absolute() else (rules_dir / candidate).resolve()
+    elif tracker:
+        if tracker not in CHINESE_PT_TRACKERS:
+            raise ServiceError(f"Unsupported Chinese PT tracker: {tracker}.", status=HTTPStatus.BAD_REQUEST)
+        candidate = (rules_dir / f"{tracker}.md").resolve()
+    else:
+        raise ServiceError("tracker or file is required.", status=HTTPStatus.BAD_REQUEST)
+    try:
+        candidate.relative_to(rules_dir)
+    except ValueError as exc:
+        raise ServiceError("Rule document path must stay inside rules_dir.", status=HTTPStatus.BAD_REQUEST) from exc
+    return candidate
+
+
+def _site_rule_output_path(value: str) -> Path:
+    configured = default_site_policy_snapshot_path().resolve()
+    candidate = Path(value).expanduser().resolve()
+    if candidate != configured:
+        raise ServiceError("HTTP snapshot output must match PTCLI_SITE_POLICY_SNAPSHOT.", status=HTTPStatus.BAD_REQUEST)
+    return candidate
+
+
 def _site_policy_verify_final_report(
     *,
     ready: bool,
@@ -8189,6 +8489,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
             "downloads_mount": bool(docker_compose.get("downloads_mount")),
             "config_mount": bool(docker_compose.get("config_mount")),
             "cookies_mount": bool(docker_compose.get("cookies_mount")),
+            "site_rules_mount": bool(docker_compose.get("site_rules_mount")),
             "tmp_mount": bool(docker_compose.get("tmp_mount")),
             "daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
             "api": deployment_handoff.get("api") or (agent_handoff.get("api") if isinstance(agent_handoff.get("api"), dict) else None),
@@ -22253,7 +22554,7 @@ def _job_progress_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
     job_id = str(job.get("job_id") or "")
     status = str(job.get("status") or "unknown")
     runtime = _job_runtime(job)
-    source_reference = _job_source_reference(job)
+    source_reference = _job_source_reference(job) or {}
     duplicate_check = _job_duplicate_check(job)
     policy_handoff = _job_policy_handoff(job) or {}
     policy_gate = _job_policy_enforcement_gate(job) or {}
@@ -35646,7 +35947,7 @@ def _manual_retorrent_live_checklist(
     materials_handoff: dict[str, Any] | None,
     target_upload_handoff: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    source_reference = _job_source_reference(job)
+    source_reference = _job_source_reference(job) or {}
     source_resolved = bool(source_reference.get("tracker") and (source_reference.get("source_id") or source_reference.get("source_url")))
     materials_ready = materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None
     target_payload_ready = target_upload_handoff.get("ready_for_live_upload") if isinstance(target_upload_handoff, dict) else None
@@ -37280,6 +37581,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     base_dir = Path(str(request.get("base_dir") or os.environ.get("PTCLI_BASE_DIR") or os.getcwd())).expanduser()
     config_path = _deployment_path(request.get("config") or os.environ.get("PTCLI_CONFIG") or "data/config.py", base_dir)
     cookies_dir = _deployment_path(request.get("cookies_dir") or "data/cookies", base_dir)
+    site_rules_dir = _deployment_path(request.get("site_rules_dir") or os.environ.get("PTCLI_SITE_RULES_DIR") or "data/site-rules", base_dir)
     tmp_dir = Path(os.environ.get("TMPDIR") or str(base_dir / "tmp")).expanduser()
     job_dir = _resolve_job_dir(request.get("job_dir") or os.environ.get("PTCLI_JOB_DIR"))
     max_concurrent_jobs = _resolve_max_concurrent_jobs(request.get("max_concurrent_jobs"))
@@ -37310,6 +37612,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         _deployment_dir_check("tmp_dir", tmp_dir, required=True, writable=True),
         _deployment_dir_check("job_dir", job_dir, required=True, writable=True),
         _deployment_dir_check("downloads_path", downloads_path, required=True),
+        _deployment_dir_check("site_rules_dir", site_rules_dir, required=True, writable=True),
         _deployment_api_token_check(),
     ]
 
@@ -37387,6 +37690,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "base_dir": str(base_dir),
         "config": str(config_path),
         "cookies_dir": str(cookies_dir),
+        "site_rules_dir": str(site_rules_dir),
         "tmp_dir": str(tmp_dir),
         "job_dir": str(job_dir),
         "downloads_path": str(downloads_path),
@@ -37590,7 +37894,7 @@ def _deployment_agent_skill_templates_summary(base_dir: Path, dockerfile_path: P
     dockerfile = _deployment_dockerfile_ai_template_status(dockerfile_path)
     missing = [name for name, item in templates.items() if not item.get("present")]
     invalid = [name for name, item in templates.items() if item.get("present") and not item.get("valid_json")]
-    schema_mismatch = [name for name, item in templates.items() if item.get("valid_json") and item.get("schema_version") != "ptcli.agent_manifest.v1"]
+    schema_mismatch = [name for name, item in templates.items() if item.get("valid_json") and item.get("schema_version") != AGENT_MANIFEST_SCHEMA_VERSION]
     ready = not missing and not invalid and not schema_mismatch and bool(dockerfile.get("copies_ai_templates"))
     return {
         "kind": "ptcli.deployment_agent_skill_templates",
@@ -37676,6 +37980,7 @@ def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dic
         "PTCLI_DOWNLOADS_HOST_PATH",
         "PTCLI_CONFIG_HOST_PATH",
         "PTCLI_COOKIES_HOST_PATH",
+        "PTCLI_SITE_RULES_HOST_PATH",
         "PTCLI_TMP_HOST_PATH",
     ]
     daily_keys = ["PTCLI_DAILY_CANDIDATE_SCHEDULES", "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR", "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"]
@@ -37719,7 +38024,7 @@ def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dic
         "edit_after_copy": [
             "Set PTCLI_API_TOKEN before exposing the API.",
             "Adjust PTCLI_PUBLIC_BASE_URL if OpenClaw/Hermes reaches ptcli through a reverse proxy.",
-            "Set PTCLI_DOWNLOADS_HOST_PATH, PTCLI_CONFIG_HOST_PATH, PTCLI_COOKIES_HOST_PATH, and PTCLI_TMP_HOST_PATH to real seedbox paths.",
+            "Set PTCLI_DOWNLOADS_HOST_PATH, PTCLI_CONFIG_HOST_PATH, PTCLI_COOKIES_HOST_PATH, PTCLI_SITE_RULES_HOST_PATH, and PTCLI_TMP_HOST_PATH to real seedbox paths.",
             "Set PTCLI_DAILY_CANDIDATE_SCHEDULES when daily candidate jobs are needed.",
             "Keep PTCLI_DAILY_CANDIDATE_OUTPUT_DIR mounted under PTCLI_TMP_HOST_PATH so AI/IM consumers can read local digest files.",
         ],
@@ -37912,7 +38217,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
             }
     scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
-    host_path_envs = all(key in text for key in ("PTCLI_DOWNLOADS_HOST_PATH", "PTCLI_CONFIG_HOST_PATH", "PTCLI_COOKIES_HOST_PATH", "PTCLI_TMP_HOST_PATH"))
+    host_path_envs = all(key in text for key in ("PTCLI_DOWNLOADS_HOST_PATH", "PTCLI_CONFIG_HOST_PATH", "PTCLI_COOKIES_HOST_PATH", "PTCLI_SITE_RULES_HOST_PATH", "PTCLI_TMP_HOST_PATH"))
     daily_output_env = "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}" in text
     ptcli_api_localhost_port = '"127.0.0.1:8080:8080"' in text or "'127.0.0.1:8080:8080'" in text
     ptcli_api_public_port = any(pattern in text for pattern in ('"8080:8080"', "'8080:8080'", '"0.0.0.0:8080:8080"', "'0.0.0.0:8080:8080'"))
@@ -37933,6 +38238,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
         "downloads_mount": ":/downloads/" in text or ":/downloads:" in text,
         "config_mount": ":/Upload-Assistant/data/config.py:" in text,
         "cookies_mount": ":/Upload-Assistant/data/cookies/" in text or ":/Upload-Assistant/data/cookies:" in text,
+        "site_rules_mount": ":/Upload-Assistant/data/site-rules/" in text or ":/Upload-Assistant/data/site-rules:" in text,
         "tmp_mount": ":/Upload-Assistant/tmp/" in text or ":/Upload-Assistant/tmp:" in text,
         "host_path_envs": host_path_envs,
         "daily_schedule_service": "ptcli-daily-schedule:" in text,
@@ -37954,6 +38260,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 (":/downloads/" in text or ":/downloads:" in text),
                 ":/Upload-Assistant/data/config.py:" in text,
                 (":/Upload-Assistant/data/cookies/" in text or ":/Upload-Assistant/data/cookies:" in text),
+                (":/Upload-Assistant/data/site-rules/" in text or ":/Upload-Assistant/data/site-rules:" in text),
                 (":/Upload-Assistant/tmp/" in text or ":/Upload-Assistant/tmp:" in text),
                 host_path_envs,
             )
@@ -38002,6 +38309,7 @@ def _deployment_docker_compose_api_message(summary: dict[str, Any]) -> str:
             ("/downloads mount", summary.get("downloads_mount")),
             ("data/config.py mount", summary.get("config_mount")),
             ("data/cookies mount", summary.get("cookies_mount")),
+            ("data/site-rules mount", summary.get("site_rules_mount")),
             ("tmp mount", summary.get("tmp_mount")),
             ("host path env vars", summary.get("host_path_envs")),
         )
@@ -38034,7 +38342,7 @@ def _deployment_docker_compose_message(summary: dict[str, Any]) -> str:
 
 
 def _deployment_mount_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
-    mount_names = {"path.config", "path.cookies_dir", "path.tmp_dir", "path.job_dir", "path.downloads_path"}
+    mount_names = {"path.config", "path.cookies_dir", "path.site_rules_dir", "path.tmp_dir", "path.job_dir", "path.downloads_path"}
     required: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
     for check in checks:
@@ -39582,11 +39890,11 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     policy_request = _goal_progress_policy_request(request)
     try:
         site_policies = site_policies_payload(policy_request)
-    except ServiceError as exc:
+    except (ServiceError, ValueError) as exc:
         site_policies = {"status": "blocked", "ok": False, "ready": False, "blockers": [str(exc)]}
     try:
         tracker_adapters = sites_payload(policy_request)
-    except ServiceError as exc:
+    except (ServiceError, ValueError) as exc:
         tracker_adapters = {"status": "blocked", "ok": False, "ready": False, "blockers": [str(exc)]}
     tools = _agent_tool_schemas()
     tool_names = {str(tool.get("name")) for tool in tools}
@@ -39746,7 +40054,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
 
 
 def _goal_progress_agent_brief_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    """Return a narrow status payload for first-pass agent routing."""
+    """Return the legacy rich CLI brief; HTTP compacting is handled separately."""
     critical_path = summary.get("critical_path_handoff") if isinstance(summary.get("critical_path_handoff"), dict) else {}
     current_step = critical_path.get("current_step") if isinstance(critical_path.get("current_step"), dict) else {}
     daily = summary.get("daily_candidate_handoff") if isinstance(summary.get("daily_candidate_handoff"), dict) else {}
@@ -42422,6 +42730,8 @@ def _goal_progress_policy_request(request: dict[str, Any]) -> dict[str, Any]:
                 request = {**request, "source_id": source_id}
         except ServiceError:
             pass
+    base_dir = Path(str(request.get("base_dir") or os.environ.get("PTCLI_BASE_DIR") or os.getcwd())).expanduser()
+    config_path = _deployment_path(request.get("config") or os.environ.get("PTCLI_CONFIG") or "data/config.py", base_dir)
     return {
         "source_url": source_url or None,
         "source_tracker": source_tracker or "U2",
@@ -42429,8 +42739,8 @@ def _goal_progress_policy_request(request: dict[str, Any]) -> dict[str, Any]:
         "target": request.get("target") or request.get("to") or "MTEAM",
         "accept_rules": request.get("accept_rules"),
         "confirm_upload": request.get("confirm_upload"),
-        "config": request.get("config"),
-        "base_dir": request.get("base_dir"),
+        "config": str(config_path),
+        "base_dir": str(base_dir),
     }
 
 
@@ -45619,20 +45929,22 @@ def _goal_progress_daily_candidate_next_step(daily_candidate_plan: dict[str, Any
 
 
 def tools_payload() -> dict[str, Any]:
+    available = {str(tool.get("name")): tool for tool in _agent_tool_schemas()}
+    tools = [compact_tool_schema(available[name]) for name in CORE_AGENT_TOOL_NAMES if name in available]
     return {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
         "status": "ok",
-        "tools": _agent_tool_schemas(),
-        "example": {
-            "source": "https://u2.dmhy.org/details.php?id=60635",
-            "target": "MTEAM",
-            "execute": True,
-            "accept_rules": True,
-            "confirm_upload": True,
-            "save_path": "/downloads",
-            "uploaded_qbit_category": "MTEAM",
-            "uploaded_qbit_tags": "retorrent",
-            "uploaded_qbit_upload_limit": "2MiB/s",
-        },
+        "ok": True,
+        "job_id": None,
+        "count": len(tools),
+        "tools": tools,
+        "blockers": [],
+        "next_actions": [],
+        "summary": {"contract": "ptcli.v1", "tool_count": len(tools)},
+        "resume_state": None,
+        "duplicate_check": None,
+        "links": {"openapi": "/openapi.json", "manifest": "/.well-known/ptcli-agent.json"},
+        "evidence": {},
     }
 
 
@@ -46480,7 +46792,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "seedbox_deployment_final_decision_fields": ["ready", "status", "action", "verdict", "deployment_ready", "bootstrap_ready", "qbit_ready", "live_trial_ready", "api", "docker", "mounts", "qbit", "live_trial", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_order", "complete_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "agent_skill_templates", "mounts", "env", "runtime", "qbit", "seedbox_qbit_handoff", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "daily_candidate_config_final_report", "seedbox_qbit_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
-                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_public_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
+                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_public_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "site_rules_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -47299,8 +47611,9 @@ def _readiness_bundle_tool_request_schema() -> dict[str, Any]:
         "downloads_path": {"type": "string"},
         "compose_file": {"type": "string"},
         "max_concurrent_jobs": {"type": "integer", "default": DEFAULT_MAX_CONCURRENT_JOBS},
-        "brief": {"type": "boolean", "description": "Return ptcli.goal_progress_brief instead of the full goal evidence tree."},
-        "view": {"type": "string", "enum": ["full", "brief", "summary", "compact"], "description": "Optional response view for goal_progress; brief/summary/compact returns the compact agent-routing shape."},
+        "brief": {"type": "boolean", "description": "Legacy alias for the compact goal-progress view."},
+        "detail": {"type": "boolean", "description": "Explicitly request the legacy detailed evidence tree; compact is the HTTP default."},
+        "view": {"type": "string", "enum": ["compact", "detail"], "default": "compact", "description": "HTTP response view; detail is intended only for operator troubleshooting."},
     }
     return {
         "type": "object",
@@ -48164,10 +48477,10 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
     public_base_url = (base_url or os.environ.get("PTCLI_PUBLIC_BASE_URL") or "http://127.0.0.1:8080").rstrip("/")
     tools = tools_payload()["tools"]
     return {
-        "schema_version": "ptcli.agent_manifest.v1",
+        "schema_version": AGENT_MANIFEST_SCHEMA_VERSION,
         "name": "ptcli-retorrent",
         "display_name": "PTCLI Retorrent Assistant",
-        "description": "AI-callable Chinese PT retorrent, upload, qBittorrent, and daily-candidate automation service.",
+        "description": "Local AI-callable Chinese PT retorrent, upload and daily-candidate service.",
         "audience": ["OpenClaw", "Hermes", "OpenAPI-compatible agents"],
         "base_url": public_base_url,
         "auth": {
@@ -48179,22 +48492,13 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         },
         "discovery": {
             "health": f"{public_base_url}/health",
-            "goal_progress": f"{public_base_url}/v1/goal/progress",
             "deployment_check": f"{public_base_url}/v1/deployment/check",
-            "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
             "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
-            "site_policy_rule_review": f"{public_base_url}/v1/site-policies/rule-review",
-            "site_policy_verify": f"{public_base_url}/v1/site-policies/verify",
-            "summary_check": f"{public_base_url}/v1/summary/check",
-            "materials_prepare": f"{public_base_url}/v1/materials/prepare",
-            "materials_prepare_job": f"{public_base_url}/v1/jobs/materials/prepare",
-            "metadata_prepare": f"{public_base_url}/v1/metadata/prepare",
-            "metadata_prepare_job": f"{public_base_url}/v1/jobs/metadata/prepare",
-            "target_package_prepare": f"{public_base_url}/v1/target/package/prepare",
-            "target_package_prepare_job": f"{public_base_url}/v1/jobs/target/package/prepare",
-            "target_upload_preflight": f"{public_base_url}/v1/target/upload/preflight",
-            "target_upload": f"{public_base_url}/v1/target/upload",
-            "target_upload_job": f"{public_base_url}/v1/jobs/target/upload",
+            "goal_progress": f"{public_base_url}/v1/goal/progress",
+            "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
+            "source_url_check_and_submit": f"{public_base_url}/v1/jobs/retorrent/from-url/check-and-submit",
+            "jobs": f"{public_base_url}/v1/jobs",
+            "site_policies": f"{public_base_url}/v1/site-policies",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -48204,11 +48508,40 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "never_skip": ["site rule gates", "target duplicate check", "uploaded torrent injection/seeding evidence"],
             "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions.",
         },
-        "skill_contract": _agent_skill_contract(public_base_url),
-        "agent_instructions": _agent_instructions(),
-        "tool_selection": _agent_tool_selection(),
-        "closure_contract": _agent_closure_contract(),
-        "default_workflows": _agent_default_workflows(),
+        "agent_instructions": {
+            "read_first": ["status", "ok", "blockers", "next_actions", "job_id", "links", "resume_state", "duplicate_check", "summary", "evidence"],
+            "poll": "When status is queued or running, poll links.self; read links.summary only after a terminal state.",
+            "resume": "Resume only from links.resume with explicit allowlisted overrides and required user confirmation.",
+            "complete": "Report completion only when status=complete, blockers=[], and summary/evidence prove target seeding closure.",
+        },
+        "tool_selection": {
+            "manual_source_link": "source_url_check_and_submit",
+            "manual_preflight": "source_url_retorrent_preflight",
+            "daily_candidates": "daily_candidates_job",
+            "approved_candidate": "submit_daily_candidate_job",
+            "poll": "get_job_status",
+            "final_summary": "get_job_summary",
+            "resume": "resume_job",
+            "rules": "site_policies",
+            "seedbox_handoff": "readiness_bundle",
+        },
+        "default_workflows": [
+            {
+                "name": "seedbox_handoff",
+                "steps": ["deployment_check", "readiness_bundle", "source_url_check_and_submit", "get_job_status", "get_job_summary"],
+                "stop_when": ["operator has not explicitly submitted the live request", "operator_package.gates contains false", "completion.report_allowed is not true"],
+            },
+            {
+                "name": "source_url_retorrent",
+                "steps": ["source_url_retorrent_preflight", "source_url_check_and_submit", "get_job_status", "get_job_summary"],
+                "stop_when": ["duplicate_check.exists=true", "blockers is non-empty without a safe resume", "accept_rules or confirm_upload is missing for live upload"],
+            },
+            {
+                "name": "daily_candidates",
+                "steps": ["daily_candidates_job", "get_job_status", "get_job_summary", "submit_daily_candidate_job"],
+                "stop_when": ["candidate is not explicitly approved", "confirm_upload is not true", "site policy gate is blocked"],
+            },
+        ],
         "tools": tools,
         "tool_count": len(tools),
         "openclaw": {
@@ -48955,6 +49288,25 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                 },
             },
             "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    # Public v1 job endpoints intentionally expose one bounded envelope.  The
+    # richer internal schemas above remain available to legacy helpers while
+    # OpenAPI and agent tools describe what the HTTP service actually returns.
+    job_response_schema = response_envelope_schema()
+    job_summary_response_schema = response_envelope_schema()
+    source_url_check_submit_response_schema = response_envelope_schema()
+    job_list_response_schema = {
+        **response_envelope_schema(),
+        "properties": {
+            **response_envelope_schema()["properties"],
+            "count": {"type": "integer"},
+            "total": {"type": "integer"},
+            "limit": {"type": "integer"},
+            "filters": {"type": "object"},
+            "status_counts": {"type": "object"},
+            "queue": {"type": "object"},
+            "jobs": {"type": "array", "items": response_envelope_schema()},
         },
     }
     daily_candidate_batch_response_schema = {
@@ -49801,6 +50153,22 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    operational_response_schema = {
+        **response_envelope_schema(),
+        "properties": {
+            **response_envelope_schema()["properties"],
+            "ready": {"type": "boolean"},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "checks": {"type": "array", "items": {"type": "object"}},
+            "gates": {"type": "object"},
+            "next_call": {"type": ["object", "null"]},
+            "seedbox_handoff": {"type": "object"},
+            "operator_package": {"type": "object"},
+        },
+    }
+    deployment_response_schema = operational_response_schema
+    goal_progress_response_schema = operational_response_schema
+    readiness_bundle_response_schema = operational_response_schema
     summary_check_response_schema = {
         "type": "object",
         "properties": {
@@ -49827,6 +50195,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {"title": "ptcli Retorrent API", "version": "1.0.0"},
         "paths": {
+            "/openapi.json": {
+                "get": {
+                    "operationId": "getPtcliOpenApi",
+                    "responses": {
+                        "200": {
+                            "description": "The complete PTCLI OpenAPI document.",
+                            "content": {
+                                "application/json": {"schema": {"type": "object"}}
+                            },
+                        }
+                    },
+                }
+            },
             "/health": {
                 "get": {
                     "operationId": "health",
@@ -49910,8 +50291,9 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         {"name": "downloads_path", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "compose_file", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "view", "in": "query", "required": False, "schema": {"type": "string", "enum": ["compact", "detail"], "default": "compact"}},
                     ],
-                    "responses": {"200": {"description": "Local deployment readiness report.", "content": {"application/json": {"schema": deployment_response_schema}}}},
+                    "responses": {"200": {"description": "Compact local deployment readiness report; use view=detail for the legacy evidence tree.", "content": {"application/json": {"schema": deployment_response_schema}}}},
                 }
             },
             "/v1/goal/progress": {
@@ -49926,9 +50308,9 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         {"name": "base_dir", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "brief", "in": "query", "required": False, "schema": {"type": "boolean"}},
-                        {"name": "view", "in": "query", "required": False, "schema": {"type": "string", "enum": ["full", "brief", "summary", "compact"]}},
+                        {"name": "view", "in": "query", "required": False, "schema": {"type": "string", "enum": ["compact", "detail"], "default": "compact"}},
                     ],
-                    "responses": {"200": {"description": "Current progress audit for the final ptcli AI service goal.", "content": {"application/json": {"schema": goal_progress_response_schema}}}},
+                    "responses": {"200": {"description": "Compact progress router; use view=detail for the legacy evidence tree.", "content": {"application/json": {"schema": goal_progress_response_schema}}}},
                 },
                 "post": {
                     "operationId": "postPtcliGoalProgress",
@@ -49948,8 +50330,9 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "accept_rules", "in": "query", "required": False, "schema": {"type": "boolean"}},
                         {"name": "confirm_upload", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                        {"name": "view", "in": "query", "required": False, "schema": {"type": "string", "enum": ["compact", "detail"], "default": "compact"}},
                     ],
-                    "responses": {"200": {"description": "AI readiness bundle.", "content": {"application/json": {"schema": readiness_bundle_response_schema}}}},
+                    "responses": {"200": {"description": "Compact no-execution seedbox handoff; use view=detail for the legacy evidence tree.", "content": {"application/json": {"schema": readiness_bundle_response_schema}}}},
                 },
                 "post": {
                     "operationId": "createPtcliReadinessBundle",
@@ -50167,6 +50550,72 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "responses": {"200": {"description": "Verify rule-review fingerprints against configured site policies.", "content": {"application/json": {"schema": site_policy_verify_response_schema}}}},
                 },
             },
+            "/v1/site-rule-documents": {
+                "get": {
+                    "operationId": "listPtcliSiteRuleDocuments",
+                    "security": token_security,
+                    "responses": {"200": {"description": "List and validate local Markdown tracker-rule documents."}},
+                },
+            },
+            "/v1/site-rule-documents/validate": {
+                "post": {
+                    "operationId": "validatePtcliSiteRuleDocument",
+                    "security": token_security,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {"type": "object", "properties": {"tracker": {"type": "string"}, "file": {"type": "string"}}}}},
+                    },
+                    "responses": {"200": {"description": "Validate Markdown schema, source hash, policy fields, obligations, and review fingerprint."}},
+                },
+            },
+            "/v1/site-rule-documents/review": {
+                "post": {
+                    "operationId": "reviewPtcliSiteRuleDocument",
+                    "security": token_security,
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["tracker", "approve", "human_confirmed", "reviewer", "reviewed_at"],
+                                    "properties": {
+                                        "tracker": {"type": "string"},
+                                        "approve": {"type": "boolean", "const": True},
+                                        "human_confirmed": {"type": "boolean", "const": True},
+                                        "reviewer": {"type": "string"},
+                                        "reviewed_at": {"type": "string"},
+                                        "write": {"type": "boolean", "default": False},
+                                        "confirm_write": {"type": "boolean", "default": False},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "Preview or explicitly persist human approval; never contacts trackers or performs live upload."}},
+                },
+            },
+            "/v1/site-rule-documents/compile": {
+                "post": {
+                    "operationId": "compilePtcliSiteRuleDocuments",
+                    "security": token_security,
+                    "requestBody": {
+                        "required": False,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "write": {"type": "boolean", "default": False},
+                                        "confirm_write": {"type": "boolean", "default": False},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "Compile all approved documents into one hash-verified runtime snapshot; partial writes are forbidden."}},
+                },
+            },
             "/v1/retorrent/check": {
                 "post": {
                     "operationId": "checkRetorrentDuplicate",
@@ -50188,7 +50637,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createRetorrentCheckJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": request_schema}}},
-                    "responses": {"200": {"description": "Queued duplicate-check job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued duplicate-check job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/retorrent/check/{job_id}/submit": {
@@ -50197,7 +50646,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
                     "requestBody": {"required": False, "content": {"application/json": {"schema": retorrent_check_submit_request_schema}}},
-                    "responses": {"200": {"description": "Queued live retorrent job from a completed clear duplicate-check job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued live retorrent job from a completed clear duplicate-check job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/retorrent": {
@@ -50205,7 +50654,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createRetorrentJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": request_schema}}},
-                    "responses": {"200": {"description": "Queued retorrent job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued retorrent job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/retorrent/submit": {
@@ -50214,7 +50663,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": manual_request_schema}}},
                     "responses": {
-                        "200": {
+                        "202": {
                             "description": "Queued manual retorrent job that checks duplicates and executes only when gates allow.",
                             "content": {"application/json": {"schema": job_response_schema}},
                         }
@@ -50227,7 +50676,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": source_url_request_schema}}},
                     "responses": {
-                        "200": {
+                        "202": {
                             "description": "Queued source-URL retorrent job that infers tracker/torrent id and executes only when gates allow.",
                             "content": {"application/json": {"schema": job_response_schema}},
                         }
@@ -50241,9 +50690,13 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "requestBody": {"required": True, "content": {"application/json": {"schema": source_url_check_submit_request_schema}}},
                     "responses": {
                         "200": {
-                            "description": "Runs duplicate check first, then creates a source-URL retorrent job only when clear.",
+                            "description": "Duplicate or confirmation gate blocked the request without creating a job.",
                             "content": {"application/json": {"schema": source_url_check_submit_response_schema}},
-                        }
+                        },
+                        "202": {
+                            "description": "Duplicate check passed and a source-URL retorrent job was created.",
+                            "content": {"application/json": {"schema": job_response_schema}},
+                        },
                     },
                 }
             },
@@ -50252,7 +50705,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createPtcliMaterialsPrepareJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": materials_prepare_request_schema}}},
-                    "responses": {"200": {"description": "Queued local-material preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued local-material preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/metadata/prepare": {
@@ -50260,7 +50713,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createPtcliMetadataPrepareJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": metadata_prepare_request_schema}}},
-                    "responses": {"200": {"description": "Queued metadata/PTGen preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued metadata/PTGen preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/target/package/prepare": {
@@ -50268,7 +50721,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createPtcliTargetPackagePrepareJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": target_package_prepare_request_schema}}},
-                    "responses": {"200": {"description": "Queued target package preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued target package preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/target/upload": {
@@ -50276,7 +50729,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createPtcliTargetUploadJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": target_upload_request_schema}}},
-                    "responses": {"200": {"description": "Queued target upload and uploaded-torrent closure job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued target upload and uploaded-torrent closure job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/candidates/daily": {
@@ -50326,7 +50779,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "createDailyRetorrentCandidateJob",
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_request_schema}}},
-                    "responses": {"200": {"description": "Queued daily-candidate discovery job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued daily-candidate discovery job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/candidates/daily/refill": {
@@ -50343,7 +50796,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
                     "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_submit_request_schema}}},
-                    "responses": {"200": {"description": "Queued retorrent job from a selected daily candidate.", "content": {"application/json": {"schema": job_response_schema}}}},
+                    "responses": {"202": {"description": "Queued retorrent job from a selected daily candidate.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/candidates/daily/schedule": {

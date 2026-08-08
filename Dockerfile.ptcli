@@ -1,8 +1,7 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    TMPDIR=/Upload-Assistant/tmp
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -29,8 +28,10 @@ COPY data/example-config.py data/example-config.py
 
 RUN chmod +x /Upload-Assistant/ptcli.py && \
     ln -sf /Upload-Assistant/ptcli.py /usr/local/bin/ptcli && \
-    mkdir -p /Upload-Assistant/data/cookies /Upload-Assistant/tmp && \
+    mkdir -p /Upload-Assistant/data/cookies /Upload-Assistant/data/site-rules /Upload-Assistant/tmp && \
     chmod 777 /Upload-Assistant/tmp
+
+ENV TMPDIR=/Upload-Assistant/tmp
 
 EXPOSE 8080
 

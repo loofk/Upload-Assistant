@@ -124,6 +124,18 @@ def build_site_policy_config_audit(
     blockers = list(dict.fromkeys([*missing_fields, *disabled_automation, *placeholder_fields]))
     shape = _site_policy_override_shape(override)
     ready = bool(coverage.get("complete")) and not placeholder_fields
+    snapshot_documents = (config or {}).get("_PTCLI_SITE_POLICY_DOCUMENTS")
+    document = snapshot_documents.get(normalize_tracker(tracker)) if isinstance(snapshot_documents, dict) else None
+    snapshot_meta = (config or {}).get("_PTCLI_SITE_POLICY_SNAPSHOT_META")
+    legacy_override = _site_policy_legacy_override(config or {}, normalize_tracker(tracker))
+    if isinstance(document, dict) and legacy_override:
+        policy_source = "markdown_snapshot+legacy_override"
+    elif isinstance(document, dict):
+        policy_source = "markdown_snapshot"
+    elif override:
+        policy_source = "legacy_config"
+    else:
+        policy_source = "builtin_default"
     return {
         "kind": "ptcli.site_policy_config_audit",
         "tracker": tracker,
@@ -133,6 +145,9 @@ def build_site_policy_config_audit(
         "accepted_config_shapes": ["flat", "structured"],
         "config_path": f'config["PTCLI"]["SITE_POLICIES"]["{tracker}"]',
         "configured": bool(override),
+        "policy_source": policy_source,
+        "policy_document": document if isinstance(document, dict) else None,
+        "policy_snapshot": snapshot_meta if isinstance(snapshot_meta, dict) else None,
         "configured_fields": configured_fields,
         "defaulted_fields": defaulted_fields,
         "missing_fields": missing_fields,
@@ -193,12 +208,17 @@ def build_site_policy_coverage(policy: dict[str, Any], *, roles: list[str] | tup
     tracker = str(policy.get("tracker") or "UNKNOWN")
     normalized_roles = _string_list(roles) or ["unknown"]
     rule_obligations = build_rule_obligations(policy, roles=normalized_roles, accept_rules=accept_rules)
-    automation = policy.get("automation") if isinstance(policy.get("automation"), dict) else {
-        "download": policy.get("allow_auto_download"),
-        "upload": policy.get("allow_auto_upload"),
-        "retorrent": policy.get("allow_retorrent"),
-        "manual_review_required": policy.get("manual_review_required"),
-    }
+    raw_automation = policy.get("automation")
+    automation: dict[str, Any] = (
+        raw_automation
+        if isinstance(raw_automation, dict)
+        else {
+            "download": policy.get("allow_auto_download"),
+            "upload": policy.get("allow_auto_upload"),
+            "retorrent": policy.get("allow_retorrent"),
+            "manual_review_required": policy.get("manual_review_required"),
+        }
+    )
     missing: list[str] = []
     disabled: list[str] = []
     recommendations: list[str] = []
@@ -355,8 +375,9 @@ def _site_policy_overrides(config: dict[str, Any]) -> dict[str, Any]:
     ptcli_config = config.get("PTCLI")
     nested = ptcli_config.get("SITE_POLICIES") if isinstance(ptcli_config, dict) else None
     top_level = config.get("SITE_POLICIES")
+    snapshot = config.get("_PTCLI_SITE_POLICY_SNAPSHOT")
     merged: dict[str, Any] = {}
-    for candidate in (top_level, nested):
+    for candidate in (snapshot, top_level, nested):
         if isinstance(candidate, dict):
             for tracker, value in candidate.items():
                 normalized = str(tracker).strip().upper()
@@ -365,12 +386,26 @@ def _site_policy_overrides(config: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _site_policy_legacy_override(config: dict[str, Any], tracker: str) -> bool:
+    ptcli_config = config.get("PTCLI")
+    nested = ptcli_config.get("SITE_POLICIES") if isinstance(ptcli_config, dict) else None
+    top_level = config.get("SITE_POLICIES")
+    for candidate in (top_level, nested):
+        if not isinstance(candidate, dict):
+            continue
+        for raw_tracker, value in candidate.items():
+            normalized = str(raw_tracker).strip().upper()
+            if normalized in CHINESE_PT_TRACKERS and normalize_tracker(normalized) == tracker and isinstance(value, dict):
+                return True
+    return False
+
+
 def _apply_policy_override(policy: SitePolicy, override: dict[str, Any]) -> SitePolicy:
     fields: dict[str, Any] = {}
-    automation = override.get("automation") if isinstance(override.get("automation"), dict) else {}
-    qbit_limits = override.get("qbit_limits") if isinstance(override.get("qbit_limits"), dict) else {}
-    seeding = override.get("seeding_requirements") if isinstance(override.get("seeding_requirements"), dict) else {}
-    transfer_rules = override.get("transfer_rules") if isinstance(override.get("transfer_rules"), dict) else {}
+    automation = _dict_section(override, "automation")
+    qbit_limits = _dict_section(override, "qbit_limits")
+    seeding = _dict_section(override, "seeding_requirements")
+    transfer_rules = _dict_section(override, "transfer_rules")
     nested_bool_fields = {
         "manual_review_required": automation.get("manual_review_required"),
         "allow_auto_download": automation.get("download"),
@@ -426,7 +461,7 @@ def _apply_policy_override(policy: SitePolicy, override: dict[str, Any]) -> Site
 
 
 def _policy_transfer_rules(policy: dict[str, Any]) -> dict[str, Any]:
-    nested = policy.get("transfer_rules") if isinstance(policy.get("transfer_rules"), dict) else {}
+    nested = _dict_section(policy, "transfer_rules")
     return {
         "freeleech_required": bool(policy.get("freeleech_required") or nested.get("freeleech_required")),
         "required_promotions": _string_list(policy.get("required_promotions") or nested.get("required_promotions")),
@@ -645,6 +680,11 @@ def _as_list(value: Any) -> list[Any]:
     if value in (None, ""):
         return []
     return [value]
+
+
+def _dict_section(mapping: dict[str, Any], key: str) -> dict[str, Any]:
+    value = mapping.get(key)
+    return value if isinstance(value, dict) else {}
 
 
 def _policy_blockers(policies: list[SitePolicy], *, accept_rules: bool) -> list[str]:

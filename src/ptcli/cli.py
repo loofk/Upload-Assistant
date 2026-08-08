@@ -314,6 +314,28 @@ def build_parser() -> argparse.ArgumentParser:
     site_policy_verify.add_argument("--expected-fingerprints-json", help='Expected fingerprints JSON object, e.g. {"U2":"...","MTEAM":"..."}.')
     site_policy_verify.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    site_rule_docs = subparsers.add_parser("site-rule-docs", help="Inspect local Markdown tracker-rule documents without changing them.")
+    site_rule_docs.add_argument("--rules-dir", help="Directory containing TRACKER.md documents. Defaults to PTCLI_SITE_RULES_DIR or data/site-rules.")
+    site_rule_docs.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    site_rule_validate = subparsers.add_parser("site-rule-validate", help="Validate one Markdown tracker-rule document and its review fingerprints.")
+    site_rule_validate.add_argument("--file", required=True, help="Path to the Markdown tracker-rule document.")
+    site_rule_validate.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    site_rule_review = subparsers.add_parser("site-rule-review", help="Explicitly approve a validated Markdown tracker-rule document.")
+    site_rule_review.add_argument("--file", required=True, help="Path to the Markdown tracker-rule document.")
+    site_rule_review.add_argument("--approve", action="store_true", help="Confirm that a human reviewed the complete source text and structured extraction.")
+    site_rule_review.add_argument("--reviewer", required=True, help="Human/local account name performing the review.")
+    site_rule_review.add_argument("--reviewed-at", required=True, help="ISO-8601 review timestamp with an explicit timezone.")
+    site_rule_review.add_argument("--write", action="store_true", help="Persist approval metadata only when validation and all obligations pass.")
+    site_rule_review.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    site_rule_compile = subparsers.add_parser("site-rule-compile", help="Compile approved Markdown tracker rules into a deterministic runtime JSON snapshot.")
+    site_rule_compile.add_argument("--rules-dir", help="Directory containing TRACKER.md documents. Defaults to PTCLI_SITE_RULES_DIR or data/site-rules.")
+    site_rule_compile.add_argument("--output", help="Snapshot output path. Defaults to PTCLI_SITE_POLICY_SNAPSHOT or data/site-policies.generated.json.")
+    site_rule_compile.add_argument("--write", action="store_true", help="Write only when every document is approved and compile-ready.")
+    site_rule_compile.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rule_check = subparsers.add_parser("rule-check", help="Run executable rule gates for a source/target workflow.")
     rule_check.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
     rule_check.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
@@ -12653,6 +12675,41 @@ def goal_progress_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     return goal_progress_payload({key: value for key, value in request.items() if value not in (None, "")})
 
 
+def site_rule_docs_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.site_rule_docs import inspect_site_rule_documents
+
+    return inspect_site_rule_documents(args.rules_dir)
+
+
+def site_rule_validate_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.site_rule_docs import validate_site_rule_document
+
+    return validate_site_rule_document(args.file)
+
+
+def site_rule_review_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.site_rule_docs import approve_site_rule_document
+
+    if args.approve is not True:
+        return {
+            "schema_version": 1,
+            "kind": "ptcli.site_rule_document_review",
+            "status": "blocked",
+            "ok": False,
+            "ready": False,
+            "written": False,
+            "blockers": ["--approve is required after explicit human review."],
+            "next_actions": ["Review the complete rule text and structured extraction, then repeat with --approve."],
+        }
+    return approve_site_rule_document(args.file, reviewer=args.reviewer, reviewed_at=args.reviewed_at, write=args.write)
+
+
+def site_rule_compile_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.site_rule_docs import compile_site_policy_snapshot
+
+    return compile_site_policy_snapshot(args.rules_dir, output_path=args.output, write=args.write)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -12711,6 +12768,26 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "site-policy-verify":
             payload = _with_captured_stdout(lambda: site_policy_verify_cli_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
+
+        if args.command == "site-rule-docs":
+            payload = site_rule_docs_cli_payload(args)
+            _print_payload(payload, json_output)
+            return 0
+
+        if args.command == "site-rule-validate":
+            payload = site_rule_validate_cli_payload(args)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("valid") is True else 1
+
+        if args.command == "site-rule-review":
+            payload = site_rule_review_cli_payload(args)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
+
+        if args.command == "site-rule-compile":
+            payload = site_rule_compile_cli_payload(args)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 

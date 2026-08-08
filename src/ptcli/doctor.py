@@ -129,7 +129,7 @@ _PTCLI_INTERNAL_IMPORTS: tuple[tuple[str, str], ...] = (
     ("ptcli.metadata", "src.ptcli.metadata"),
     ("ptcli.source", "src.ptcli.source"),
     ("ptcli.target", "src.ptcli.target"),
-    ("ptgen_adapter", "src.trackers.COMMON"),
+    ("ptgen_adapter", "src.ptcli.ptgen"),
 )
 
 

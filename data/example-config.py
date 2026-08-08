@@ -1225,7 +1225,7 @@ config = {
             },
             # MTEAM is the current API-style target example.
             "MTEAM": {
-                "rules_url": "https://kp.m-team.cc/rules",
+                "rules_url": "https://wiki.m-team.cc/zh-tw/site-rules",
                 "manual_review_required": True,
                 "allow_auto_download": False,
                 "allow_auto_upload": True,

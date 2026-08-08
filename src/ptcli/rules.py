@@ -40,7 +40,7 @@ _RULE_URLS: Final[dict[str, str]] = {
     "HDS": "https://hd-space.org/index.php?page=rules",
     "HDSKY": "https://hdsky.me/rules.php",
     "HHAN": "https://hhanclub.net/rules.php",
-    "MTEAM": "https://kp.m-team.cc/rules",
+    "MTEAM": "https://wiki.m-team.cc/zh-tw/site-rules",
     "OB": "https://ourbits.club/rules.php",
     "PTER": "https://pterclub.com/rules.php",
     "TJUPT": "https://www.tjupt.org/rules.php",

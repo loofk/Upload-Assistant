@@ -3,6 +3,11 @@ data/config.json
 data/config.py
 data/config*
 data/cookies/
+# Private tracker-rule evidence copied from authenticated pages. Keep only the
+# schema/workflow README in git; runtime snapshots stay local as well.
+/data/site-rules/*.md
+!/data/site-rules/README.md
+/data/site-rules/*.json
 data/tags.json
 data/tvdb/
 data/web_ui/*.*

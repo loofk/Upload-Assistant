@@ -4222,7 +4222,7 @@ def test_rule_check_command_requires_ack_for_ready(capsys) -> None:
     assert payload["manual_review"]["required"] is True
     assert payload["manual_review"]["acknowledged"] is False
     assert payload["manual_review"]["obligation_count"] == 2
-    assert payload["manual_review"]["rules_urls"] == ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"]
+    assert payload["manual_review"]["rules_urls"] == ["https://u2.dmhy.org/rules.php", "https://wiki.m-team.cc/zh-tw/site-rules"]
     assert len(payload["manual_review"]["required_confirmations"]) == 2
     assert all(item["required_confirmations"] for item in payload["manual_review"]["required_confirmations"])
 
@@ -4264,7 +4264,7 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     assert payload["manual_review"]["target_trackers"] == ["MTEAM"]
     assert payload["manual_review"]["obligation_count"] == 2
     assert payload["manual_review"]["acknowledged_count"] == 2
-    assert payload["manual_review"]["rules_urls"] == ["https://kp.m-team.cc/rules", "https://ptchdbits.co/rules.php"]
+    assert payload["manual_review"]["rules_urls"] == ["https://ptchdbits.co/rules.php", "https://wiki.m-team.cc/zh-tw/site-rules"]
     assert payload["manual_review"]["required_confirmations"] == [
         {
             "tracker": obligation["tracker"],
@@ -11875,7 +11875,7 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
                 "automation_scope": {"site_specific_rules_encoded": False, "concrete_policy_checks": "tracker_adapters"},
                 "rule_obligations": [
                     {"tracker": "U2", "role": "source", "action": "download_and_retorrent", "rules_url": "https://u2.dmhy.org/rules.php", "acknowledged": True},
-                    {"tracker": "MTEAM", "role": "target", "action": "upload_and_seed", "rules_url": "https://kp.m-team.cc/rules", "acknowledged": True},
+                    {"tracker": "MTEAM", "role": "target", "action": "upload_and_seed", "rules_url": "https://wiki.m-team.cc/zh-tw/site-rules", "acknowledged": True},
                 ],
             },
         },
@@ -11891,7 +11891,7 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
                     "blockers": [],
                     "rule_obligations": [
                         {"tracker": "U2", "role": "source", "action": "download_and_retorrent", "rules_url": "https://u2.dmhy.org/rules.php", "acknowledged": True},
-                        {"tracker": "MTEAM", "role": "target", "action": "upload_and_seed", "rules_url": "https://kp.m-team.cc/rules", "acknowledged": True},
+                        {"tracker": "MTEAM", "role": "target", "action": "upload_and_seed", "rules_url": "https://wiki.m-team.cc/zh-tw/site-rules", "acknowledged": True},
                     ],
                 },
             },
@@ -21501,7 +21501,7 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_repair_gate"]["recommended_endpoint"] == "/v1/site-policies/rule-review"
     assert payload["policy_repair_gate"]["rule_review_request"]["rules_reviewed"] is False
     assert payload["policy_repair_gate"]["rule_review_request"]["reviewer"] == "<reviewer>"
-    assert payload["policy_repair_gate"]["rule_review_request"]["rules_urls"] == {"U2": "https://u2.dmhy.org/rules.php", "MTEAM": "https://kp.m-team.cc/rules"}
+    assert payload["policy_repair_gate"]["rule_review_request"]["rules_urls"] == {"U2": "https://u2.dmhy.org/rules.php", "MTEAM": "https://wiki.m-team.cc/zh-tw/site-rules"}
     assert payload["policy_repair_gate"]["next_step"]["after_rule_review"]["tool"] == "edit_config"
     assert payload["policy_repair_gate"]["next_step"]["after_edit"]["tool"] == "site_policies"
     assert payload["policy_repair_gate"]["config"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
@@ -21579,7 +21579,7 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert config_handoff["manual_review_required"] is True
     assert config_handoff["cannot_auto_generate_rule_review"] is True
     assert config_handoff["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
-    assert config_handoff["rule_review_request"]["rules_urls"] == {"U2": "https://u2.dmhy.org/rules.php", "MTEAM": "https://kp.m-team.cc/rules"}
+    assert config_handoff["rule_review_request"]["rules_urls"] == {"U2": "https://u2.dmhy.org/rules.php", "MTEAM": "https://wiki.m-team.cc/zh-tw/site-rules"}
     assert config_handoff["merge_strategy"]["safe_to_auto_apply"] is False
     assert config_handoff["next_step"]["tool"] == "site_policy_rule_review"
     assert config_handoff["next_step"]["after_rule_review"]["tool"] == "edit_config"
@@ -26792,10 +26792,11 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
     monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
     data_dir = tmp_path / "data"
     cookies_dir = data_dir / "cookies"
+    site_rules_dir = data_dir / "site-rules"
     tmp_dir = tmp_path / "tmp"
     job_dir = tmp_path / "jobs"
     downloads_dir = tmp_path / "downloads"
-    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+    for directory in (cookies_dir, site_rules_dir, tmp_dir, job_dir, downloads_dir):
         directory.mkdir(parents=True)
     (tmp_path / ".env.ptcli.example").write_text(Path(".env.ptcli.example").read_text(encoding="utf-8"), encoding="utf-8")
     (tmp_path / "Dockerfile.ptcli").write_text(Path("Dockerfile.ptcli").read_text(encoding="utf-8"), encoding="utf-8")
@@ -26824,8 +26825,9 @@ services:
     volumes:
       - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
       - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
-      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
-      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
+          - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+          - ${PTCLI_SITE_RULES_HOST_PATH:-/app/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
+          - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -39742,7 +39744,7 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
         "source_tracker": "U2",
         "target_trackers": ["MTEAM"],
         "obligation_count": 2,
-        "rules_urls": ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"],
+        "rules_urls": ["https://u2.dmhy.org/rules.php", "https://wiki.m-team.cc/zh-tw/site-rules"],
         "required_confirmations": [
             {
                 "tracker": obligation["tracker"],

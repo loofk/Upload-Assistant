@@ -23,10 +23,13 @@ services:
       - PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
       - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
+      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
+      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
     volumes:
       - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
       - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
       - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
@@ -54,10 +57,13 @@ services:
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
       - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
       - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
+      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
+      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
     volumes:
       - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
       - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
       - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["sites", "--json"]
 
@@ -79,10 +85,13 @@ services:
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
       - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
       - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
+      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
+      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
     volumes:
       - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
       - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
       - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
 
@@ -104,10 +113,13 @@ services:
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
       - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
       - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
+      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
+      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
     volumes:
       - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
       - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
       - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
 

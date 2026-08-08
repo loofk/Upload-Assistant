@@ -383,7 +383,7 @@ def _imdb_id_from_external_ids_payload(payload: Any) -> int | None:
 
 
 async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, Any], *, base_dir: str | None) -> dict[str, Any]:
-    from src.trackers.COMMON import COMMON
+    from src.ptcli.ptgen import fetch_ptgen_description
 
     imdb_id = _normalize_int(source_info.get("imdb_id"))
     douban_url = _normalize_douban_url(source_info.get("douban_url") or source_info.get("douban_id"))
@@ -398,7 +398,7 @@ async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, An
     meta = _ptgen_meta(source_info, work_root, uuid, imdb_id, douban_url)
 
     try:
-        description = await COMMON(config=config).ptgen(meta, ptgen_api, ptgen_retry)
+        description = await fetch_ptgen_description(meta, ptgen_site=ptgen_api, retries=ptgen_retry)
     except Exception as exc:
         return {"blocker": f"PTGen enrichment failed: {exc}"}
     if not description.strip():

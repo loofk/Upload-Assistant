@@ -10,6 +10,12 @@ Upload Assistant (UA) 是一个基于 Python 的工具，用于自动化种子�
 
 ### 当前 ptcli 目标状态
 
+`codex/new-feature` 已建立 PTCLI v1 LOCAL_READY focused 门禁。后续 agent 应先运行 `make check-ptcli`，需要证明容器可用时运行 `make verify-ptcli-local` 并读取 `tmp/ptcli-local-ready.json`。验收必须满足 `status=ready`、`ok=true`、`blockers=[]`；该结论只证明本地/隔离容器基线，不代表真实 Tracker、qBittorrent 或 live upload 已验证。
+
+LOCAL_READY 基线包括：15 个核心 `/v1/tools` 工具、有体积预算的 job/OpenAPI/manifest 契约、固定 worker 文件队列、重启后的 blocked/resume 语义、focused PTGen runtime，以及无网络模拟 U2/CHD -> MTEAM 闭环和规则/确认/重复种 gate。默认 `make test`/`make check` 已指向 focused 门禁；legacy 全量套件需安装 `requirements-legacy-dev.txt` 后单独运行 `make test-legacy`。
+
+SEEDBOX_HANDOFF_READY 门禁使用 `make verify-ptcli-seedbox-handoff`，报告位于 `tmp/ptcli-seedbox-handoff-ready.json`。HTTP 的 deployment/readiness/goal-progress 默认是 compact 响应，只有显式 `view=detail` 才返回完整迁移期证据树；`readiness-bundle.operator_package.safe_to_auto_execute` 必须保持 false。真实 job 只允许在 `get_job_summary.completion.report_allowed=true` 且 failed_checks/missing_evidence/blockers 全空时报告完成。
+
 已基本落地：
 - Docker Compose 部署骨架：`ptcli-api` 常驻服务、健康检查、挂载 config/cookies/downloads/tmp/job 目录、`.env.ptcli.example`、部署检查 `/v1/deployment/check`。
 - AI 工具契约：`/openapi.json`、`/v1/tools`、`/.well-known/ptcli-agent.json`、`/v1/openclaw/skill.json`、`/v1/hermes/skill.json`，离线模板位于 `ai/openclaw/ptcli.skill.json` 和 `ai/hermes/ptcli.skill.json`。
@@ -88,11 +94,14 @@ python3 config-generator.py
 
 ### 安装依赖
 ```bash
-# 运行依赖
-pip install -r requirements.txt
+# focused ptcli 运行依赖
+pip install -r requirements-ptcli.txt
 
-# 开发/检查依赖（lint、test、type check、安全扫描）
+# focused 开发/检查依赖（lint、test）
 pip install -r requirements-dev.txt
+
+# legacy/full UA 开发与测试依赖
+pip install -r requirements-legacy-dev.txt
 ```
 
 ### 代码检查
@@ -170,6 +179,10 @@ make help        # 查看所有可用命令
 make lint        # ruff 代码检查
 make test        # pytest（自动排除 live 测试）
 make check       # lint + test 一起跑
+make check-ptcli # focused lint + test + skill manifest 同步门禁
+make verify-ptcli-local # 构建/启动隔离容器并生成 tmp/ptcli-local-ready.json
+make verify-ptcli-seedbox-handoff # 验证 compact 运维 API、U2/CHD 交接包和容器安全门禁
+make test-legacy # legacy/full UA 离线测试（需 requirements-legacy-dev.txt）
 make smoke       # 快速导入检查（验证核心模块可加载）
 make test-live   # 实时集成测试（需要 data/cookies + data/config.py）
 

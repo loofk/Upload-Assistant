@@ -4,6 +4,39 @@
 
 原始 `upload.py`、Web UI、Discord bot 和大量海外 tracker 代码仍保留为迁移期兼容内容；`upload.py --help` 会标明这是 legacy 入口。新功能优先在 `ptcli.py` 与 `src/ptcli/` 下推进。
 
+## PTCLI v1 LOCAL_READY 基线
+
+`codex/new-feature` 当前以“可安全进入盒子验证”为阶段目标，而不是把未执行的真实站点操作标记为完成：
+
+- `ptcli-api` 可通过 Docker Compose 常驻运行，默认绑定本机，支持 token、配置/cookie/downloads/tmp/jobs 挂载。
+- `/v1/tools` 只暴露 15 个核心 AI 工具；job status、summary、list、OpenAPI 和 skill manifest 使用有体积预算的稳定 JSON 契约。
+- 文件型任务队列使用固定 worker 数，支持 queued/running/blocked/failed/complete、重启阻断恢复、summary、resume 和审计证据。
+- focused PTGen 客户端不再依赖未复制进 `Dockerfile.ptcli` 的 legacy tracker 模块。
+- 无网络测试模拟 U2/CHD -> MTEAM 正常闭环、重复种停止、`accept_rules`/`confirm_upload` 阻断；不会访问真实 Tracker 或 qBittorrent。
+- 站点规则可保存在本地私有 Markdown 文档中，经校验、显式人工批准和全量编译后生成带 hash 的只读运行时策略快照；草稿或待确认 obligation 不会进入 live 策略。
+
+本阶段的统一验收命令是：
+
+```bash
+pip install -r requirements-dev.txt
+make check-ptcli
+make verify-ptcli-local
+```
+
+最后一条命令会校验 Compose、构建并启动隔离镜像、探测 health/OpenAPI/tools/manifest/token，并把机器可读报告写到 `tmp/ptcli-local-ready.json`。只有报告满足 `status=ready`、`ok=true`、`blockers=[]` 才是 LOCAL_READY；这不等价于真实 U2/CHD -> MTEAM live 闭环已验证。完整 legacy 测试需另外安装 `requirements-legacy-dev.txt` 并运行 `make test-legacy`。
+
+### SEEDBOX_HANDOFF_READY
+
+盒子运维 API 默认返回 compact 契约：`/v1/deployment/check`、`/v1/readiness/bundle` 和 `/v1/goal/progress` 分别受 64 KiB、96 KiB、16 KiB 预算约束；人工排障时可显式添加 `view=detail` 读取迁移期完整证据树。`readiness-bundle.operator_package` 提供 U2/CHD -> MTEAM 的固定门禁、步骤和证据合同，但 `safe_to_auto_execute=false`，不会代表用户已经授权真实操作。
+
+```bash
+make verify-ptcli-seedbox-handoff
+curl -H "Authorization: Bearer $PTCLI_API_TOKEN" http://127.0.0.1:8080/v1/readiness/bundle
+curl -H "Authorization: Bearer $PTCLI_API_TOKEN" "http://127.0.0.1:8080/v1/readiness/bundle?view=detail"
+```
+
+真实任务完成后，AI 必须读取 `/v1/jobs/<job_id>/summary` 的 `completion`：只有 `report_allowed=true` 且 `failed_checks=[]`、`missing_evidence=[]`、`blockers=[]` 才能报告 live 闭环完成。交接报告写入 `tmp/ptcli-seedbox-handoff-ready.json`；它仍然不执行或替代真实规则审查、查重、qBittorrent 连接及上传确认。
+
 ## 当前范围
 
 - 只面向 `src.ptcli.mainland.MAINLAND_PT_TRACKERS` 中的中文/PT 站点。
@@ -12,6 +45,23 @@
 - U2/CHD -> MTEAM 是最早的参考流；同类 NexusPHP 源站逐步扩展到完整闭环。
 - 所有真实下载、上传、qBittorrent 注入动作都要求显式规则确认；上传还要求 `--confirm-upload`。
 - 站点规则不由 AI 猜测。CLI 会暴露规则 obligation、每个 obligation 的人工审查范围、确认状态和当前程序化检查范围。
+
+## 本地 Markdown 站点规则
+
+`data/site-rules/TRACKER.md` 使用 TOML front matter 保存可执行字段，Markdown 的 `# 原始规则` 保存人工审查证据。真实规则文档与生成的 JSON 快照默认被 Git 忽略，目录内只提交[维护说明](data/site-rules/README.md)。Docker Compose 通过 `PTCLI_SITE_RULES_HOST_PATH` 持久化整个目录，并让 API、CLI 和 daily scheduler 使用同一份规则快照。
+
+当前 U2、CHD、MTEAM 文档是根据用户提供内容建立的本地草稿，故意保持 `source_complete=false`：U2/CHD 仍需核对登录后的常见问题、允许客户端、种子级禁转/HR 标记；MTEAM 仍需粘贴并人工核对官方 Wiki 的完整目标上传规则。它们可以校验和审阅，但不能编译启用。
+
+```bash
+python3 ptcli.py site-rule-docs --json
+python3 ptcli.py site-rule-validate --file data/site-rules/U2.md --json
+python3 ptcli.py site-rule-review --file data/site-rules/U2.md \
+  --approve --reviewer YOUR_NAME --reviewed-at 2026-08-08T12:00:00+08:00 --json
+python3 ptcli.py site-rule-compile --rules-dir data/site-rules \
+  --output data/site-rules/site-policies.generated.json --write --json
+```
+
+审查命令默认只返回 preview；持久化还要显式 `--write`。HTTP 对应 `/v1/site-rule-documents`、`/validate`、`/review`、`/compile`，其中 review 和 compile 写入还要求 `confirm_write=true`。这些操作不访问 Tracker 或 qBittorrent，也不能代替人工确认规则。
 
 ## 常用命令
 
@@ -44,7 +94,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
-- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、AI 预检 `/v1/agent/run-preview`、创建任务前同步 `/v1/retorrent/source-url/preflight`、`/v1/deployment/check`、`/v1/readiness/bundle`、站点能力/规则 profile `/v1/sites`、qBittorrent 检查/匹配/导出/注入/等待 `/v1/qbit/inspect`/`/v1/qbit/match`/`/v1/qbit/export`/`/v1/qbit/inject`/`/v1/qbit/wait`、外部元数据/PTGen 准备 `/v1/metadata/prepare`、本地素材准备 `/v1/materials/prepare`、目标站发种包、上传预检和上传闭环 `/v1/target/package/prepare`/`/v1/target/upload/preflight`/`/v1/target/upload`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/from-url/check-and-submit`、`/v1/jobs/retorrent/submit`、`/v1/jobs/metadata/prepare`、`/v1/jobs/materials/prepare`、`/v1/jobs/target/package/prepare`、`/v1/jobs/target/upload`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、AI 预检 `/v1/agent/run-preview`、创建任务前同步 `/v1/retorrent/source-url/preflight`、`/v1/deployment/check`、`/v1/readiness/bundle`、站点能力/规则 profile `/v1/sites`、本地规则文档 `/v1/site-rule-documents` 及其 validate/review/compile 接口、qBittorrent 检查/匹配/导出/注入/等待 `/v1/qbit/inspect`/`/v1/qbit/match`/`/v1/qbit/export`/`/v1/qbit/inject`/`/v1/qbit/wait`、外部元数据/PTGen 准备 `/v1/metadata/prepare`、本地素材准备 `/v1/materials/prepare`、目标站发种包、上传预检和上传闭环 `/v1/target/package/prepare`/`/v1/target/upload/preflight`/`/v1/target/upload`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/from-url/check-and-submit`、`/v1/jobs/retorrent/submit`、`/v1/jobs/metadata/prepare`、`/v1/jobs/materials/prepare`、`/v1/jobs/target/package/prepare`、`/v1/jobs/target/upload`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - `/v1/goal/progress` 是最终目标进度的只读总控短路径，会把 Docker Compose 部署、AI 契约、任务 API、手动源链接转种、metadata/materials、每日候选、站点规则、qBittorrent 执行、站点 adapter、盒子 live 验证和 legacy 清理压成 `completion_estimate`、`capabilities`、`critical_path_remaining`、`evidence`、`next_step` 和 blockers；它会区分 `complete`、`partial`、`ready_to_submit`、`submitted_running`、`submitted_needs_resume`、`submitted_ready_to_report`、`unverified`、`missing`、`not_started`，避免把已有代码骨架或已提交但未闭环的 live job 误报成完成。传入 `job_id`/`live_job_id` 或 `summary_file`/`live_summary_file` 时，它会只读复核对应 job/summary 的 `live_validation_completion_audit.report_allowed=true`、`failed_checks=[]`、`missing_evidence=[]` 和 blockers，满足后才把 `seedbox_live_validation` 及其依赖能力提升为完成；若传入 `daily_candidate_summary_file` / `daily_schedule_summary_file` 或一个 `kind=ptcli.daily_schedule.summary` 的 `summary_file`，`evidence.daily_candidates` 会额外吸收 `daily_scheduler_final_report`、`daily_candidate_target_fulfillment_report`、`delivery_result` 和 `delivery_audit`，优先用上次 scheduler 的推荐调用判断补短缺、轮询、重试交付或等待审批。`evidence.daily_candidates` 还会暴露每日候选 schedule 是否配置、`schedule_handoff`、`daily_candidate_schedule_final_report`、可复制 env 示例或 `/v1/jobs/candidates/daily/schedule` 创建请求，已有候选 job 结果时还会透出 `daily_candidate_final_report` 和 `daily_candidate_delivery_final_report`，其中 `goal_handoff` 会把配置 schedule、创建候选 job、发布通知、用户审批后提交候选和补足短缺压成固定步骤；`evidence.qbittorrent` 会聚合部署里的 qBittorrent 配置、live job 的 `qbit_enforcement_summary`、`live_user_report.qbit`、可执行 qbit doctor step 和下一步调用建议，方便 AI 判断是否已有注入、等待完成、限速和做种证据；若站点策略缺人工规则审查或限速/做种配置，`evidence.site_policies` 会直接暴露 `policy_repair_gate`、`rule_review_request`、`config_update_plan`、`policy_execution_handoff`、`policy_execution_plan`、`policy_runtime_contract` 和可调用的 `next_step`，优先指向 `/v1/site-policies/rule-review` 或配置补丁，也能在规则就绪后直接显示请求默认限速、做种证据要求和 live completion contract；`evidence.tracker_adapters` 会内联 `/v1/sites` 的 `adapter_extension_final_report`、`tracker_rollout_handoff`、`adapter_coverage_summary`、`extension_handoff` 和 `extension_validation_matrix`，让 AI 在总控进度里直接判断站点扩展、参考流和 adapter-ready verdict；若传入的 doctor summary 已通过 `/v1/summary/check.live_submission_final_report.ready=true`，则会把 `seedbox_live_validation` 标为 `ready_to_submit`，在 `evidence.live_validation.live_submission_final_report` 暴露首读报告，并让 `next_step` 直接指向 `/v1/jobs/retorrent/from-url/check-and-submit`；若传入的是已提交 live job，则会在 `evidence.live_validation.live_recovery_final_report` 暴露 poll/resume/summary/duplicate-stop 的总控结论，并优先用它的 `recommended_call` 作为 `next_step`，让 AI 先 dry-run、轮询或读取 summary，再判断是否能报告完成；`job_lifecycle_final_report` 仍作为兼容下钻证据保留；当还没有 live 证据时，`evidence.live_validation_preflight` 会内联只读 readiness bundle 的 `live_execution_package`、`live_validation_repair_plan`、`seedbox_live_validation_report`、`live_validation_sequence`、`first_live_validation_handoff`、`seedbox_live_validation_start_report`、`seedbox_live_post_submit_report` 和 `agent_smoke_live_validation_handoff`，让 AI/盒子脚本无需再跳一次就能看到该运行 doctor、修站规/部署、提交后 poll/resume/summary 还是继续补配置。
 - `deployment_final_report` 是 `/v1/deployment/check` 的部署最终报告出口，会把 Docker Compose `ptcli-api`、挂载、`.env` 模板、API token、qBittorrent 配置、每日候选调度和下一步调用压成 `ready`、`report_allowed`、`verdict`、`recommended_call`、`complete_when`、`stop_when` 和 blockers；OpenClaw/Hermes 在创建 live job 前应先读它，只有 `ready=true` 且 `blockers=[]` 时才继续调用 `readiness_bundle`。默认 `127.0.0.1` 本地绑定可不设置 token 但会提示建议配置；若 compose 暴露 `8080:8080` 或 `0.0.0.0:8080:8080`，`deployment_check` 会要求 `PTCLI_API_TOKEN`，否则 `api_exposure_gate=blocked`。
 - 任务响应中的 `job_handoff.recommended_call` 会把下一步 `tool`、`endpoint`、`method`、`request`、`dry_run_request`、`execute_request`、`safe_to_call_now`、`requires_user_review`、`gates` 和 safety/stop 条件聚合成单一对象，便于 OpenClaw/Hermes 按 queued/running/blocked/complete 状态安全轮询、预览恢复、执行恢复或读取 summary；其中 `gates` 会明确 dry-run 预览、execute 请求、`accept_rules`、`confirm_upload` 和缺失 flags，live 执行仍必须满足站点规则和上传确认。
