@@ -123,6 +123,9 @@ Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最�
 ```bash
 make go-check
 docker compose -f docker-compose.go.yml config --quiet
+make verify-go-v2-local
 ```
 
-上述测试使用本地 fixture 或 `httptest`，不会访问真实站点、下载器或图床。真实盒子闭环必须另行完成受控 live 验证，并保留源/目标 torrent hash、内容路径、规则指纹、查重、上传、注入、做种和 summary 证据。
+`verify-go-v2-local` 会创建名称和卷均隔离的临时 Compose 栈，使用随机数据库密码和临时管理员，验证 linux/amd64、非 root、主密钥权限、健康检查、安全响应头、鉴权拒绝、OpenAPI/tool/AgentSkill、中文 Web、原生 CLI、迁移完整性、任务幂等与服务重启后的任务持久性，然后精确删除临时栈和卷。机器可读结果写入 `tmp/go-v2-local-ready.json`，报告不会包含临时凭据。
+
+上述测试使用本地 fixture、`httptest` 或隔离 Compose，不会访问真实站点、下载器或图床。报告中的 `live_validation.status=blocked_external` 是有意保留的真实边界。真实盒子闭环必须另行完成受控 live 验证，并保留源/目标 torrent hash、内容路径、规则指纹、查重、上传、注入、做种和 summary 证据。

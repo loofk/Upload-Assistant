@@ -1,4 +1,4 @@
-.PHONY: help lint lint-ptcli test test-ptcli test-legacy check check-ptcli verify-ptcli-local verify-ptcli-seedbox-handoff smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live go-fmt go-lint go-test go-build go-check go-compose-config web-install web-check
+.PHONY: help lint lint-ptcli test test-ptcli test-legacy check check-ptcli verify-ptcli-local verify-ptcli-seedbox-handoff smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live go-fmt go-lint go-test go-build go-check go-compose-config verify-go-v2-local web-install web-check
 
 PYTHON ?= python3
 GO ?= go
@@ -71,6 +71,9 @@ go-build: ## 构建 Go 服务
 
 go-compose-config: ## 校验 Go/PostgreSQL Compose 配置
 	docker compose -f docker-compose.go.yml config --quiet
+
+verify-go-v2-local: go-check go-compose-config ## 用隔离 Compose 栈生成 Go v2 LOCAL_READY 验收报告
+	./scripts/verify_go_v2_local_ready.sh
 
 web-install: ## 安装内嵌 React/TypeScript Web 依赖
 	cd web && $(NPM) ci --no-audit --no-fund
