@@ -1,0 +1,4 @@
+interface:
+  display_name: "Upload Assistant"
+  short_description: "Safely operate auditable PT retorrent jobs"
+  default_prompt: "Use $upload-assistant to inspect or operate the local Upload Assistant service without bypassing rule, duplicate, confirmation, or seeding gates."

@@ -46,6 +46,7 @@ func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	webui.Register(mux)
 	registerDocumentationRoutes(mux)
+	registerAgentDiscoveryRoutes(mux)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{
 			OK: true, Status: "alive", Service: "upload-assistant", Version: deps.Build.Version,
@@ -124,7 +125,8 @@ func authenticate(authenticator TokenAuthenticator, next http.Handler) http.Hand
 
 func isPublicPath(path string) bool {
 	return path == "/" || path == "/app" || strings.HasPrefix(path, "/app/") || strings.HasPrefix(path, "/assets/") || path == "/favicon.svg" ||
-		path == "/health/live" || path == "/health/ready" || path == "/api/v2/version" || path == "/openapi.json"
+		path == "/health/live" || path == "/health/ready" || path == "/api/v2/version" || path == "/openapi.json" ||
+		path == agentDiscoveryPath || path == agentSkillPath
 }
 
 func securityHeaders(next http.Handler) http.Handler {

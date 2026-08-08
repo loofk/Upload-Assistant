@@ -73,6 +73,7 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		t.Fatalf("openapi = %s", document.OpenAPI)
 	}
 	requiredPaths := []string{
+		"/.well-known/upload-assistant.json", "/.well-known/upload-assistant/SKILL.md",
 		"/openapi.json", "/api/v2/tools", "/api/v2/jobs",
 		"/api/v2/jobs/{job_id}", "/api/v2/jobs/{job_id}/summary",
 		"/api/v2/jobs/{job_id}/artifacts/{artifact_id}/content",
@@ -127,6 +128,47 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.oai.openapi+json;version=3.1" {
 		t.Fatalf("OpenAPI HTTP response = %d/%s", response.Code, response.Header().Get("Content-Type"))
+	}
+}
+
+func TestAgentDiscoveryAndSkillArePublic(t *testing.T) {
+	handler := New(Dependencies{
+		Database: fakeDatabase{}, DataDir: t.TempDir(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Build: buildinfo.Info{Version: "test"},
+		Auth: fakeAuthenticator{principal: security.Principal{UserID: "user", Role: "admin", TokenScopes: []string{"*"}}},
+	})
+
+	discoveryResponse := httptest.NewRecorder()
+	handler.ServeHTTP(discoveryResponse, httptest.NewRequest(http.MethodGet, agentDiscoveryPath, nil))
+	if discoveryResponse.Code != http.StatusOK || discoveryResponse.Header().Get("Content-Type") != "application/json; charset=utf-8" {
+		t.Fatalf("discovery response = %d/%s", discoveryResponse.Code, discoveryResponse.Header().Get("Content-Type"))
+	}
+	var discovery struct {
+		Kind       string `json:"kind"`
+		SkillURL   string `json:"skill_url"`
+		OpenAPIURL string `json:"openapi_url"`
+		ToolsURL   string `json:"tools_url"`
+	}
+	if err := json.Unmarshal(discoveryResponse.Body.Bytes(), &discovery); err != nil {
+		t.Fatal(err)
+	}
+	if discovery.Kind != "upload-assistant.agent-discovery.v1" || discovery.SkillURL != agentSkillPath || discovery.OpenAPIURL != "/openapi.json" || discovery.ToolsURL != "/api/v2/tools" {
+		t.Fatalf("unexpected discovery: %#v", discovery)
+	}
+
+	skillResponse := httptest.NewRecorder()
+	handler.ServeHTTP(skillResponse, httptest.NewRequest(http.MethodGet, agentSkillPath, nil))
+	if skillResponse.Code != http.StatusOK || skillResponse.Header().Get("Content-Type") != "text/markdown; charset=utf-8" {
+		t.Fatalf("skill response = %d/%s", skillResponse.Code, skillResponse.Header().Get("Content-Type"))
+	}
+	if body := skillResponse.Body.String(); !strings.HasPrefix(body, "---\nname: upload-assistant\n") || !strings.Contains(body, "Never bypass rule acceptance") {
+		t.Fatalf("unexpected skill body: %.120q", body)
+	}
+
+	toolsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(toolsResponse, httptest.NewRequest(http.MethodGet, "/api/v2/tools", nil))
+	if toolsResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated tools status = %d, want %d", toolsResponse.Code, http.StatusUnauthorized)
 	}
 }
 

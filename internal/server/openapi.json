@@ -8,6 +8,20 @@
   "servers": [{"url": "http://127.0.0.1:8080"}],
   "security": [{"bearerAuth": []}],
   "paths": {
+    "/.well-known/upload-assistant.json": {
+      "get": {
+        "operationId": "getAgentDiscovery",
+        "security": [],
+        "responses": {"200": {"description": "OpenClaw and Hermes discovery metadata", "content": {"application/json": {"schema": {"type": "object"}}}}}
+      }
+    },
+    "/.well-known/upload-assistant/SKILL.md": {
+      "get": {
+        "operationId": "getAgentSkill",
+        "security": [],
+        "responses": {"200": {"description": "AgentSkills-compatible Upload Assistant skill", "content": {"text/markdown": {"schema": {"type": "string"}}}}}
+      }
+    },
     "/openapi.json": {
       "get": {
         "operationId": "getOpenAPIDocument",
