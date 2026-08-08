@@ -384,6 +384,13 @@ func (plan *Plan) buildDownloaders(defaults, clients map[string]any) {
 			continue
 		}
 		clientType := strings.ToLower(usefulString(section["torrent_client"]))
+		if clientType == "deluge" {
+			plan.Warnings = append(plan.Warnings, Issue{
+				Code: "legacy_deluge_web_endpoint_required", Resource: name,
+				Message: "旧配置使用 Deluge 原生 daemon RPC 地址/账号，不能安全转换为 Deluge Web JSON-RPC；请在 Web 配置中心手工填写 Web endpoint 与 Web 密码。",
+			})
+			continue
+		}
 		if clientType == "transmission" {
 			plan.buildTransmissionDownloader(defaultName, name, section)
 			continue

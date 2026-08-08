@@ -81,6 +81,31 @@ func TestTargetInjectStepRejectsUnboundDownloaderEvidence(t *testing.T) {
 	}
 }
 
+func TestTargetInjectStepAcceptsCapabilityLimitedAdapterWithExplicitNoLabelMode(t *testing.T) {
+	execution, store, torrent := targetInjectExecution(t, map[string]any{"name": "box", "apply_labels": false})
+	inspection, err := torrentmeta.Inspect(torrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := targetAddEvidence(torrent, inspection, "box")
+	evidence.Adapter = "deluge"
+	evidence.Observed.Adapter = "deluge"
+	provider := &fakeDownloaderProvider{addResult: evidence}
+	output, err := (targetInjectExecutor{provider: provider, artifacts: store, recorder: &sequenceArtifactRecorder{}}).Execute(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.addOptions.Category != "" || len(provider.addOptions.Tags) != 0 {
+		t.Fatalf("Deluge target add options = %#v", provider.addOptions)
+	}
+	var result struct {
+		Options targetInjectOptionsReceipt `json:"options"`
+	}
+	if json.Unmarshal(output, &result) != nil || result.Options.ApplyLabels {
+		t.Fatalf("Deluge target injection output = %s", output)
+	}
+}
+
 func targetInjectExecution(t *testing.T, targetControl map[string]any) (Execution, WorkflowArtifactStore, []byte) {
 	t.Helper()
 	downloadExecution, store, _ := targetTorrentDownloadExecution(t)

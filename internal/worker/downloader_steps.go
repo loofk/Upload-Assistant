@@ -63,6 +63,7 @@ type downloaderControl struct {
 	SavePath      string   `json:"save_path"`
 	Category      string   `json:"category"`
 	Tags          []string `json:"tags"`
+	ApplyLabels   *bool    `json:"apply_labels,omitempty"`
 	SkipChecking  *bool    `json:"skip_checking,omitempty"`
 	Paused        *bool    `json:"paused,omitempty"`
 	DownloadLimit int64    `json:"download_limit_bytes_per_second,omitempty"`
@@ -123,6 +124,7 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 	}
 	addOptions := qbittorrent.AddOptions{
 		SavePath: control.SavePath, Category: control.Category, Tags: control.Tags,
+		ApplyLabels:  control.ApplyLabels,
 		SkipChecking: boolValue(control.SkipChecking), Paused: boolValue(control.Paused),
 		DownloadLimit: appliedDownload, UploadLimit: appliedUpload,
 	}
@@ -137,7 +139,7 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 		torrentHash = evidence.Result.Hashes.V2SHA256
 	}
 	return mustJSON(map[string]any{
-		"downloader_name": control.Name, "torrent_hash": torrentHash,
+		"downloader_name": control.Name, "downloader_adapter": evidence.Adapter, "torrent_hash": torrentHash,
 		"add_evidence": evidence,
 		"limits": map[string]any{
 			"requested_download": control.DownloadLimit, "requested_upload": control.UploadLimit,
@@ -147,6 +149,7 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 		},
 		"options": map[string]any{
 			"save_path": control.SavePath, "category": control.Category, "tags": control.Tags,
+			"apply_labels":  labelsEnabled(control),
 			"skip_checking": boolValue(control.SkipChecking), "paused": boolValue(control.Paused),
 		},
 	}), nil
@@ -216,7 +219,11 @@ func parseDownloaderSnapshot(raw json.RawMessage) (downloaderSnapshot, downloade
 	if control.SavePath == "" {
 		control.SavePath = "/downloads"
 	}
-	if control.Category == "" {
+	if control.ApplyLabels == nil {
+		value := true
+		control.ApplyLabels = &value
+	}
+	if labelsEnabled(control) && control.Category == "" {
 		control.Category = "retorrent"
 	}
 	var sourceTorrent sourceTorrentStepOutput
@@ -236,6 +243,13 @@ func mergeDownloaderControl(target *downloaderControl, override downloaderContro
 	}
 	if override.SavePath != "" {
 		target.SavePath = override.SavePath
+	}
+	if override.ApplyLabels != nil {
+		target.ApplyLabels = override.ApplyLabels
+		if !*override.ApplyLabels {
+			target.Category = ""
+			target.Tags = nil
+		}
 	}
 	if override.Category != "" {
 		target.Category = override.Category
@@ -269,6 +283,9 @@ func validateDownloaderControl(control downloaderControl) error {
 	if len(control.Category) > 100 || strings.ContainsAny(control.Category, "\r\n") {
 		return fmt.Errorf("downloader category is invalid")
 	}
+	if !labelsEnabled(control) && (strings.TrimSpace(control.Category) != "" || len(nonEmptyOptionStrings(control.Tags)) > 0) {
+		return fmt.Errorf("downloader category and tags must be empty when apply_labels=false")
+	}
 	if len(control.Tags) > 32 {
 		return fmt.Errorf("downloader tags must not exceed 32 entries")
 	}
@@ -281,6 +298,20 @@ func validateDownloaderControl(control downloaderControl) error {
 		return fmt.Errorf("downloader limits must not be negative")
 	}
 	return nil
+}
+
+func labelsEnabled(control downloaderControl) bool {
+	return control.ApplyLabels == nil || *control.ApplyLabels
+}
+
+func nonEmptyOptionStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func readArtifact(reader ArtifactReader, evidence sourceTorrentStepOutput) ([]byte, error) {

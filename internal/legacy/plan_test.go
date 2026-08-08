@@ -207,6 +207,33 @@ func TestInspectRejectsEncodedRTorrentPathTraversal(t *testing.T) {
 	}
 }
 
+func TestInspectDefersLegacyNativeDelugeRPCWithoutExposingCredentials(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "DEFAULT": {"default_torrent_client": "deluge"},
+  "TORRENT_CLIENTS": {"deluge": {
+    "torrent_client": "deluge", "deluge_url": "seedbox.example", "deluge_port": 58846,
+    "deluge_user": "operator", "deluge_pass": "private-native-password"
+  }}
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.downloaders) != 0 || !slices.ContainsFunc(plan.Warnings, func(issue Issue) bool {
+		return issue.Code == "legacy_deluge_web_endpoint_required" && issue.Resource == "deluge"
+	}) {
+		t.Fatalf("Deluge migration = downloaders %#v warnings %#v", plan.downloaders, plan.Warnings)
+	}
+	serialized, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(serialized), "private-native-password") || strings.Contains(string(serialized), "operator") {
+		t.Fatalf("redacted Deluge preview exposed native RPC credentials: %s", serialized)
+	}
+}
+
 func TestInspectRejectsSymlinkAndExecutableConfig(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(t.TempDir(), "config.py")

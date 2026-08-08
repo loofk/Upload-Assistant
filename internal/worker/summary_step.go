@@ -78,6 +78,7 @@ type summaryBindings struct {
 	}
 	SourceAdd struct {
 		DownloaderName string `json:"downloader_name"`
+		Adapter        string `json:"downloader_adapter"`
 		TorrentHash    string `json:"torrent_hash"`
 		Limits         any    `json:"limits"`
 		Options        any    `json:"options"`
@@ -201,6 +202,7 @@ type summaryBindings struct {
 		Target         string                     `json:"target"`
 		TorrentID      string                     `json:"uploaded_torrent_id"`
 		DownloaderName string                     `json:"downloader_name"`
+		Adapter        string                     `json:"downloader_adapter"`
 		Configuration  string                     `json:"downloader_configuration_sha256"`
 		TorrentHash    string                     `json:"torrent_hash"`
 		Options        targetInjectOptionsReceipt `json:"options"`
@@ -262,7 +264,7 @@ func (executor summaryExecutor) Execute(ctx context.Context, execution Execution
 			},
 			"rules": bindings.SourceRule,
 			"downloader": map[string]any{
-				"name": bindings.SourceAdd.DownloaderName, "torrent_hash": bindings.SourceAdd.TorrentHash,
+				"name": bindings.SourceAdd.DownloaderName, "adapter": bindings.SourceAdd.Adapter, "torrent_hash": bindings.SourceAdd.TorrentHash,
 				"limits": bindings.SourceAdd.Limits, "options": bindings.SourceAdd.Options,
 			},
 		},
@@ -316,9 +318,9 @@ func (executor summaryExecutor) Execute(ctx context.Context, execution Execution
 			},
 		},
 		"seeding": map[string]any{
-			"downloader_name": bindings.Injection.DownloaderName, "downloader_configuration_sha256": bindings.Injection.Configuration,
+			"downloader_name": bindings.Injection.DownloaderName, "downloader_adapter": bindings.Injection.Adapter, "downloader_configuration_sha256": bindings.Injection.Configuration,
 			"torrent_hash": bindings.Injection.TorrentHash, "expected_remote_content_path": bindings.Injection.ExpectedPath,
-			"category": bindings.Injection.Options.Category, "tags": bindings.Injection.Options.Tags,
+			"apply_labels": bindings.Injection.Options.ApplyLabels, "category": bindings.Injection.Options.Category, "tags": bindings.Injection.Options.Tags,
 			"download_limit_bytes_per_second": bindings.Injection.Options.DownloadLimit,
 			"upload_limit_bytes_per_second":   bindings.Injection.Options.UploadLimit,
 			"requirements":                    bindings.Seed.Requirements, "checks": bindings.Seed.Checks,
@@ -466,7 +468,8 @@ func validateSummaryBindings(bindings summaryBindings, artifacts map[string]work
 	if !validSummaryRule(bindings.SourceRule, bindings.Source.Tracker, "source") || !validSummaryRule(bindings.TargetRule, bindings.Target, "target") {
 		return fmt.Errorf("accepted source or target rule evidence is incomplete")
 	}
-	if !bindings.Content.Resolved || bindings.Content.FileCount <= 0 || bindings.Content.TotalSize <= 0 ||
+	if bindings.SourceAdd.DownloaderName == "" || bindings.SourceAdd.Adapter == "" || bindings.SourceAdd.DownloaderName != bindings.Content.DownloaderName ||
+		!bindings.Content.Resolved || bindings.Content.FileCount <= 0 || bindings.Content.TotalSize <= 0 ||
 		!bindings.Package.Prepared || bindings.Package.Target != bindings.Target || !bindings.Duplicate.Checked ||
 		bindings.Duplicate.Status != "clean" || bindings.Duplicate.Duplicate || bindings.Duplicate.Target != bindings.Target {
 		return fmt.Errorf("content, target package, or duplicate gate evidence is incomplete")
@@ -481,7 +484,7 @@ func validateSummaryBindings(bindings summaryBindings, artifacts map[string]work
 	if !bindings.Downloaded.Downloaded || !bindings.Downloaded.Verified || bindings.Downloaded.Status != "ready_for_injection" ||
 		bindings.Downloaded.Target != bindings.Target || bindings.Downloaded.TorrentID != bindings.Upload.TorrentID ||
 		bindings.Downloaded.Hashes != bindings.TargetTorrent.Hashes || bindings.Downloaded.Fingerprint != bindings.TargetTorrent.Fingerprint ||
-		!bindings.Injection.Injected || bindings.Injection.Status != "injected" || bindings.Injection.Target != bindings.Target ||
+		!bindings.Injection.Injected || bindings.Injection.Status != "injected" || bindings.Injection.Target != bindings.Target || bindings.Injection.Adapter == "" ||
 		bindings.Injection.TorrentID != bindings.Upload.TorrentID || !hashMatches(bindings.Injection.TorrentHash, bindings.Downloaded.Hashes) ||
 		!bindings.Seed.Verified || bindings.Seed.Status != "seeding_requirements_satisfied" || bindings.Seed.Target != bindings.Target ||
 		bindings.Seed.TorrentID != bindings.Upload.TorrentID || bindings.Seed.TorrentHash != bindings.Injection.TorrentHash {

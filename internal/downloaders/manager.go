@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/loofk/upload-assistant/v2/internal/downloaders/deluge"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/rtorrent"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
@@ -156,6 +157,9 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 		return AddEvidence{}, err
 	}
 	applyConfiguredDefaults(runtime.EndpointConfig.Options, &options)
+	if err := validateAddCapabilities(runtime.AdapterCapability, options); err != nil {
+		return AddEvidence{}, err
+	}
 	result, err := client.Add(ctx, metainfo, options)
 	if err != nil {
 		if partialHash, partial := PartialAddHash(err); partial {
@@ -164,6 +168,7 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 			_ = manager.store.AuditDownloaderAction(auditCtx, name, "torrent.add_partial", map[string]any{
 				"observed_hash": partialHash, "v1_infohash": result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
 				"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
+				"apply_labels":            addLabelsEnabled(options),
 				"reconciliation_required": true, "error": safeError(err),
 			}, actor)
 		}
@@ -183,7 +188,7 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 		"configuration_sha256": evidence.ConfigurationSHA256,
 		"v1_infohash":          result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
 		"observed_hash": observedHash(result.Observed), "save_path": options.SavePath,
-		"category": options.Category, "tags": options.Tags,
+		"category": options.Category, "tags": options.Tags, "apply_labels": addLabelsEnabled(options),
 		"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
 	}, actor); err != nil {
 		return AddEvidence{}, err
@@ -191,7 +196,43 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	return evidence, nil
 }
 
+func validateAddCapabilities(capability integrations.DownloaderAdapterCapability, options qbittorrent.AddOptions) error {
+	if !addLabelsEnabled(options) && (strings.TrimSpace(options.Category) != "" || len(nonEmptyOptionStrings(options.Tags)) > 0) {
+		return fmt.Errorf("%w: category and tags must be empty when apply_labels=false", integrations.ErrValidation)
+	}
+	if addLabelsEnabled(options) && (!capability.Operations.Category || !capability.Operations.Tags) {
+		return fmt.Errorf("%w: downloader adapter %q requires explicit apply_labels=false because its core runtime cannot apply category and tags", integrations.ErrValidation, capability.Adapter)
+	}
+	if strings.TrimSpace(options.Category) != "" && !capability.Operations.Category {
+		return fmt.Errorf("%w: downloader adapter %q does not support category", integrations.ErrValidation, capability.Adapter)
+	}
+	if len(nonEmptyOptionStrings(options.Tags)) > 0 && !capability.Operations.Tags {
+		return fmt.Errorf("%w: downloader adapter %q does not support tags", integrations.ErrValidation, capability.Adapter)
+	}
+	if options.SkipChecking && !capability.Operations.SkipChecking {
+		return fmt.Errorf("%w: downloader adapter %q does not support skip_checking", integrations.ErrValidation, capability.Adapter)
+	}
+	return nil
+}
+
+func addLabelsEnabled(options qbittorrent.AddOptions) bool {
+	return options.ApplyLabels == nil || *options.ApplyLabels
+}
+
+func nonEmptyOptionStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
 func applyConfiguredDefaults(configured map[string]any, options *qbittorrent.AddOptions) {
+	if !addLabelsEnabled(*options) {
+		return
+	}
 	if options.Category == "" {
 		if category, ok := configured["category"].(string); ok {
 			options.Category = strings.TrimSpace(category)
@@ -267,6 +308,11 @@ func (manager *Manager) client(ctx context.Context, name string) (integrations.R
 	if err != nil {
 		return integrations.RuntimeDownloader{}, nil, err
 	}
+	capability, supported := integrations.DownloaderAdapterCapabilityFor(runtime.Adapter)
+	if !supported || !capability.RuntimeSupported {
+		return integrations.RuntimeDownloader{}, nil, fmt.Errorf("%w: %s", ErrAdapterUnavailable, runtime.Adapter)
+	}
+	runtime.AdapterCapability = capability
 	timeout := time.Duration(runtime.EndpointConfig.TimeoutSeconds) * time.Second
 	var client torrentClient
 	switch runtime.Adapter {
@@ -280,6 +326,10 @@ func (manager *Manager) client(ctx context.Context, name string) (integrations.R
 		})
 	case "rtorrent":
 		client, err = rtorrent.New(rtorrent.Config{
+			Endpoint: runtime.EndpointConfig.Endpoint, Timeout: timeout, Credentials: runtime.Credentials,
+		})
+	case "deluge":
+		client, err = deluge.New(deluge.Config{
 			Endpoint: runtime.EndpointConfig.Endpoint, Timeout: timeout, Credentials: runtime.Credentials,
 		})
 	default:

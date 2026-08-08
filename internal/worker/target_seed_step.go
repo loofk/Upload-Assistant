@@ -196,19 +196,19 @@ func (executor targetSeedVerifyExecutor) inputs(snapshotBody json.RawMessage) (t
 func equalTargetInjectOptions(left, right targetInjectOptionsReceipt) bool {
 	return left.DownloaderName == right.DownloaderName && left.SavePath == right.SavePath && left.Category == right.Category &&
 		slices.Equal(left.Tags, right.Tags) && left.DownloadLimit == right.DownloadLimit && left.UploadLimit == right.UploadLimit &&
-		left.SkipChecking == right.SkipChecking && left.Paused == right.Paused
+		left.ApplyLabels == right.ApplyLabels && left.SkipChecking == right.SkipChecking && left.Paused == right.Paused
 }
 
 func evaluateTargetSeed(bindings targetSeedBindings, torrent downloaders.TorrentEvidence, files downloaders.TorrentFilesEvidence) targetSeedChecks {
 	state := strings.ToLower(strings.TrimSpace(torrent.Torrent.State))
-	downloaderMatches := torrent.DownloaderName == bindings.DownloaderName && torrent.Adapter == "qbittorrent" &&
-		len(torrent.ConfigurationSHA256) == 64
-	seedingState := !strings.Contains(state, "paused") && !strings.Contains(state, "stopped") &&
-		!strings.Contains(state, "error") && !strings.Contains(state, "missing")
+	expectedAdapter := bindings.InjectDocument.Add.Adapter
+	downloaderMatches := expectedAdapter != "" && torrent.DownloaderName == bindings.DownloaderName && torrent.Adapter == expectedAdapter &&
+		torrent.ConfigurationSHA256 == bindings.ConfigurationSHA
+	seedingState := isActiveSeedingState(expectedAdapter, state)
 	complete := torrent.Torrent.Progress >= 0.999999 || torrent.Torrent.TotalSize > 0 && torrent.Torrent.AmountLeft == 0
-	filesMatch := files.DownloaderName == bindings.DownloaderName && files.Adapter == "qbittorrent" &&
-		files.Torrent.DownloaderName == bindings.DownloaderName && files.Torrent.Adapter == "qbittorrent" &&
-		len(files.Torrent.ConfigurationSHA256) == 64 && files.Torrent.RemoteContentPath == bindings.ExpectedPath &&
+	filesMatch := files.DownloaderName == bindings.DownloaderName && files.Adapter == expectedAdapter &&
+		files.Torrent.DownloaderName == bindings.DownloaderName && files.Torrent.Adapter == expectedAdapter &&
+		files.Torrent.ConfigurationSHA256 == bindings.ConfigurationSHA && files.Torrent.RemoteContentPath == bindings.ExpectedPath &&
 		hashMatches(files.Torrent.Torrent.Hash, bindings.InjectDocument.Add.Result.Hashes) &&
 		files.FileCount == bindings.ContentFileCount && files.TotalSize == bindings.ContentSizeBytes && len(files.Files) == bindings.ContentFileCount
 	if filesMatch {
@@ -224,13 +224,15 @@ func evaluateTargetSeed(bindings targetSeedBindings, torrent downloaders.Torrent
 	if seedingSeconds < 0 {
 		seedingSeconds = 0
 	}
+	labelsRequired := bindings.Options.ApplyLabels || strings.TrimSpace(bindings.Options.Category) != "" || len(nonEmptyOptionStrings(bindings.Options.Tags)) > 0
 	return targetSeedChecks{
 		DownloaderMatches: downloaderMatches,
 		HashMatches:       hashMatches(torrent.Torrent.Hash, bindings.InjectDocument.Add.Result.Hashes), Complete: complete,
 		SeedingState: seedingState, ContentPathMatches: torrent.RemoteContentPath == bindings.ExpectedPath &&
 			torrent.RemoteSavePath == bindings.Options.SavePath && torrent.Torrent.TotalSize == bindings.ContentSizeBytes,
-		FileManifestMatches: filesMatch, CategoryMatches: torrent.Torrent.Category == bindings.Options.Category,
-		TagsMatch:              tagsContainAll(torrent.Torrent.Tags, bindings.Options.Tags),
+		FileManifestMatches:    filesMatch,
+		CategoryMatches:        !labelsRequired || torrent.Torrent.Category == bindings.Options.Category,
+		TagsMatch:              !labelsRequired || tagsContainAll(torrent.Torrent.Tags, bindings.Options.Tags),
 		DownloadLimitSafe:      limitWithinCap(torrent.Torrent.DownloadLimit, bindings.Options.DownloadLimit),
 		UploadLimitSafe:        limitWithinCap(torrent.Torrent.UploadLimit, bindings.Options.UploadLimit),
 		ObservedSeedingSeconds: seedingSeconds, MinimumSeedingSeconds: minimumSeconds,
@@ -238,6 +240,14 @@ func evaluateTargetSeed(bindings targetSeedBindings, torrent downloaders.Torrent
 		TimeRequirementMet:  seedingSeconds >= minimumSeconds,
 		RatioRequirementMet: torrent.Torrent.Ratio >= bindings.Rule.Seeding.MinimumRatio,
 	}
+}
+
+func isActiveSeedingState(adapter, state string) bool {
+	state = strings.ToLower(strings.TrimSpace(state))
+	if adapter == "qbittorrent" {
+		return state == "uploading" || state == "stalledup" || state == "forcedup"
+	}
+	return state == "seeding"
 }
 
 func limitWithinCap(observed, cap int64) bool {

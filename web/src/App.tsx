@@ -429,7 +429,7 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
 }) {
   const [form, setForm] = useState<CreateJobInput>({
     sourceURL: "", target: "MTEAM", executionMode: "step", stopAfterStep: "",
-    downloaderName: "default", savePath: "/downloads", screenshotProfile: "default", imageHost: "default",
+		downloaderName: "default", savePath: "/downloads", applyLabels: true, screenshotProfile: "default", imageHost: "default",
   });
   const [busy, setBusy] = useState(false);
   const update = <K extends keyof CreateJobInput>(key: K, value: CreateJobInput[K]) => setForm((current) => ({...current, [key]: value}));
@@ -454,6 +454,7 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
         <label>执行模式<select value={form.executionMode} onChange={(event) => update("executionMode", event.target.value as "auto" | "step")}><option value="step">逐步暂停（推荐）</option><option value="auto">自动执行到硬门禁</option></select></label>
         <label>下载器名称<input required value={form.downloaderName} onChange={(event) => update("downloaderName", event.target.value)} /></label>
         <label>远程保存路径<input required value={form.savePath} onChange={(event) => update("savePath", event.target.value)} /></label>
+				<label className="full"><input type="checkbox" checked={form.applyLabels} onChange={(event) => update("applyLabels", event.target.checked)} /> 应用下载器分类和标签（Deluge 核心 API 等不支持标签的适配器必须取消）</label>
         <label>截图配置<input required value={form.screenshotProfile} onChange={(event) => update("screenshotProfile", event.target.value)} /></label>
         <label>图床配置<input required value={form.imageHost} onChange={(event) => update("imageHost", event.target.value)} /></label>
         <label className="full">指定暂停步骤（可选）<input value={form.stopAfterStep} placeholder="例如 target_duplicate_check" onChange={(event) => update("stopAfterStep", event.target.value)} /></label>

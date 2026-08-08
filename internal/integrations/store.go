@@ -227,6 +227,9 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	if err := validateDownloaderCredentialContract(capability, input.Credentials); err != nil {
 		return Downloader{}, err
 	}
+	if err := validateDownloaderOptionContract(capability, input.Config.Options); err != nil {
+		return Downloader{}, err
+	}
 	config, err := validateEndpointConfig(input.Config)
 	if err != nil {
 		return Downloader{}, err
@@ -238,6 +241,9 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	}
 	credentialFields, credentialPayload, err := validateCredentials(input.Credentials)
 	if err != nil {
+		return Downloader{}, err
+	}
+	if err := s.ensureDownloaderRequiredCredentials(ctx, name, input.Adapter, enabled, credentialFields); err != nil {
 		return Downloader{}, err
 	}
 	var newSecretID any
@@ -276,6 +282,9 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	)
 	if err != nil {
 		return Downloader{}, fmt.Errorf("upsert downloader: %w", err)
+	}
+	if enabled && input.Adapter == "deluge" && secretID == "" {
+		return Downloader{}, fmt.Errorf("%w: Deluge requires a Web password credential when enabled", ErrValidation)
 	}
 	downloader.LastHealthCheck = timePointer(healthChecked)
 	if input.PathMappings != nil {
@@ -394,6 +403,12 @@ func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeD
 	} else {
 		runtime.Credentials = map[string]string{}
 	}
+	if err := validateDownloaderCredentialContract(capability, runtime.Credentials); err != nil {
+		return RuntimeDownloader{}, fmt.Errorf("%w: stored downloader credentials no longer match adapter contract", ErrValidation)
+	}
+	if runtime.Adapter == "deluge" && runtime.Credentials["password"] == "" {
+		return RuntimeDownloader{}, fmt.Errorf("%w: Deluge Web password is required", ErrValidation)
+	}
 	runtime.CredentialFields = make([]string, 0, len(runtime.Credentials))
 	for field := range runtime.Credentials {
 		runtime.CredentialFields = append(runtime.CredentialFields, field)
@@ -407,6 +422,37 @@ func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeD
 	}
 	runtime.ConfigurationSHA256 = hex.EncodeToString(configurationHash.Sum(nil))
 	return runtime, nil
+}
+
+func (s *Store) ensureDownloaderRequiredCredentials(ctx context.Context, name, adapter string, enabled bool, suppliedFields []string) error {
+	if !enabled || adapter != "deluge" {
+		return nil
+	}
+	if slices.Equal(suppliedFields, []string{"password"}) {
+		return nil
+	}
+	if len(suppliedFields) > 0 {
+		return fmt.Errorf("%w: Deluge requires a Web password credential", ErrValidation)
+	}
+	var existingAdapter, secretID string
+	err := s.pool.QueryRow(ctx, `SELECT adapter, COALESCE(secret_id::text, '') FROM downloaders WHERE name = $1`, name).Scan(&existingAdapter, &secretID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: Deluge requires a Web password credential when enabled", ErrValidation)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect existing downloader credentials: %w", err)
+	}
+	if existingAdapter != "deluge" || secretID == "" {
+		return fmt.Errorf("%w: Deluge requires a new Web password when enabling or changing adapters", ErrValidation)
+	}
+	fields, err := s.loadCredentialFields(ctx, secretID, "downloaders."+name+".credentials")
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(fields, []string{"password"}) {
+		return fmt.Errorf("%w: stored Deluge credentials are not a Web password; replace them explicitly", ErrValidation)
+	}
+	return nil
 }
 
 func (s *Store) RecordDownloaderHealth(ctx context.Context, name, status string, details map[string]any, actor workflow.Actor) error {

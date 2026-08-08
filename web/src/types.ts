@@ -131,6 +131,7 @@ export interface CreateJobInput {
   stopAfterStep?: string;
   downloaderName: string;
   savePath: string;
+	applyLabels: boolean;
   screenshotProfile: string;
   imageHost: string;
 }

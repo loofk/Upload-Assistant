@@ -97,6 +97,14 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 			t.Errorf("OpenAPI schema %s is missing", schema)
 		}
 	}
+	for _, schema := range []string{"RetorrentDownloader", "AddTorrentRequest"} {
+		var decoded struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(document.Components.Schemas[schema], &decoded); err != nil || len(decoded.Properties["apply_labels"]) == 0 {
+			t.Errorf("OpenAPI schema %s is missing apply_labels: %v", schema, err)
+		}
+	}
 	var summarySchema struct {
 		Required []string `json:"required"`
 	}

@@ -42,6 +42,32 @@ describe("App authentication boundary", () => {
     expect(new Headers(downloaderCall?.[1]?.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
   });
 
+	it("shows Deluge Web endpoint and password-only credential contract", async () => {
+		sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+		const operations = {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: false, tags: false, skip_checking: false};
+		const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+			const path = String(input);
+			const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+				: path === "/api/v2/downloaders" ? {downloaders: []}
+				: path === "/api/v2/downloader-adapters" ? {adapters: [
+					{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: ["api_key", "password", "username"], operations: {...operations, category: true, tags: true, skip_checking: true}},
+					{adapter: "deluge", display_name: "Deluge", runtime_supported: true, credential_fields: ["password"], operations, constraints: ["Web JSON-RPC only"]},
+				]}
+				: path === "/api/v2/image-hosts" ? {image_hosts: []}
+				: path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
+				: path === "/api/v2/sites" ? {sites: []} : {};
+			return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<App />);
+		await userEvent.click(screen.getByRole("button", {name: "配置"}));
+		await userEvent.selectOptions(await screen.findByLabelText("适配器"), "deluge");
+		expect(screen.getByLabelText("服务地址")).toHaveValue("http://host.docker.internal:8112/json");
+		expect(screen.getByLabelText("Web 密码（新建必填）")).toHaveAttribute("type", "password");
+		expect(screen.queryByLabelText("用户名（与密码同时填写）")).not.toBeInTheDocument();
+		expect(screen.getByText("Web JSON-RPC only")).toBeInTheDocument();
+	});
+
   it("shows ranked daily candidates and their safety evidence", async () => {
 	sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
 	const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {

@@ -92,6 +92,7 @@ type AddOptions struct {
 	SavePath      string
 	Category      string
 	Tags          []string
+	ApplyLabels   *bool
 	SkipChecking  bool
 	Paused        bool
 	UploadLimit   int64

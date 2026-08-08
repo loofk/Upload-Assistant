@@ -65,7 +65,7 @@ Rule changes follow an immutable review sequence: import Markdown as a draft, in
 
 Credentials are write-only inputs. Confirm successful storage from redacted API responses; never try to read secrets back. Keep downloader path mappings explicit and validate them before running jobs.
 
-Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported`, every `operations` flag, and every `constraints` entry. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission and rTorrent report `skip_checking=false`; do not request or simulate that behavior. For rTorrent, treat an ineffective named-throttle response as a blocker and never claim the requested limit was enforced.
+Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported`, every `operations` flag, and every `constraints` entry. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission, rTorrent, and Deluge report `skip_checking=false`; do not request or simulate that behavior. Deluge uses its Web JSON-RPC endpoint and Web password, requires the Web session to be connected to a daemon, and reports `category=false` and `tags=false`; set `apply_labels=false` explicitly and leave category/tags empty for both source and target downloader controls, never silently discard them or substitute native daemon RPC credentials. For rTorrent, treat an ineffective named-throttle response as a blocker and never claim the requested limit was enforced.
 
 ## Migrate Legacy Configuration
 

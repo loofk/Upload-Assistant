@@ -67,17 +67,60 @@ func TestTargetSeedVerifyBlocksUnsafeLimitWithEvidence(t *testing.T) {
 	}
 }
 
+func TestTargetSeedVerifyDoesNotCountQueuedTorrentAsActiveSeeding(t *testing.T) {
+	execution, store, evidence, files := targetSeedExecutionForAdapter(t, "deluge", false)
+	evidence.Torrent.State = "queued"
+	files.Torrent = evidence
+	_, err := (targetSeedVerifyExecutor{
+		provider: &fakeDownloaderProvider{inspection: evidence, files: files}, artifacts: store, recorder: &sequenceArtifactRecorder{},
+	}).Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if blocked.Blockers[0].Code != "target_seed_verification_pending" {
+		t.Fatalf("queued seed blocker = %#v", blocked)
+	}
+}
+
+func TestTargetSeedVerifyAcceptsReceiptBoundDelugeEvidenceWithoutLabels(t *testing.T) {
+	execution, store, evidence, files := targetSeedExecutionForAdapter(t, "deluge", false)
+	provider := &fakeDownloaderProvider{inspection: evidence, files: files}
+	output, err := (targetSeedVerifyExecutor{
+		provider: provider, artifacts: store, recorder: &sequenceArtifactRecorder{}, now: func() time.Time { return time.Unix(10_000, 0) },
+	}).Execute(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Verified bool `json:"verified"`
+		Checks   struct {
+			Downloader bool `json:"downloader_matches"`
+			Category   bool `json:"category_matches"`
+			Tags       bool `json:"tags_match"`
+		} `json:"checks"`
+	}
+	if json.Unmarshal(output, &result) != nil || !result.Verified || !result.Checks.Downloader || !result.Checks.Category || !result.Checks.Tags {
+		t.Fatalf("Deluge target seed output = %s", output)
+	}
+}
+
 func targetSeedExecution(t *testing.T) (Execution, WorkflowArtifactStore, downloaders.TorrentEvidence, downloaders.TorrentFilesEvidence) {
+	return targetSeedExecutionForAdapter(t, "qbittorrent", true)
+}
+
+func targetSeedExecutionForAdapter(t *testing.T, adapter string, applyLabels bool) (Execution, WorkflowArtifactStore, downloaders.TorrentEvidence, downloaders.TorrentFilesEvidence) {
 	t.Helper()
-	injectExecution, store, torrent := targetInjectExecution(t, map[string]any{
-		"name": "box", "category": "mteam", "tags": []string{"retorrent", "mteam"},
-		"upload_limit_bytes_per_second": 4 * 1024 * 1024,
-	})
+	targetControl := map[string]any{"name": "box", "apply_labels": applyLabels, "upload_limit_bytes_per_second": 4 * 1024 * 1024}
+	if applyLabels {
+		targetControl["category"] = "mteam"
+		targetControl["tags"] = []string{"retorrent", "mteam"}
+	}
+	injectExecution, store, torrent := targetInjectExecution(t, targetControl)
 	inspection, err := torrentmeta.Inspect(torrent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	addEvidence := targetAddEvidence(torrent, inspection, "box")
+	addEvidence.Adapter = adapter
+	addEvidence.Observed.Adapter = adapter
 	injectOutput, err := (targetInjectExecutor{
 		provider: &fakeDownloaderProvider{addResult: addEvidence}, artifacts: store, recorder: &sequenceArtifactRecorder{},
 	}).Execute(context.Background(), injectExecution)
@@ -91,20 +134,34 @@ func targetSeedExecution(t *testing.T) (Execution, WorkflowArtifactStore, downlo
 		t.Fatal(err)
 	}
 	frozen.PreviousSteps["target_inject"] = injectOutput
+	state := "uploading"
+	if adapter != "qbittorrent" {
+		state = "seeding"
+	}
 	torrentEvidence := downloaders.TorrentEvidence{
-		DownloaderName: "box", Adapter: "qbittorrent", ConfigurationSHA256: addEvidence.ConfigurationSHA256,
+		DownloaderName: "box", Adapter: adapter, ConfigurationSHA256: addEvidence.ConfigurationSHA256,
 		RemoteSavePath: "/remote/downloads", RemoteContentPath: "/remote/downloads/video.mkv",
 		Torrent: qbittorrent.Torrent{
-			Hash: inspection.Hashes.V1SHA1, Name: "video.mkv", State: "uploading", Progress: 1,
+			Hash: inspection.Hashes.V1SHA1, Name: "video.mkv", State: state, Progress: 1,
 			Size: 3, TotalSize: 3, Completed: 3, AmountLeft: 0, Ratio: 1.25,
 			DownloadLimit: -1, UploadLimit: 2 * 1024 * 1024,
 			SavePath: "/remote/downloads", ContentPath: "/remote/downloads/video.mkv",
-			Category: "mteam", Tags: "retorrent,mteam", AddedOn: 1, CompletionOn: 2,
+			Category: func() string {
+				if applyLabels {
+					return "mteam"
+				}
+				return ""
+			}(), Tags: func() string {
+				if applyLabels {
+					return "retorrent,mteam"
+				}
+				return ""
+			}(), AddedOn: 1, CompletionOn: 2,
 			TimeActive: 4_000, SeedingTime: 3_600,
 		},
 	}
 	filesEvidence := downloaders.TorrentFilesEvidence{
-		DownloaderName: "box", Adapter: "qbittorrent", Torrent: torrentEvidence,
+		DownloaderName: "box", Adapter: adapter, Torrent: torrentEvidence,
 		Files:     []qbittorrent.TorrentFile{{Index: 0, Name: "video.mkv", Size: 3, Progress: 1, Priority: 1, Seed: true}},
 		FileCount: 1, TotalSize: 3,
 	}

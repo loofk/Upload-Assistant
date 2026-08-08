@@ -116,18 +116,23 @@ export class ApiClient {
   }
 
   async createJob(input: CreateJobInput): Promise<JobEnvelope> {
+		const downloader: Record<string, JsonValue> = {
+			name: input.downloaderName,
+			save_path: input.savePath,
+			apply_labels: input.applyLabels,
+			skip_checking: false,
+			paused: false,
+		};
+		if (input.applyLabels) {
+			downloader.category = "retorrent-source";
+			downloader.tags = ["upload-assistant", "source"];
+		}
     const workflowInput: Record<string, JsonValue> = {
       source_url: input.sourceURL,
       target: input.target.toUpperCase(),
       confirm_upload: false,
-      downloader: {
-        name: input.downloaderName,
-        save_path: input.savePath,
-        category: "retorrent-source",
-        tags: ["upload-assistant", "source"],
-        skip_checking: false,
-        paused: false,
-      },
+			downloader,
+			target_downloader: {apply_labels: input.applyLabels},
       screenshots: {profile: input.screenshotProfile},
       image_host: {name: input.imageHost},
     };

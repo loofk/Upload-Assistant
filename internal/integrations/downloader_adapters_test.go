@@ -23,8 +23,8 @@ func TestDownloaderAdapterCapabilitiesAreTruthfulAndCopied(t *testing.T) {
 		t.Fatalf("rTorrent capability = %#v", rtorrent)
 	}
 	deluge, exists := DownloaderAdapterCapabilityFor("deluge")
-	if !exists || deluge.RuntimeSupported || deluge.UnavailableReason == "" {
-		t.Fatalf("unsupported Deluge capability = %#v", deluge)
+	if !exists || !deluge.RuntimeSupported || !deluge.Operations.AddTorrent || deluge.Operations.Category || deluge.Operations.Tags || deluge.Operations.SkipChecking || len(deluge.Constraints) < 4 {
+		t.Fatalf("Deluge capability = %#v", deluge)
 	}
 	items[0].CredentialFields[0] = "mutated"
 	items[3].Constraints[0] = "mutated"
@@ -51,5 +51,24 @@ func TestDownloaderCredentialContractRejectsUnsupportedAndPartialFields(t *testi
 	qbit, _ := DownloaderAdapterCapabilityFor("qbittorrent")
 	if err := validateDownloaderCredentialContract(qbit, map[string]string{"api_key": "token"}); err != nil {
 		t.Fatalf("valid qBittorrent bearer credential error = %v", err)
+	}
+	deluge, _ := DownloaderAdapterCapabilityFor("deluge")
+	if err := validateDownloaderCredentialContract(deluge, map[string]string{"password": "secret"}); err != nil {
+		t.Fatalf("valid Deluge Web credential error = %v", err)
+	}
+	if err := validateDownloaderCredentialContract(deluge, map[string]string{"username": "operator", "password": "secret"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Deluge native RPC credentials error = %v", err)
+	}
+}
+
+func TestDownloaderOptionContractRejectsUnsupportedDelugeLabelDefaults(t *testing.T) {
+	deluge, _ := DownloaderAdapterCapabilityFor("deluge")
+	for _, options := range []map[string]any{{"category": "source"}, {"tag": "retorrent"}, {"label": "MTEAM"}} {
+		if err := validateDownloaderOptionContract(deluge, options); !errors.Is(err, ErrValidation) {
+			t.Fatalf("Deluge options %#v error = %v", options, err)
+		}
+	}
+	if err := validateDownloaderOptionContract(deluge, map[string]any{}); err != nil {
+		t.Fatalf("empty Deluge options error = %v", err)
 	}
 }

@@ -31,6 +31,7 @@ type addTorrentRequest struct {
 	SavePath      string   `json:"save_path,omitempty"`
 	Category      string   `json:"category,omitempty"`
 	Tags          []string `json:"tags,omitempty"`
+	ApplyLabels   *bool    `json:"apply_labels,omitempty"`
 	SkipChecking  bool     `json:"skip_checking,omitempty"`
 	Paused        bool     `json:"paused,omitempty"`
 	UploadLimit   int64    `json:"upload_limit,omitempty"`
@@ -111,6 +112,7 @@ func (api downloaderActionsAPI) add(w http.ResponseWriter, r *http.Request) {
 		r.Context(), strings.TrimSpace(r.PathValue("name")), metainfo,
 		qbittorrent.AddOptions{
 			SavePath: request.SavePath, Category: request.Category, Tags: request.Tags,
+			ApplyLabels:  request.ApplyLabels,
 			SkipChecking: request.SkipChecking, Paused: request.Paused,
 			UploadLimit: request.UploadLimit, DownloadLimit: request.DownloadLimit,
 		}, workflow.Actor{Type: "user", ID: principal.UserID},

@@ -18,6 +18,7 @@ describe("ApiClient safety defaults", () => {
       executionMode: "step",
       downloaderName: "box",
       savePath: "/downloads",
+			applyLabels: true,
       screenshotProfile: "default",
       imageHost: "default",
     });
@@ -30,7 +31,27 @@ describe("ApiClient safety defaults", () => {
     expect(body.input.confirm_upload).toBe(false);
     expect(body.input.accept_rules).toBeUndefined();
     expect(body.execution_mode).toBe("step");
+		expect(body.input.downloader).toMatchObject({apply_labels: true, category: "retorrent-source", tags: ["upload-assistant", "source"]});
+		expect(body.input.target_downloader).toEqual({apply_labels: true});
   });
+
+	it("requires an explicit no-label workflow control for capability-limited downloaders", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ok: true, job_id: "job-id"}), {
+			status: 202, headers: {"Content-Type": "application/json"},
+		}));
+		vi.stubGlobal("fetch", fetchMock);
+		vi.stubGlobal("crypto", {randomUUID: () => "33333333-3333-4333-8333-333333333333"});
+		await new ApiClient("ua_test-token-value-that-is-long-enough").createJob({
+			sourceURL: "https://u2.dmhy.org/details.php?id=60635", target: "MTEAM", executionMode: "step",
+			downloaderName: "deluge-box", savePath: "/downloads", applyLabels: false,
+			screenshotProfile: "default", imageHost: "default",
+		});
+		const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+		expect(body.input.downloader).toEqual({name: "deluge-box", save_path: "/downloads", apply_labels: false, skip_checking: false, paused: false});
+		expect(body.input.target_downloader).toEqual({apply_labels: false});
+		expect(JSON.stringify(body.input)).not.toContain("category");
+		expect(JSON.stringify(body.input)).not.toContain("tags");
+	});
 
   it("creates audited candidate scans and submits candidates only in step mode", async () => {
 	const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ok: true, job_id: "job-id"}), {

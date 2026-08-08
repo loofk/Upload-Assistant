@@ -105,14 +105,23 @@ function formatBytes(value: number): string {
 function DownloadersPanel({items, adapters, client, reload, onError}: {items: Downloader[]; adapters: DownloaderAdapterCapability[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
 	const [form, setForm] = useState({name: "default", adapter: "qbittorrent", enabled: true, endpoint: "http://host.docker.internal:8080", username: "", password: "", apiKey: "", remote: "/downloads", local: "/downloads"});
   const [busy, setBusy] = useState(false);
+	const selectedCapability = adapters.find((item) => item.adapter === form.adapter);
+	const supportsCredential = (field: string) => selectedCapability?.credential_fields.includes(field) ?? false;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     try {
       const credentials: Record<string, string> = {};
-      if (form.apiKey) credentials.api_key = form.apiKey;
-      if (form.username) credentials.username = form.username;
-      if (form.password) credentials.password = form.password;
+			if (supportsCredential("api_key") && form.apiKey) credentials.api_key = form.apiKey;
+			if (supportsCredential("username")) {
+				if ((form.username && !form.password) || (!form.username && form.password)) throw new Error(`${selectedCapability?.display_name ?? form.adapter} 的用户名与密码必须同时填写；更新时可同时留空以保留现有凭据。`);
+				if (form.username && form.password) {
+					credentials.username = form.username;
+					credentials.password = form.password;
+				}
+			} else if (supportsCredential("password") && form.password) {
+				credentials.password = form.password;
+			}
       await client.putDownloader(form.name, {
 			adapter: form.adapter, enabled: form.enabled, endpoint: form.endpoint, credentials,
         pathMappings: form.remote && form.local ? [{remote_path: form.remote, local_path: form.local, priority: 100}] : [],
@@ -125,12 +134,13 @@ function DownloadersPanel({items, adapters, client, reload, onError}: {items: Do
 		<div className="integration-grid">{items.map((item) => <IntegrationCard key={item.id} title={item.name} type={item.adapter} enabled={item.enabled} health={item.health_status} endpoint={item.config.endpoint} credentials={item.credential_fields} details={[...item.path_mappings.map((mapping) => `${mapping.remote_path} → ${mapping.local_path}`), ...(item.adapter_capability?.constraints ?? []), ...(item.adapter_capability?.unavailable_reason ? [item.adapter_capability.unavailable_reason] : [])]} action={<button className="card-action" disabled={!item.enabled || !item.adapter_capability?.runtime_supported} onClick={async () => { try { await client.probeDownloader(item.name); await reload(); } catch (reason) { onError(reason); } }}>显式探测</button>} />)}{!items.length && <ConfigEmpty text="尚未配置下载器。" />}</div>
   </section><ConfigForm title="添加或更新下载器" onSubmit={submit} busy={busy}>
     <label>配置名称<input value={form.name} required onChange={(event) => setForm({...form, name: event.target.value})} /></label>
-		<label>适配器<select value={form.adapter} onChange={(event) => { const adapter = event.target.value; const capability = adapters.find((item) => item.adapter === adapter); const endpoint = adapter === "transmission" ? "http://host.docker.internal:9091/transmission/rpc" : adapter === "rtorrent" ? "http://host.docker.internal/RPC2" : form.endpoint; setForm({...form, adapter, endpoint, enabled: capability?.runtime_supported ?? false}); }}>{adapters.map((item) => <option key={item.adapter} value={item.adapter}>{item.display_name}{item.runtime_supported ? "" : "（仅可禁用保存）"}</option>)}</select></label>
+		<label>适配器<select value={form.adapter} onChange={(event) => { const adapter = event.target.value; const capability = adapters.find((item) => item.adapter === adapter); const endpoints: Record<string, string> = {qbittorrent: "http://host.docker.internal:8080", transmission: "http://host.docker.internal:9091/transmission/rpc", rtorrent: "http://host.docker.internal/RPC2", deluge: "http://host.docker.internal:8112/json"}; setForm({...form, adapter, endpoint: endpoints[adapter] ?? form.endpoint, enabled: capability?.runtime_supported ?? false, username: "", password: "", apiKey: ""}); }}>{adapters.map((item) => <option key={item.adapter} value={item.adapter}>{item.display_name}{item.runtime_supported ? "" : "（仅可禁用保存）"}</option>)}</select></label>
 		<label><input type="checkbox" checked={form.enabled} disabled={!adapters.find((item) => item.adapter === form.adapter)?.runtime_supported} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 启用运行时</label>
     <label className="full">服务地址<input type="url" value={form.endpoint} required onChange={(event) => setForm({...form, endpoint: event.target.value})} /></label>
-    <label>用户名（可选）<input autoComplete="off" value={form.username} onChange={(event) => setForm({...form, username: event.target.value})} /></label>
-    <label>密码（留空则保留）<input type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({...form, password: event.target.value})} /></label>
-    <label className="full">API Key（可选、留空则保留）<input type="password" autoComplete="new-password" value={form.apiKey} onChange={(event) => setForm({...form, apiKey: event.target.value})} /></label>
+		{supportsCredential("username") && <label>用户名（与密码同时填写）<input autoComplete="off" value={form.username} onChange={(event) => setForm({...form, username: event.target.value})} /></label>}
+		{supportsCredential("password") && <label>{supportsCredential("username") ? "密码（与用户名同时填写）" : "Web 密码（新建必填）"}<input type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({...form, password: event.target.value})} /></label>}
+		{supportsCredential("api_key") && <label className="full">API Key（可选、留空则保留）<input type="password" autoComplete="new-password" value={form.apiKey} onChange={(event) => setForm({...form, apiKey: event.target.value})} /></label>}
+		{selectedCapability?.constraints?.length ? <div className="safety-callout full"><strong>适配器约束</strong>{selectedCapability.constraints.map((constraint) => <span key={constraint}>{constraint}</span>)}</div> : null}
     <label>远程路径<input value={form.remote} onChange={(event) => setForm({...form, remote: event.target.value})} /></label><label>容器路径<input value={form.local} onChange={(event) => setForm({...form, local: event.target.value})} /></label>
   </ConfigForm></div>;
 }

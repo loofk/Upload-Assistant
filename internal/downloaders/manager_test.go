@@ -3,6 +3,7 @@ package downloaders
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -153,6 +154,72 @@ func TestManagerDispatchesRTorrentRuntime(t *testing.T) {
 	}
 }
 
+func TestManagerDispatchesDelugeWebRuntime(t *testing.T) {
+	methods := []string{
+		"core.add_torrent_file", "core.get_torrent_status", "core.set_torrent_options",
+		"daemon.get_version", "daemon.get_method_list", "core.get_libtorrent_version",
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Method string `json:"method"`
+			ID     int64  `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "auth.login", "web.connected":
+			result = true
+		case "daemon.get_method_list":
+			result = methods
+		case "daemon.get_version":
+			result = "2.2.0"
+		case "core.get_libtorrent_version":
+			result = "2.0.11.0"
+		default:
+			http.Error(w, "unexpected", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": result, "error": nil, "id": request.ID})
+	}))
+	t.Cleanup(server.Close)
+	store := &fakeConfigurationStore{runtime: integrations.RuntimeDownloader{
+		Downloader:     integrations.Downloader{Name: "deluge", Adapter: "deluge", Enabled: true},
+		EndpointConfig: integrations.EndpointConfig{Endpoint: server.URL, TimeoutSeconds: 5},
+		Credentials:    map[string]string{"password": "secret"},
+	}}
+	probe, err := NewManager(store).Probe(context.Background(), "deluge", workflow.Actor{Type: "test", ID: "manager"})
+	if err != nil || probe.ApplicationVersion != "Deluge 2.2.0" || probe.Authentication != "deluge-web-cookie" || store.healthStatus != "ready" {
+		t.Fatalf("Probe() result/health/error = %#v/%s/%v", probe, store.healthStatus, err)
+	}
+}
+
+func TestManagerRejectsUnsupportedConfiguredDelugeLabelsBeforeRemoteCall(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	store := &fakeConfigurationStore{runtime: integrations.RuntimeDownloader{
+		Downloader: integrations.Downloader{Name: "deluge", Adapter: "deluge", Enabled: true},
+		EndpointConfig: integrations.EndpointConfig{
+			Endpoint: server.URL, TimeoutSeconds: 5, Options: map[string]any{"category": "legacy"},
+		},
+		Credentials: map[string]string{"password": "secret"},
+	}}
+	metainfo := []byte("d8:announce14:https://t.test4:infod6:lengthi1e4:name4:testee")
+	_, err := NewManager(store).Add(context.Background(), "deluge", metainfo, qbittorrent.AddOptions{}, workflow.Actor{Type: "test", ID: "manager"})
+	if !errors.Is(err, integrations.ErrValidation) || !strings.Contains(err.Error(), "category") {
+		t.Fatalf("Add() capability error = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("Add() made %d calls before capability validation", calls)
+	}
+}
+
 func TestMapPathUsesPathBoundary(t *testing.T) {
 	mapping := integrations.PathMapping{RemotePath: "/remote/downloads", LocalPath: "/downloads"}
 	if mapped, ok := mapPath("/remote/downloads/release/file.mkv", mapping); !ok || mapped != "/downloads/release/file.mkv" {
@@ -173,5 +240,25 @@ func TestApplyConfiguredDefaultsIsStableAndDoesNotOverrideRequest(t *testing.T) 
 	applyConfiguredDefaults(map[string]any{"category": "legacy", "label": "retorrent"}, &empty)
 	if empty.Category != "legacy" || strings.Join(empty.Tags, ",") != "retorrent" {
 		t.Fatalf("empty options = %#v", empty)
+	}
+	disabled := false
+	withoutLabels := qbittorrent.AddOptions{ApplyLabels: &disabled}
+	applyConfiguredDefaults(map[string]any{"category": "legacy", "label": "retorrent"}, &withoutLabels)
+	if withoutLabels.Category != "" || len(withoutLabels.Tags) != 0 {
+		t.Fatalf("explicit no-label options = %#v", withoutLabels)
+	}
+}
+
+func TestValidateAddCapabilitiesRequiresExplicitNoLabelModeForDeluge(t *testing.T) {
+	capability, _ := integrations.DownloaderAdapterCapabilityFor("deluge")
+	if err := validateAddCapabilities(capability, qbittorrent.AddOptions{}); !errors.Is(err, integrations.ErrValidation) || !strings.Contains(err.Error(), "apply_labels=false") {
+		t.Fatalf("implicit Deluge labels error = %v", err)
+	}
+	disabled := false
+	if err := validateAddCapabilities(capability, qbittorrent.AddOptions{ApplyLabels: &disabled}); err != nil {
+		t.Fatalf("explicit Deluge no-label error = %v", err)
+	}
+	if err := validateAddCapabilities(capability, qbittorrent.AddOptions{ApplyLabels: &disabled, Category: "source"}); !errors.Is(err, integrations.ErrValidation) {
+		t.Fatalf("contradictory Deluge no-label error = %v", err)
 	}
 }

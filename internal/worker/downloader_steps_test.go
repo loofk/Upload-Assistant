@@ -83,6 +83,41 @@ func TestDownloaderAddVerifiesArtifactAndAppliesStrictestRuleLimits(t *testing.T
 	}
 }
 
+func TestDownloaderAddAllowsExplicitNoLabelModeForCapabilityLimitedAdapter(t *testing.T) {
+	metainfo := []byte("d8:announce14:https://t.test4:infod4:name7:fixtureee")
+	hashes, err := torrentmeta.Hashes(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := artifacts.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := store.Write(context.Background(), artifacts.Scope{JobID: "job-id", StepID: "source-step", AttemptID: "source-attempt"}, "source.torrent", bytes.NewReader(metainfo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := downloaderAddExecution(written.RelativePath, written.SizeBytes, written.SHA256)
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	control := snapshot["job_input"].(map[string]any)["downloader"].(map[string]any)
+	delete(control, "category")
+	delete(control, "tags")
+	control["apply_labels"] = false
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	provider := &fakeDownloaderProvider{addResult: downloaders.AddEvidence{
+		DownloaderName: "box", Adapter: "deluge", Result: qbittorrent.AddResult{Hashes: hashes},
+	}}
+	if _, err := (downloaderAddExecutor{provider: provider, artifacts: store}).Execute(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	if provider.addOptions.Category != "" || len(provider.addOptions.Tags) != 0 {
+		t.Fatalf("explicit no-label options = %#v", provider.addOptions)
+	}
+}
+
 func TestDownloaderWaitBlocksWithObservedProgressAndCompletesOnResume(t *testing.T) {
 	provider := &fakeDownloaderProvider{inspection: downloaders.TorrentEvidence{
 		DownloaderName: "box", Adapter: "qbittorrent",
@@ -111,6 +146,15 @@ func TestDownloaderWaitBlocksWithObservedProgressAndCompletesOnResume(t *testing
 	decodeErr := json.Unmarshal(output, &completed)
 	if err != nil || decodeErr != nil || !completed.Completed {
 		t.Fatalf("completed output/error = %s/%v", output, err)
+	}
+}
+
+func TestMergeDownloaderControlCanExplicitlyDisableInheritedLabels(t *testing.T) {
+	enabled, disabled := true, false
+	control := downloaderControl{Category: "source", Tags: []string{"retorrent"}, ApplyLabels: &enabled}
+	mergeDownloaderControl(&control, downloaderControl{ApplyLabels: &disabled})
+	if labelsEnabled(control) || control.Category != "" || control.Tags != nil {
+		t.Fatalf("disabled inherited labels = %#v", control)
 	}
 }
 

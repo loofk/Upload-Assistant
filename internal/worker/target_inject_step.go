@@ -13,6 +13,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
@@ -78,6 +79,7 @@ type targetInjectOptionsReceipt struct {
 	SavePath       string   `json:"save_path"`
 	Category       string   `json:"category"`
 	Tags           []string `json:"tags"`
+	ApplyLabels    bool     `json:"apply_labels"`
 	DownloadLimit  int64    `json:"download_limit_bytes_per_second"`
 	UploadLimit    int64    `json:"upload_limit_bytes_per_second"`
 	SkipChecking   bool     `json:"skip_checking"`
@@ -103,6 +105,7 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 	}
 	evidence, err := executor.provider.Add(ctx, bindings.Control.Name, bindings.Torrent, qbittorrent.AddOptions{
 		SavePath: bindings.Control.SavePath, Category: bindings.Control.Category, Tags: append([]string(nil), bindings.Control.Tags...),
+		ApplyLabels:  bindings.Control.ApplyLabels,
 		SkipChecking: false, Paused: false, DownloadLimit: bindings.AppliedDownloadLimit, UploadLimit: bindings.AppliedUploadLimit,
 	}, execution.Actor)
 	if err != nil {
@@ -128,6 +131,7 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 		Options: targetInjectOptionsReceipt{
 			DownloaderName: bindings.Control.Name, SavePath: bindings.Control.SavePath,
 			Category: bindings.Control.Category, Tags: append([]string(nil), bindings.Control.Tags...),
+			ApplyLabels:   labelsEnabled(bindings.Control),
 			DownloadLimit: bindings.AppliedDownloadLimit, UploadLimit: bindings.AppliedUploadLimit,
 			SkipChecking: false, Paused: false,
 		},
@@ -161,7 +165,7 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 	}
 	return mustJSON(map[string]any{
 		"injected": true, "status": "injected", "target": bindings.Target, "uploaded_torrent_id": bindings.TorrentID,
-		"downloader_name": bindings.Control.Name, "downloader_configuration_sha256": evidence.ConfigurationSHA256,
+		"downloader_name": bindings.Control.Name, "downloader_adapter": evidence.Adapter, "downloader_configuration_sha256": evidence.ConfigurationSHA256,
 		"torrent_hash": torrentHash, "add_evidence": evidence,
 		"options": receipt.Options, "rule": receipt.Rule,
 		"expected_remote_content_path":           bindings.RemoteContentRoot,
@@ -285,11 +289,17 @@ func (executor targetInjectExecutor) inputs(snapshotBody json.RawMessage) (targe
 	if control.Name == content.DownloaderName && explicitSavePath && control.SavePath != derivedSavePath {
 		return targetInjectBindings{}, fmt.Errorf("target_downloader.save_path must be %s for the verified source content on the same downloader", derivedSavePath)
 	}
-	if control.Category == "" {
-		control.Category = strings.ToLower(bindings.Target)
+	if control.ApplyLabels == nil {
+		value := true
+		control.ApplyLabels = &value
 	}
-	if control.Tags == nil {
-		control.Tags = []string{"retorrent", strings.ToLower(bindings.Target)}
+	if labelsEnabled(control) {
+		if control.Category == "" {
+			control.Category = strings.ToLower(bindings.Target)
+		}
+		if control.Tags == nil {
+			control.Tags = []string{"retorrent", strings.ToLower(bindings.Target)}
+		}
 	}
 	if control.SkipChecking == nil {
 		value := false
@@ -314,14 +324,20 @@ func (executor targetInjectExecutor) inputs(snapshotBody json.RawMessage) (targe
 }
 
 func validateTargetInjectionEvidence(evidence downloaders.AddEvidence, bindings targetInjectBindings) error {
-	if evidence.DownloaderName != bindings.Control.Name || evidence.Adapter != "qbittorrent" || len(evidence.ConfigurationSHA256) != 64 ||
+	capability, supported := integrations.DownloaderAdapterCapabilityFor(evidence.Adapter)
+	if !supported || !capability.RuntimeSupported ||
+		(labelsEnabled(bindings.Control) && strings.TrimSpace(bindings.Control.Category) != "" && !capability.Operations.Category) ||
+		(labelsEnabled(bindings.Control) && len(nonEmptyOptionStrings(bindings.Control.Tags)) > 0 && !capability.Operations.Tags) {
+		return fmt.Errorf("downloader adapter capability does not match the target injection options")
+	}
+	if evidence.DownloaderName != bindings.Control.Name || len(evidence.ConfigurationSHA256) != 64 ||
 		evidence.TorrentBytes != len(bindings.Torrent) || !strings.EqualFold(evidence.TorrentSHA256, bindings.TorrentArtifact.SHA256) ||
 		evidence.Result.Hashes != bindings.TorrentInspection.Hashes {
 		return fmt.Errorf("downloader add evidence is incomplete or does not match the downloaded target torrent")
 	}
 	if evidence.Observed != nil {
 		observed := evidence.Observed
-		if observed.DownloaderName != bindings.Control.Name || observed.Adapter != "qbittorrent" ||
+		if observed.DownloaderName != bindings.Control.Name || observed.Adapter != evidence.Adapter ||
 			observed.ConfigurationSHA256 != evidence.ConfigurationSHA256 || !hashMatches(observed.Torrent.Hash, bindings.TorrentInspection.Hashes) ||
 			(observed.Torrent.TotalSize > 0 && observed.Torrent.TotalSize != bindings.ContentSizeBytes) {
 			return fmt.Errorf("the configured downloader observed torrent does not match the target injection")

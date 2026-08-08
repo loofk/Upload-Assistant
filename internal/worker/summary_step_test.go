@@ -108,7 +108,7 @@ func summaryExecution(t *testing.T) (Execution, WorkflowArtifactStore, *fakeSumm
 		Accepted: true, AcceptanceSHA: strings.Repeat("2", 64),
 	})
 	frozen.PreviousSteps["downloader_add"] = mustJSON(map[string]any{
-		"downloader_name": "box", "torrent_hash": strings.Repeat("a", 40),
+		"downloader_name": "box", "downloader_adapter": "qbittorrent", "torrent_hash": strings.Repeat("a", 40),
 		"limits": map[string]any{"applied_download": 1}, "options": map[string]any{"save_path": "/remote/downloads"},
 	})
 	frozen.PreviousSteps["downloader_wait"] = mustJSON(map[string]any{"completed": true, "downloader_name": "box", "torrent_hash": strings.Repeat("a", 40)})

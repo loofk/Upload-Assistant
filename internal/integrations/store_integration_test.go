@@ -2,6 +2,7 @@ package integrations
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -168,20 +169,36 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if err != nil || len(switchedRuntime.Credentials) != 0 || len(switchedRuntime.CredentialFields) != 0 {
 		t.Fatalf("switched downloader retained incompatible credentials: fields=%#v error=%v", switchedRuntime.CredentialFields, err)
 	}
-	disabled := false
+	if _, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{
+		Adapter: "deluge", Enabled: &enabled,
+		Config: EndpointConfig{Endpoint: "http://host.docker.internal:8112/json"},
+	}, actor); !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpsertDownloader() accepted enabled Deluge without Web password: %v", err)
+	}
 	deluge, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{
-		Adapter: "deluge", Enabled: &disabled,
-		Config: EndpointConfig{Endpoint: "http://host.docker.internal:8112"},
+		Adapter: "deluge", Enabled: &enabled,
+		Config:      EndpointConfig{Endpoint: "http://host.docker.internal:8112/json"},
+		Credentials: map[string]string{"password": "encrypted-web-password"},
 	}, actor)
-	if err != nil || deluge.Enabled || deluge.AdapterCapability.RuntimeSupported || deluge.AdapterCapability.UnavailableReason == "" {
-		t.Fatalf("disabled Deluge downloader/error = %#v/%v", deluge, err)
+	if err != nil || !deluge.Enabled || !deluge.AdapterCapability.RuntimeSupported || deluge.AdapterCapability.Operations.Category || deluge.AdapterCapability.Operations.Tags {
+		t.Fatalf("Deluge downloader/error = %#v/%v", deluge, err)
+	}
+	if _, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{
+		Adapter: "deluge", Enabled: &enabled,
+		Config: EndpointConfig{Endpoint: "http://host.docker.internal:8112/json"},
+	}, actor); err != nil {
+		t.Fatalf("UpsertDownloader() did not preserve an existing Deluge Web password: %v", err)
+	}
+	delugeRuntime, err := store.GetRuntimeDownloader(ctx, "deluge-"+nameSuffix)
+	if err != nil || delugeRuntime.Credentials["password"] != "encrypted-web-password" || len(delugeRuntime.CredentialFields) != 1 {
+		t.Fatalf("GetRuntimeDownloader() Deluge credentials/error = %#v/%v", delugeRuntime.CredentialFields, err)
 	}
 	if _, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{
 		Adapter: "deluge", Enabled: &enabled,
 		Config:      EndpointConfig{Endpoint: "http://host.docker.internal:8112"},
-		Credentials: map[string]string{"password": "must-not-be-stored"},
-	}, actor); err == nil {
-		t.Fatal("UpsertDownloader() enabled an unavailable Deluge runtime")
+		Credentials: map[string]string{"username": "native-daemon-user", "password": "must-not-be-stored"},
+	}, actor); !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpsertDownloader() accepted Deluge native RPC credentials: %v", err)
 	}
 
 	imageHost, err := store.UpsertImageHost(ctx, "imgbb-"+nameSuffix, ImageHostInput{
