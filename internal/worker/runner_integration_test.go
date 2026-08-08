@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -72,6 +73,14 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	allowedContentRoot := filepath.Join(t.TempDir(), "downloads")
+	localContentRoot := filepath.Join(allowedContentRoot, "release")
+	if err := os.MkdirAll(localContentRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localContentRoot, "video.mkv"), []byte("fixture-video"), 0o640); err != nil {
+		t.Fatal(err)
+	}
 	source := fakeSourceProvider{
 		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", RetrievedAt: time.Now().UTC()},
 		download: sites.DownloadedTorrent{
@@ -91,12 +100,15 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 				TotalSize: 100, Completed: 50, AmountLeft: 50,
 			},
 		},
+		files: downloadFilesEvidence(hashes.V1SHA1, "/remote/downloads/release", localContentRoot, []qbittorrent.TorrentFile{{
+			Index: 0, Name: "release/video.mkv", Size: 13, Progress: 1, Priority: 1, Availability: 1,
+		}}),
 	}
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithRuleProvider(fakeRuleProvider{revision: rule}),
 		WithSourceAdapters(source, artifactStore),
-		WithDownloader(downloader, artifactStore),
+		WithDownloader(downloader, artifactStore, allowedContentRoot),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -145,6 +157,17 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	steps, err = service.ListSteps(ctx, job.ID)
 	if err != nil || steps[5].Status != workflow.StepComplete {
 		t.Fatalf("resumed downloader_wait status/error = %s/%v", steps[5].Status, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("content resolve RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "metadata" {
+		t.Fatalf("content-resolved job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 2 || storedArtifacts[1].Kind != "content_manifest" {
+		t.Fatalf("content-resolved artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

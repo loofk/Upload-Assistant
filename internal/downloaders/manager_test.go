@@ -50,6 +50,11 @@ func TestManagerProbeInspectAndPathMapping(t *testing.T) {
 				"total_size": 1024, "completed": 1024, "amount_left": 0,
 				"save_path": "/remote/downloads", "content_path": "/remote/downloads/release",
 			}})
+		case "/api/v2/torrents/files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"index": 0, "name": "release/video.mkv", "size": 1024, "progress": 1,
+				"priority": 1, "is_seed": true, "availability": 1,
+			}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -76,7 +81,11 @@ func TestManagerProbeInspectAndPathMapping(t *testing.T) {
 	if evidence.LocalContentPath != "/downloads/release" || evidence.PathMapping == nil {
 		t.Fatalf("path evidence = %#v", evidence)
 	}
-	if len(store.auditActions) != 1 || store.auditActions[0] != "torrent.inspect" {
+	files, err := manager.Files(context.Background(), "qbit", hash, actor)
+	if err != nil || files.FileCount != 1 || files.TotalSize != 1024 || files.Torrent.LocalContentPath != "/downloads/release" {
+		t.Fatalf("Files() evidence/error = %#v/%v", files, err)
+	}
+	if len(store.auditActions) != 2 || store.auditActions[0] != "torrent.inspect" || store.auditActions[1] != "torrent.files" {
 		t.Fatalf("audit actions = %#v", store.auditActions)
 	}
 }

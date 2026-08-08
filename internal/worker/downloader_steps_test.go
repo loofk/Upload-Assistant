@@ -18,6 +18,7 @@ type fakeDownloaderProvider struct {
 	addBytes   []byte
 	addResult  downloaders.AddEvidence
 	inspection downloaders.TorrentEvidence
+	files      downloaders.TorrentFilesEvidence
 	err        error
 }
 
@@ -29,6 +30,10 @@ func (provider *fakeDownloaderProvider) Add(_ context.Context, _ string, metainf
 
 func (provider *fakeDownloaderProvider) Inspect(_ context.Context, _, _ string, _ workflow.Actor) (downloaders.TorrentEvidence, error) {
 	return provider.inspection, provider.err
+}
+
+func (provider *fakeDownloaderProvider) Files(_ context.Context, _, _ string, _ workflow.Actor) (downloaders.TorrentFilesEvidence, error) {
+	return provider.files, provider.err
 }
 
 func TestDownloaderAddVerifiesArtifactAndAppliesStrictestRuleLimits(t *testing.T) {

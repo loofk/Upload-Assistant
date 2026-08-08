@@ -46,6 +46,15 @@ type AddEvidence struct {
 	Observed       *TorrentEvidence      `json:"observed,omitempty"`
 }
 
+type TorrentFilesEvidence struct {
+	DownloaderName string                    `json:"downloader_name"`
+	Adapter        string                    `json:"adapter"`
+	Torrent        TorrentEvidence           `json:"torrent"`
+	Files          []qbittorrent.TorrentFile `json:"files"`
+	FileCount      int                       `json:"file_count"`
+	TotalSize      int64                     `json:"total_size"`
+}
+
 func NewManager(store ConfigurationStore) *Manager {
 	return &Manager{store: store}
 }
@@ -85,6 +94,45 @@ func (manager *Manager) Inspect(ctx context.Context, name, hash string, actor wo
 		"remote_content_path": evidence.RemoteContentPath, "local_content_path": evidence.LocalContentPath,
 	}, actor); err != nil {
 		return TorrentEvidence{}, err
+	}
+	return evidence, nil
+}
+
+func (manager *Manager) Files(ctx context.Context, name, hash string, actor workflow.Actor) (TorrentFilesEvidence, error) {
+	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	if err != nil {
+		return TorrentFilesEvidence{}, err
+	}
+	torrent, err := client.Get(ctx, hash)
+	if err != nil {
+		return TorrentFilesEvidence{}, err
+	}
+	files, err := client.Files(ctx, hash)
+	if err != nil {
+		return TorrentFilesEvidence{}, err
+	}
+	var totalSize int64
+	completeFiles := 0
+	for _, file := range files {
+		if file.Size < 0 || totalSize > int64(^uint64(0)>>1)-file.Size {
+			return TorrentFilesEvidence{}, fmt.Errorf("qBittorrent file sizes are invalid")
+		}
+		totalSize += file.Size
+		if file.Progress >= 0.999999 {
+			completeFiles++
+		}
+	}
+	evidence := TorrentFilesEvidence{
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter,
+		Torrent: buildTorrentEvidence(runtime, torrent), Files: files,
+		FileCount: len(files), TotalSize: totalSize,
+	}
+	if err := manager.store.AuditDownloaderAction(ctx, name, "torrent.files", map[string]any{
+		"hash": torrent.Hash, "file_count": len(files), "complete_file_count": completeFiles,
+		"total_size": totalSize, "remote_content_path": torrent.ContentPath,
+		"local_content_path": evidence.Torrent.LocalContentPath,
+	}, actor); err != nil {
+		return TorrentFilesEvidence{}, err
 	}
 	return evidence, nil
 }

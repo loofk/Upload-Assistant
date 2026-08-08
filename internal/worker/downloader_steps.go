@@ -25,16 +25,29 @@ const maxWorkflowTorrentBytes = 40 << 20
 type DownloaderProvider interface {
 	Add(context.Context, string, []byte, qbittorrent.AddOptions, workflow.Actor) (downloaders.AddEvidence, error)
 	Inspect(context.Context, string, string, workflow.Actor) (downloaders.TorrentEvidence, error)
+	Files(context.Context, string, string, workflow.Actor) (downloaders.TorrentFilesEvidence, error)
 }
 
 type ArtifactReader interface {
 	Open(string) (*os.File, error)
 }
 
-func WithDownloader(provider DownloaderProvider, artifactStore ArtifactReader) Option {
+type WorkflowArtifactStore interface {
+	ArtifactReader
+	ArtifactWriter
+}
+
+func WithDownloader(provider DownloaderProvider, artifactStore WorkflowArtifactStore, allowedContentRoots ...string) Option {
 	return func(runner *Runner) {
+		if len(allowedContentRoots) == 0 {
+			allowedContentRoots = []string{"/downloads"}
+		}
 		runner.executors["downloader_add"] = downloaderAddExecutor{provider: provider, artifacts: artifactStore}
 		runner.executors["downloader_wait"] = downloaderWaitExecutor{provider: provider}
+		runner.executors["content_resolve"] = contentResolveExecutor{
+			provider: provider, artifacts: artifactStore, recorder: runner.runtime,
+			allowedRoots: append([]string(nil), allowedContentRoots...),
+		}
 	}
 }
 

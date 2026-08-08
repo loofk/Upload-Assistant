@@ -20,7 +20,10 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 )
 
-const maxResponseBytes = 4 << 20
+const (
+	maxResponseBytes      = 4 << 20
+	maxFilesResponseBytes = 32 << 20
+)
 
 var (
 	ErrUnauthorized = errors.New("qBittorrent authentication failed")
@@ -71,6 +74,16 @@ type Torrent struct {
 	Tags          string  `json:"tags"`
 	AddedOn       int64   `json:"added_on"`
 	CompletionOn  int64   `json:"completion_on"`
+}
+
+type TorrentFile struct {
+	Index        int     `json:"index"`
+	Name         string  `json:"name"`
+	Size         int64   `json:"size"`
+	Progress     float64 `json:"progress"`
+	Priority     int     `json:"priority"`
+	Seed         bool    `json:"is_seed"`
+	Availability float64 `json:"availability"`
 }
 
 type AddOptions struct {
@@ -190,6 +203,33 @@ func (client *Client) Get(ctx context.Context, hash string) (Torrent, error) {
 	return Torrent{}, ErrNotFound
 }
 
+func (client *Client) Files(ctx context.Context, hash string) ([]TorrentFile, error) {
+	if err := validateHash(hash); err != nil {
+		return nil, err
+	}
+	if err := client.Authenticate(ctx); err != nil {
+		return nil, err
+	}
+	query := url.Values{"hash": {strings.ToLower(hash)}}
+	body, err := client.requestLimit(
+		ctx, http.MethodGet, "/api/v2/torrents/files?"+query.Encode(), nil, "", true, maxFilesResponseBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var files []TorrentFile
+	if err := json.Unmarshal(body, &files); err != nil {
+		return nil, fmt.Errorf("decode qBittorrent torrent files: %w", err)
+	}
+	if len(files) == 0 {
+		return nil, ErrNotFound
+	}
+	if len(files) > 200_000 {
+		return nil, fmt.Errorf("qBittorrent torrent file count exceeds 200000")
+	}
+	return files, nil
+}
+
 func (client *Client) Add(ctx context.Context, metainfo []byte, options AddOptions) (AddResult, error) {
 	hashes, err := torrentmeta.Hashes(metainfo)
 	if err != nil {
@@ -307,6 +347,10 @@ func (client *Client) WaitComplete(ctx context.Context, hash string, interval ti
 }
 
 func (client *Client) request(ctx context.Context, method, apiPath string, body io.Reader, contentType string, authenticated bool) ([]byte, error) {
+	return client.requestLimit(ctx, method, apiPath, body, contentType, authenticated, maxResponseBytes)
+}
+
+func (client *Client) requestLimit(ctx context.Context, method, apiPath string, body io.Reader, contentType string, authenticated bool, responseLimit int64) ([]byte, error) {
 	requestURL := client.endpoint.String() + apiPath
 	request, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
@@ -329,13 +373,13 @@ func (client *Client) request(ctx context.Context, method, apiPath string, body 
 		return nil, fmt.Errorf("qBittorrent request failed: %w", err)
 	}
 	defer response.Body.Close()
-	limited := io.LimitReader(response.Body, maxResponseBytes+1)
+	limited := io.LimitReader(response.Body, responseLimit+1)
 	responseBody, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, fmt.Errorf("read qBittorrent response: %w", err)
 	}
-	if len(responseBody) > maxResponseBytes {
-		return nil, fmt.Errorf("qBittorrent response exceeds %d bytes", maxResponseBytes)
+	if int64(len(responseBody)) > responseLimit {
+		return nil, fmt.Errorf("qBittorrent response exceeds %d bytes", responseLimit)
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return nil, ErrUnauthorized

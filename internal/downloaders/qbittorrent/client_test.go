@@ -83,6 +83,10 @@ func TestClientCookieAuthenticationAddInspectAndLimits(t *testing.T) {
 				Hash: hashes.V1SHA1, Name: "test", State: "uploading", Progress: 1,
 				TotalSize: 1, Completed: 1, AmountLeft: 0, SavePath: "/downloads", ContentPath: "/downloads/test",
 			}})
+		case "/api/v2/torrents/files":
+			_ = json.NewEncoder(w).Encode([]TorrentFile{{
+				Index: 0, Name: "test", Size: 1, Progress: 1, Priority: 1, Seed: true, Availability: 1,
+			}})
 		case "/api/v2/torrents/setDownloadLimit", "/api/v2/torrents/setUploadLimit":
 			_ = r.ParseForm()
 			limit, _ := strconv.ParseInt(r.Form.Get("limit"), 10, 64)
@@ -115,6 +119,10 @@ func TestClientCookieAuthenticationAddInspectAndLimits(t *testing.T) {
 	}
 	if err := client.SetLimits(ctx, hashes.V1SHA1, 4096, 8192); err != nil {
 		t.Fatal(err)
+	}
+	files, err := client.Files(ctx, hashes.V1SHA1)
+	if err != nil || len(files) != 1 || files[0].Name != "test" {
+		t.Fatalf("Files() files/error = %#v/%v", files, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
