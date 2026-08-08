@@ -1,9 +1,88 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestLocalRuleDraftsUseSafeYAMLContract(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "data", "site-rules", "*.md"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	fingerprintPattern := regexp.MustCompile(`^[a-f0-9]{64}$`)
+	validated := 0
+
+	for _, path := range paths {
+		if filepath.Base(path) == "README.md" {
+			continue
+		}
+		path := path
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s) error = %v", path, err)
+			}
+			document, err := ParseMarkdown(raw)
+			if err != nil {
+				t.Fatalf("ParseMarkdown(%s) error = %v", path, err)
+			}
+			if document.Format != "yaml" || document.Kind != Kind {
+				t.Fatalf("repository rule format=%q kind=%q", document.Format, document.Kind)
+			}
+			if len(document.Site.Roles) != 1 {
+				t.Fatalf("repository rule site=%q roles=%v", document.Site.Code, document.Site.Roles)
+			}
+			if !document.Source.Complete {
+				if document.Review.Status != "draft" {
+					t.Fatalf("incomplete local rule review=%q", document.Review.Status)
+				}
+				if document.Automation.AutoPull || document.Automation.AutoUpload {
+					t.Fatalf("incomplete local rule enabled automation: auto_pull=%t auto_upload=%t", document.Automation.AutoPull, document.Automation.AutoUpload)
+				}
+			}
+			if !document.Transfer.ForbidOriginalTorrent || !document.Transfer.PreserveContent {
+				t.Fatalf("repository draft omitted transfer hard gates: %#v", document.Transfer)
+			}
+			pendingManualBlocker := false
+			for _, obligation := range document.Obligations {
+				if obligation.Verification == "manual" && obligation.Blocking && obligation.Resolution == "pending" {
+					pendingManualBlocker = true
+					break
+				}
+			}
+			if !document.Source.Complete && !pendingManualBlocker {
+				t.Fatal("incomplete local rule has no pending blocking manual obligation")
+			}
+			fingerprint, err := document.Fingerprint()
+			if err != nil {
+				t.Fatalf("Fingerprint() error = %v", err)
+			}
+			if !fingerprintPattern.MatchString(fingerprint) {
+				t.Fatalf("Fingerprint() = %q", fingerprint)
+			}
+			policyJSON, err := document.PolicyJSON()
+			if err != nil {
+				t.Fatalf("PolicyJSON() error = %v", err)
+			}
+			policy, err := ParsePolicy(policyJSON)
+			if err != nil {
+				t.Fatalf("ParsePolicy() error = %v", err)
+			}
+			if policy.Site.Code != document.Site.Code || policy.Source.Complete != document.Source.Complete || policy.Automation.AutoPull != document.Automation.AutoPull || policy.Automation.AutoUpload != document.Automation.AutoUpload {
+				t.Fatalf("unsafe policy round trip: %#v", policy)
+			}
+		})
+		validated++
+	}
+	if validated == 0 {
+		t.Skip("local tracker rule evidence is intentionally gitignored")
+	}
+}
 
 func TestParseYAMLRuleAndStableFingerprint(t *testing.T) {
 	raw := testRuleMarkdown(false)

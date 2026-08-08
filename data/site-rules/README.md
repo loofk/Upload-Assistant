@@ -1,37 +1,69 @@
-# 本地站点规则文档
+# Go v2 站点规则 Markdown
 
-这个目录保存从站点规则页复制并人工核对的私有规则证据。`TRACKER.md` 和编译后的
-`site-policies.generated.json` 默认被 Git 忽略；不要提交登录后页面内容、Cookie、passkey、
-API key 或任何账号信息。
+本目录保存可审查、无凭据的本地站点规则源文档。除本说明外，`*.md` 默认被 Git 忽略，
+以免把来自认证页面的规则证据意外提交。文件是导入模板和审查草稿，
+不会被 Docker Compose 自动挂载、导入、审批或激活；运行时的不可变规则修订保存在
+PostgreSQL 和 `/data/rules` 持久卷中。
 
-每个 `TRACKER.md` 由 TOML front matter 和 Markdown 正文组成：
+不要在这里或 Markdown 正文中保存 Cookie、passkey、API key、账号信息或登录后页面中
+只属于账号本人的数据。本地文档若尚未取得完整规则，必须保持
+`source.complete: false`、`review.status: draft`，不能通过审批或激活。
 
-- `# 原始规则`：保留本次审查所依据的原文或明确标注范围的摘录；
-- `automation`、`qbit_limits`、`seeding_requirements`、`transfer_rules`：可执行策略；
-- `[[obligations]]`：无法可靠程序化判断的人工义务；
-- `source_complete=false` 或 blocking obligation 为 `pending` 时，禁止编译运行时快照；
-- `review_status=approved` 只能由显式人工审查命令生成，不要手填 fingerprint。
+## 文档格式
 
-推荐流程：
+每份文档使用 `---` 分隔的 YAML front matter，kind 固定为
+`upload-assistant.site-rule.v1`，后面是保留审查依据的 Markdown 原文：
 
-```bash
-python3 ptcli.py site-rule-docs --json
-python3 ptcli.py site-rule-validate --file data/site-rules/U2.md --json
-python3 ptcli.py site-rule-review \
-  --file data/site-rules/U2.md \
-  --approve --reviewer YOUR_NAME --reviewed-at 2026-08-08T12:00:00+08:00 \
-  --json
-# 确认 preview 后才持久化
-python3 ptcli.py site-rule-review \
-  --file data/site-rules/U2.md \
-  --approve --reviewer YOUR_NAME --reviewed-at 2026-08-08T12:00:00+08:00 \
-  --write --json
-python3 ptcli.py site-rule-compile \
-  --rules-dir data/site-rules \
-  --output data/site-rules/site-policies.generated.json \
-  --write --json
+- `site`：站点代码、名称及 `source`/`target` 角色；
+- `source`：规则页 URL、采集日期、覆盖范围和正文 SHA-256；
+- `automation`：下载、上传、转种能力以及可执行的 `auto_pull`/`auto_upload` 开关；
+- `limits`、`seeding`、`transfer`：限速、做种和转载硬策略；
+- `obligations`：程序可验证或必须人工判断的义务；
+- `review`：草稿/审批状态。fingerprint 由服务计算，不要手填或复制旧值。
+
+将站点规则文本复制到 Markdown 正文，并在 `source.scope` 中准确写明已覆盖和未覆盖的
+页面。只有完整取得本次自动化所需的现行原文、核对引用并计算正文 hash 后，才可设置
+`source.complete: true`。无法可靠程序化判断的条款必须保留为
+`verification: manual`、`blocking: true`、`resolution: pending`；不能为了通过 gate 改成
+程序已验证。程序门禁已经真实实现并有测试时，才可使用
+`verification: programmatic`、`resolution: enforced`。
+
+`auto_pull` 和 `auto_upload` 是运行时硬开关，不是能力说明。在完整审查前保持 `false`。
+`automation.download`、`upload` 和 `retorrent` 只描述文档覆盖的能力，不能代替自动执行
+授权。
+
+## 导入、审批与激活
+
+可在 Web「规则中心」粘贴整份 Markdown，也可调用 Go v2 API：
+
+```http
+POST /api/v2/site-rules/import
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"markdown":"---\n...\n---\n\n# 原始规则\n..."}
 ```
 
-Docker Compose 将宿主机 `PTCLI_SITE_RULES_HOST_PATH` 挂载到容器内
-`/Upload-Assistant/data/site-rules`。API 也提供只读列举/校验和带双重显式确认的审查、编译接口；
-这些接口不访问 tracker、不执行下载或上传，也不能代替人工规则判断。
+导入只创建不可变草稿，不调用 Tracker。随后读取修订详情、原始 Markdown 和服务端计算的
+fingerprint：
+
+```text
+GET /api/v2/site-rules/{revision_id}
+GET /api/v2/site-rules/{revision_id}/markdown
+```
+
+只有 `source.complete=true`、结构化策略与正文都已人工审查时，才提交精确 fingerprint
+进行审批，再单独激活：
+
+```text
+POST /api/v2/site-rules/{revision_id}/approve
+POST /api/v2/site-rules/{revision_id}/activate
+```
+
+导入、审批和激活都不访问站点，也不代表某次任务已经接受规则。任务仍须绑定当前激活修订
+的精确 fingerprint，并为所有 blocking manual obligations 提交人工证据；live 上传还必须
+在最终查重和上传包可审阅后显式提交 `confirm_upload=true`。
+
+legacy TOML `+++` 文档仅为旧数据迁移兼容，不应再作为仓库规则源格式。复制规则正文后先
+在本地运行 `go test ./internal/rules -count=1`；完整项目验收使用 `make go-check` 和
+`make verify-go-v2-local`，测试不会联系真实站点。

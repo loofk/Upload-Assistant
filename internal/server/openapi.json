@@ -309,7 +309,8 @@
     "/api/v2/site-rules/import": {
       "post": {
         "operationId": "importSiteRuleRevision",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["markdown"], "properties": {"markdown": {"type": "string", "minLength": 1}}}}}},
+        "description": "Imports structured Markdown as an immutable draft. A draft with source.complete=false cannot be approved or activated.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["markdown"], "properties": {"markdown": {"type": "string", "minLength": 1, "description": "YAML front matter followed by captured original rule text; keep source.complete=false until the relevant current rules have been fully reviewed."}}}}}},
         "responses": {"201": {"description": "Immutable draft imported", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}}
       }
     },

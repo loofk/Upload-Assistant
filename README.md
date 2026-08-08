@@ -10,7 +10,7 @@ Upload Assistant 是面向中文 PT 圈的本地转种、发种与每日候选�
 - U2/CHD → MTEAM 参考闭环：源站识别/拉种、远程下载器、MediaInfo/BDInfo/截图、imgbb/PTPimg、目标查重/上传、新种下载/注入、做种核验与最终 summary。
 - PostgreSQL 持久调度：每日候选、排名、风险/阻塞、通知、运行历史与崩溃后租约接管；通知写入结果不明时禁止盲重试并要求显式对账。
 - 独立集成配置：qBittorrent、Transmission、rTorrent、Deluge Web、imgbb、PTPimg、截图策略、Discord webhook、Sonarr/Radarr，以及显式 TMDb/PTGen 元数据 provider。
-- Markdown 站点规则：结构化 front matter、原始规则文本、不可变版本、fingerprint、人工审批和激活。
+- Markdown 站点规则：Go v2 YAML front matter、原始规则文本、不可变版本、fingerprint、人工审批和激活。本地 `data/site-rules/*.md` 默认不入 Git，必须显式导入，绝不会自动生效。
 - 审计：每个任务的 hash 链、artifact SHA-256，以及配置和外部动作的全局脱敏日志。
 - AI 调用：OpenAPI、结构化工具目录、OpenClaw/Hermes Agent Skill 和原生 JSON CLI。
 - 旧配置迁移：只读解析 `/legacy`，不执行 Python；加密凭据和 30 天加密历史归档。
@@ -57,7 +57,7 @@ qBittorrent 位于宿主机时，在 Web「配置」中使用 `http://host.docke
 ## 首次配置顺序
 
 1. 在 Web 中配置源站 U2 或 CHD、目标站 MTEAM；凭据只写不读并加密保存。
-2. 导入完整规则 Markdown，审阅解析策略和原文，按精确 fingerprint 审批并激活。
+2. 在本地 `data/site-rules/*.md` 补齐现行规则原文，将 `source.complete` 改为 true 后显式导入；审阅解析策略和原文，按服务端计算的精确 fingerprint 审批并激活。本地草稿默认被 Git 忽略，也不会被 Compose 自动挂载或激活。
 3. 配置下载器、图床、截图策略以及参考闭环所需的 TMDb/PTGen provider；按需配置 Discord 和 Sonarr/Radarr。PTGen 不会回退到内置公共地址。
 4. 打开「就绪检查」，或调用 `GET /api/v2/readiness/live`，修复所有本地 blocker。
 5. 获得操作者授权后，分别执行真实站点/下载器探测，再用 `execution_mode=step` 创建受控任务。
@@ -106,7 +106,7 @@ UA_POSTGRES_PASSWORD=compose-config-fixture make go-compose-config
 make verify-go-v2-local
 ```
 
-`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、44 个 AI 工具、带 golden fingerprint 的 26 项适配器能力契约、Agent Skill、中文 Web、CLI、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
+`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、45 个 AI 工具、带 golden fingerprint 的 26 项适配器能力契约、Agent Skill、中文 Web、CLI、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
 
 本地与 CI 测试只使用 fixture、`httptest` 和隔离 PostgreSQL，不联系真实 Tracker、下载器或图床。真实 U2→MTEAM、CHD→MTEAM、qBittorrent、MediaInfo/BDInfo/截图/mkbrr 与 imgbb/PTPimg 闭环必须由操作者提供合法账号、资源和显式授权后执行；在此之前必须保持为外部验证阻塞，不能伪造完成。
 

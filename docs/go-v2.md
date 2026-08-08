@@ -60,6 +60,12 @@ upload-assistant cli jobs resume <job-id> \
 
 live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新提交源站和目标站的精确规则 fingerprint；CLI 只是减少误操作，服务端仍会重新验证规则、人工 obligation、查重、不可变上传包与做种 gate。
 
+## 站点规则 Markdown
+
+本地 `data/site-rules/*.md` 使用 Go v2 YAML front matter，并保留人工审查所依据的规则正文；除说明文件外，它们默认被 Git 忽略，也不会由 Compose 自动导入或激活。未取得或未逐条核对完整规则时必须保持 `source.complete=false`、`review.status=draft`、`auto_pull=false` 和 `auto_upload=false`，不能审批或用于 live gate。
+
+在 Web「规则中心」或 `POST /api/v2/site-rules/import` 粘贴整份文档只会创建不可变草稿且不访问 Tracker。补齐现行原文并核对结构化策略后，操作者必须读取服务端计算的 fingerprint，依次显式调用 `/approve` 和 `/activate`。人工 obligation 仍需在具体任务中提交证据；激活规则也不会自动赋予 `accept_rules` 或 `confirm_upload`。字段说明和安全维护流程见 `data/site-rules/README.md`。
+
 ## 真实环境就绪交接
 
 在进行任何站点、下载器、图床或元数据提供方联网探测前，先调用 `GET /api/v2/readiness/live`，或使用 Web 顶部「就绪检查」和 CLI `readiness live`。当前完整参考路径限定为 U2/CHD → MTEAM。该只读检查仅验证：已审批激活的规则 fingerprint 与阻塞 obligations、站点凭据字段是否存在、源/目标下载器、图床、截图策略、显式 TMDb/PTGen provider、`/downloads` 挂载以及 MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 是否可用。
