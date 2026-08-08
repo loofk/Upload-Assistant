@@ -641,6 +641,8 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "state_conflict", err.Error())
 	case errors.Is(err, workflow.ErrReplayUnsafe):
 		writeProblem(w, http.StatusConflict, "replay_not_allowed", err.Error())
+	case errors.Is(err, workflow.ErrReconciliation):
+		writeProblem(w, http.StatusConflict, "reconciliation_required", err.Error())
 	case errors.Is(err, workflow.ErrUnsupportedKind):
 		writeProblem(w, http.StatusBadRequest, "unsupported_job_kind", err.Error())
 	default:

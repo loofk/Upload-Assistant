@@ -267,6 +267,7 @@
     "/api/v2/jobs/{job_id}/resume": {
       "post": {
         "operationId": "resumeJob",
+		"description": "Queues a paused, blocked, or failed job. Unknown remote-write outcomes and partial downloader writes require an explicit attempt-bound reconciliation decision; a generic retry is rejected with reconciliation_required.",
         "parameters": [{"$ref": "#/components/parameters/JobID"}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResumeJobRequest"}}}},
         "responses": {"200": {"description": "Job queued for recovery", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
@@ -803,8 +804,21 @@
       "ResumeJobRequest": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {"resume_state": {"type": "object", "additionalProperties": true, "default": {}}}
+		"properties": {"resume_state": {"type": "object", "additionalProperties": true, "default": {}, "properties": {"reconciliation": {"$ref": "#/components/schemas/JobReconciliation"}}}}
       },
+	  "JobReconciliation": {
+		"type": "object", "additionalProperties": false,
+		"required": ["blocker_code", "attempt_id", "decision", "confirmed", "evidence_sha256", "observed_at"],
+		"properties": {
+		  "blocker_code": {"type": "string", "enum": ["target_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"]},
+		  "attempt_id": {"type": "string", "format": "uuid", "description": "Exact latest blocked/failed attempt returned by the attempts API."},
+		  "decision": {"type": "string", "enum": ["verified_not_applied", "verified_remote_state"]},
+		  "confirmed": {"type": "boolean", "const": true},
+		  "evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of the operator-reviewed external reconciliation evidence; raw evidence and credentials are not copied into the job event."},
+		  "observed_at": {"type": "string", "format": "date-time"},
+		  "observed_hash": {"type": "string", "description": "Required for a downloader partial add and must match the exact hash in the persisted reconciliation template."}
+		}
+	  },
       "ReplayJobRequest": {
         "type": "object", "additionalProperties": false,
         "properties": {

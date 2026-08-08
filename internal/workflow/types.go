@@ -10,6 +10,7 @@ var (
 	ErrNotFound        = errors.New("workflow resource not found")
 	ErrConflict        = errors.New("workflow state conflict")
 	ErrReplayUnsafe    = errors.New("workflow replay is not allowed")
+	ErrReconciliation  = errors.New("workflow reconciliation is required")
 	ErrUnsupportedKind = errors.New("workflow kind is not registered")
 )
 

@@ -73,6 +73,7 @@ live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新�
 - `GET /api/v2/jobs/{job_id}/attempts` 按步骤与尝试号稳定分页，展示每次执行的状态、时间、adapter、稳定错误码及脱敏输出；原始输入快照只返回 SHA-256，不会经 API 泄漏。
 - `GET /api/v2/jobs/{job_id}/events` 是单个任务的 append-only hash 链；配合 attempts、steps、artifacts 与 summary 可验证每次重试、租约恢复、转种边界和证据文件。
 - `POST /api/v2/jobs/{job_id}/replay` 只允许从 blocked/failed/cancelled 任务创建带 `replay_of_job_id` 的全新任务，默认逐步模式；运行中、暂停、已完成、待对账或上传结果未知会被硬拒绝。新任务会清除旧规则接受、人工 obligation、resume_state 和 `confirm_upload`，不能用回放绕过 gate。
+- 未知远端写入和下载器 partial-add 会自动在 `resume_state.reconciliation` 写入 blocker 与当前 attempt 模板。普通 resume、CLI `jobs retry` 和 replay 均返回稳定的 `reconciliation_required`/`replay_not_allowed`；只有与当前 attempt 精确绑定、由操作者确认、包含 RFC3339 观察时间与人工证据 SHA-256 的允许决定才能续跑。目标上传只接受 `verified_not_applied`，随后仍强制重新查重和显式 `confirm_upload`；下载器 partial-add 必须以 `verified_remote_state` 回填模板中的精确 observed hash。事件链只保存决定、证据 hash 与 reconciliation hash，不复制可能含凭据的原始材料。
 - `GET /api/v2/audit-events` 是配置变更、远程下载器/图床动作、通知、迁移和 Sonarr/Radarr 等全局动作的脱敏审计，可按 `actor_type`、`action`、`resource_type`、`resource_id` 精确过滤，并使用不透明 cursor 稳定翻页。该全局日志不会被描述为任务 hash 链。
 - Web 顶部「审计」和 CLI `audit list` 读取同一接口。API 返回前会递归脱敏 credential、cookie、token、passkey、announce URL 等敏感字段；需要证明某个任务完整性时仍应回到该任务的事件链和 artifact SHA-256。
 

@@ -280,6 +280,8 @@ function JobDetail({
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [busy, setBusy] = useState(false);
   const confirmRequired = detail.blockers.some((blocker) => blocker.code === "confirm_upload_required");
+	const reconciliationRequired = detail.blockers.some((blocker) => blocker.code.endsWith("_outcome_unknown") || blocker.code.includes("requires_reconciliation"));
+	const reconciliationReady = reconciliationInputReady(resumeText);
 
   useEffect(() => {
     setResumeText(JSON.stringify(detail.resume_state ?? {}, null, 2));
@@ -304,6 +306,10 @@ function JobDetail({
       onError(new Error("live 上传需要先勾选显式确认。"));
       return;
     }
+		if (reconciliationRequired && !reconciliationReady) {
+			onError(new Error("未知远端结果必须先填写与当前 attempt 绑定的 reconciliation、证据 SHA-256 和人工确认。"));
+			return;
+		}
     let state: Record<string, JsonValue>;
     try {
       const parsed: unknown = JSON.parse(resumeText);
@@ -327,8 +333,7 @@ function JobDetail({
 
   const canPause = ["queued", "running", "blocked", "failed"].includes(detail.status);
   const canResume = ["paused", "blocked", "failed"].includes(detail.status);
-  const replayUnsafe = detail.blockers.some((blocker) => blocker.code.endsWith("_outcome_unknown") || blocker.code.includes("requires_reconciliation"));
-  const canReplay = ["blocked", "failed", "cancelled"].includes(detail.status) && !replayUnsafe;
+  const canReplay = ["blocked", "failed", "cancelled"].includes(detail.status) && !reconciliationRequired;
   const completedSteps = detail.steps.filter((step) => step.status === "complete" || step.status === "skipped").length;
   const progress = detail.steps.length ? Math.round((completedSteps / detail.steps.length) * 100) : 0;
 
@@ -355,7 +360,7 @@ function JobDetail({
         </div>
         <div className="detail-actions">
           {canPause && <button className="secondary" disabled={busy} onClick={() => void transition("pause")}>暂停</button>}
-          {canResume && <button className="primary" disabled={busy} onClick={() => void resume()}>续跑</button>}
+          {canResume && <button className="primary" disabled={busy || (reconciliationRequired && !reconciliationReady)} onClick={() => void resume()}>{reconciliationRequired ? "对账后续跑" : "续跑"}</button>}
           {canReplay && <button className="secondary" disabled={busy} onClick={() => void replay()}>重放新任务</button>}
           {!terminalStatuses.has(detail.status) && <button className="danger" disabled={busy} onClick={() => void transition("cancel")}>取消</button>}
         </div>
@@ -372,11 +377,12 @@ function JobDetail({
       {canResume && <section className="resume-panel">
         <div className="section-title"><div><p className="eyebrow">RECOVERY INPUT</p><h2>恢复参数</h2></div><span>提交后会写入审计事件</span></div>
         <textarea aria-label="resume_state JSON" spellCheck={false} value={resumeText} onChange={(event) => setResumeText(event.target.value)} />
+		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>目标站未知结果仅接受 verified_not_applied，恢复后仍会重新查重并重新经过 confirm_upload。</span></div>}
         {confirmRequired && <label className="confirm-live">
           <input type="checkbox" checked={confirmUpload} onChange={(event) => setConfirmUpload(event.target.checked)} />
           <span><strong>我已人工复核目标站规则、最终查重与不可变上传包，并确认执行 live 上传。</strong><small>此确认不会被系统或 AI 自动推断。</small></span>
         </label>}
-        <button className="primary" disabled={busy || (confirmRequired && !confirmUpload)} onClick={() => void resume()}>写入参数并续跑</button>
+        <button className="primary" disabled={busy || (confirmRequired && !confirmUpload) || (reconciliationRequired && !reconciliationReady)} onClick={() => void resume()}>{reconciliationRequired ? "提交对账并续跑" : "写入参数并续跑"}</button>
       </section>}
 
       <nav className="tabs" aria-label="任务详情">
@@ -394,6 +400,18 @@ function JobDetail({
       {tab === "summary" && <SummaryView summary={detail.summary} status={detail.status} />}
     </article>
   );
+}
+
+function reconciliationInputReady(raw: string): boolean {
+	try {
+		const parsed = JSON.parse(raw) as {reconciliation?: Record<string, unknown>};
+		const value = parsed?.reconciliation;
+		return !!value && value.confirmed === true && typeof value.blocker_code === "string" && value.blocker_code.length > 0 &&
+			typeof value.attempt_id === "string" && value.attempt_id.length > 0 && typeof value.decision === "string" && value.decision !== "unreconciled" &&
+			typeof value.evidence_sha256 === "string" && /^[a-f0-9]{64}$/.test(value.evidence_sha256) && typeof value.observed_at === "string" && value.observed_at.length > 0;
+	} catch {
+		return false;
+	}
 }
 
 function BlockerPanel({blockers}: {blockers: Blocker[]}) {

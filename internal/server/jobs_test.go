@@ -220,6 +220,14 @@ func TestReplayJobReturnsStableSafetyConflict(t *testing.T) {
 	}
 }
 
+func TestResumeReconciliationReturnsStableConflict(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeWorkflowError(response, fmt.Errorf("%w: blocker target_upload_outcome_unknown must be reconciled", workflow.ErrReconciliation))
+	if response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"reconciliation_required"`)) {
+		t.Fatalf("reconciliation status/body = %d/%s", response.Code, response.Body.String())
+	}
+}
+
 func TestArtifactContentVerifiesEvidenceBeforeDownload(t *testing.T) {
 	body := []byte(`{"ok":true,"status":"complete"}`)
 	digest := sha256.Sum256(body)

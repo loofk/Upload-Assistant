@@ -1,10 +1,13 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,17 +185,25 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	}
 	job, err = store.BlockStep(
 		ctx, job.ID, "integration-worker", attempt.ID,
-		json.RawMessage(`[{"code":"credential_required"}]`),
-		json.RawMessage(`[{"action":"configure_site"}]`),
-		json.RawMessage(`{"site":"U2"}`),
+		json.RawMessage(`[{"code":"target_upload_outcome_unknown"}]`),
+		json.RawMessage(`[{"action":"reconcile_target_upload"}]`),
+		json.RawMessage(`{"target_upload":{"outcome":"unreconciled"}}`),
 		Actor{Type: "worker", ID: "integration-worker"},
 	)
 	if err != nil || job.Status != JobBlocked {
 		t.Fatalf("BlockStep() job/error = %s/%v", job.Status, err)
 	}
 	attemptPage, err := store.ListAttempts(ctx, job.ID, ListAttemptsFilter{Limit: 100})
-	if err != nil || len(attemptPage.Attempts) != 2 || attemptPage.Attempts[1].ErrorCode != "credential_required" {
+	if err != nil || len(attemptPage.Attempts) != 2 || attemptPage.Attempts[1].ErrorCode != "target_upload_outcome_unknown" {
 		t.Fatalf("blocked attempts/error = %#v/%v", attemptPage, err)
+	}
+	if _, err := store.ResumeJob(ctx, job.ID, json.RawMessage(`{}`), Actor{Type: "test", ID: "store-lifecycle"}); !errors.Is(err, ErrReconciliation) {
+		t.Fatalf("unsafe ResumeJob() error = %v, want ErrReconciliation", err)
+	}
+	reconciliation := fmt.Sprintf(`{"confirm_upload":true,"reconciliation":{"blocker_code":"target_upload_outcome_unknown","attempt_id":%q,"decision":"verified_not_applied","confirmed":true,"evidence_sha256":"%s","observed_at":"2026-08-08T00:00:00Z"}}`, attempt.ID, strings.Repeat("a", 64))
+	job, err = store.ResumeJob(ctx, job.ID, json.RawMessage(reconciliation), Actor{Type: "test", ID: "store-lifecycle"})
+	if err != nil || job.Status != JobQueued {
+		t.Fatalf("reconciled ResumeJob() job/error = %s/%v", job.Status, err)
 	}
 	job, err = store.CancelJob(ctx, job.ID, Actor{Type: "test", ID: "store-lifecycle"})
 	if err != nil || job.Status != JobCancelled {
@@ -233,13 +244,20 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 		t.Fatalf("VerifyEventChain() error = %v", err)
 	}
 	replayEvents := 0
+	reconciliationEvents := 0
 	for _, event := range events {
 		if event.Type == "job.replayed" {
 			replayEvents++
 		}
+		if event.Type == "job.reconciliation_acknowledged" {
+			reconciliationEvents++
+			if bytes.Contains(event.Payload, []byte(`"confirmed"`)) || !bytes.Contains(event.Payload, []byte(`"evidence_sha256"`)) {
+				t.Fatalf("unsafe reconciliation event payload = %s", event.Payload)
+			}
+		}
 	}
-	if replayEvents != 1 {
-		t.Fatalf("job.replayed event count = %d, want 1", replayEvents)
+	if replayEvents != 1 || reconciliationEvents != 1 {
+		t.Fatalf("job replay/reconciliation event counts = %d/%d, want 1/1", replayEvents, reconciliationEvents)
 	}
 	childEvents, err := store.ListEvents(ctx, replay.ID, 0, 100)
 	if err != nil || len(childEvents) != 1 || VerifyEventChain(childEvents) != nil {
@@ -382,5 +400,26 @@ func TestSafeReplayInputAndReconciliationBlockers(t *testing.T) {
 		if err != nil || blocker != code {
 			t.Fatalf("unsafeReplayBlocker(%s) = %q/%v", code, blocker, err)
 		}
+	}
+}
+
+func TestResumeReconciliationRequiresAttemptBoundEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	attemptID := "55555555-5555-4555-8555-555555555555"
+	blockers := json.RawMessage(`[{"code":"target_upload_outcome_unknown"}]`)
+	current := json.RawMessage(`{"reconciliation":{"blocker_code":"target_upload_outcome_unknown","attempt_id":"` + attemptID + `","decision":"unreconciled","confirmed":false}}`)
+	if _, err := validateResumeReconciliation(blockers, current, json.RawMessage(`{}`), attemptID, now); !errors.Is(err, ErrReconciliation) {
+		t.Fatalf("missing reconciliation error = %v", err)
+	}
+	valid := json.RawMessage(`{"reconciliation":{"blocker_code":"target_upload_outcome_unknown","attempt_id":"` + attemptID + `","decision":"verified_not_applied","confirmed":true,"evidence_sha256":"` + strings.Repeat("a", 64) + `","observed_at":"2026-08-08T11:59:00Z"}}`)
+	audit, err := validateResumeReconciliation(blockers, current, valid, attemptID, now)
+	if err != nil || audit["decision"] != "verified_not_applied" || len(audit["reconciliation_sha256"].(string)) != 64 {
+		t.Fatalf("valid reconciliation audit/error = %#v/%v", audit, err)
+	}
+	downloaderBlockers := json.RawMessage(`[{"code":"downloader_partial_add_requires_reconciliation"}]`)
+	downloaderCurrent := json.RawMessage(`{"reconciliation":{"blocker_code":"downloader_partial_add_requires_reconciliation","attempt_id":"` + attemptID + `","required_observed_hash":"0123456789abcdef0123456789abcdef01234567"}}`)
+	downloaderValid := json.RawMessage(`{"reconciliation":{"blocker_code":"downloader_partial_add_requires_reconciliation","attempt_id":"` + attemptID + `","decision":"verified_remote_state","confirmed":true,"evidence_sha256":"` + strings.Repeat("b", 64) + `","observed_at":"2026-08-08T11:59:00Z","observed_hash":"0123456789abcdef0123456789abcdef01234567"}}`)
+	if _, err := validateResumeReconciliation(downloaderBlockers, downloaderCurrent, downloaderValid, attemptID, now); err != nil {
+		t.Fatalf("downloader reconciliation error = %v", err)
 	}
 }

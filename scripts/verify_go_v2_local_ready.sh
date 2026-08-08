@@ -87,7 +87,7 @@ adapters_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_A
 readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default --tmdb-provider tmdb-main --ptgen-provider ptgen-main)"
 
 jq -e '.ok == true and .status == "ready" and .checks.database == "ready" and .checks.data_dir == "ready"' <<<"$health_json" >/dev/null
-jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/jobs/{job_id}/attempts"] and .paths["/api/v2/jobs/{job_id}/replay"] and .paths["/api/v2/adapters"] and .paths["/api/v2/audit-events"] and .paths["/api/v2/readiness/live"] and .components.schemas.RetorrentSummary and .components.schemas.ReplayJobRequest and .components.schemas.AdapterCatalogEnvelope and .components.schemas.StepAttemptListEnvelope and .components.schemas.LiveReadinessReport' <<<"$openapi_json" >/dev/null
+jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/jobs/{job_id}/attempts"] and .paths["/api/v2/jobs/{job_id}/replay"] and .paths["/api/v2/adapters"] and .paths["/api/v2/audit-events"] and .paths["/api/v2/readiness/live"] and .components.schemas.RetorrentSummary and .components.schemas.ReplayJobRequest and .components.schemas.JobReconciliation and .components.schemas.AdapterCatalogEnvelope and .components.schemas.StepAttemptListEnvelope and .components.schemas.LiveReadinessReport' <<<"$openapi_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and .count >= 44 and any(.tools[]; .name == "list_adapter_capabilities") and any(.tools[]; .name == "list_audit_events") and any(.tools[]; .name == "get_job_attempts") and any(.tools[]; .name == "replay_job") and any(.tools[]; .name == "get_live_readiness") and any(.tools[]; .name == "resolve_external_metadata")' <<<"$tools_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and .catalog_version == "upload-assistant.adapter-catalog.v1" and (.catalog_sha256 | test("^[a-f0-9]{64}$")) and .count == 26 and ([.adapters[] | select(.runtime_supported == true)] | length) >= 15 and any(.adapters[]; .id == "site/U2" and .runtime_supported == true) and any(.adapters[]; .id == "site/AUDIENCES" and .runtime_supported == false and (.unavailable_reason | length) > 0)' <<<"$adapters_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and (.audit_events | type == "array")' <<<"$audit_json" >/dev/null
@@ -121,7 +121,7 @@ if ! grep -q '全局审计' "$verify_root/app.js" || ! grep -q '真实环境就�
 fi
 
 skill_text="$(curl --fail --silent --show-error "$base_url/.well-known/upload-assistant/SKILL.md")"
-if [[ "$skill_text" != *"confirm_upload"* ]] || [[ "$skill_text" != *"jobs attempts"* ]] || [[ "$skill_text" != *"jobs replay"* ]] || [[ "$skill_text" != *"/api/v2/audit-events"* ]] || [[ "$skill_text" != *"/api/v2/readiness/live"* ]]; then
+if [[ "$skill_text" != *"confirm_upload"* ]] || [[ "$skill_text" != *"jobs attempts"* ]] || [[ "$skill_text" != *"jobs replay"* ]] || [[ "$skill_text" != *"resume_state.reconciliation"* ]] || [[ "$skill_text" != *"/api/v2/audit-events"* ]] || [[ "$skill_text" != *"/api/v2/readiness/live"* ]]; then
   echo "embedded AgentSkill safety or audit contract is missing" >&2
   exit 1
 fi

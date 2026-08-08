@@ -81,6 +81,8 @@ describe("App authentication boundary", () => {
     expect(screen.getAllByText(/remote_outcome_unknown/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/sha256:/)).toBeInTheDocument();
     expect(screen.queryByRole("button", {name: "重放新任务"})).not.toBeInTheDocument();
+		expect(screen.getByRole("button", {name: "对账后续跑"})).toBeDisabled();
+		expect(screen.getByText("必须完成远端对账")).toBeInTheDocument();
   });
 
   it("creates a safety-reset replay from an eligible job", async () => {

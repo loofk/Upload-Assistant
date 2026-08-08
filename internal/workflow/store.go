@@ -943,6 +943,11 @@ func (s *Store) stopStep(
 		}
 		*values[index] = canonical
 	}
+	var err error
+	resumeState, err = addReconciliationTemplate(blockers, nextActions, resumeState, attemptID)
+	if err != nil {
+		return Job{}, fmt.Errorf("prepare stopped step reconciliation: %w", err)
+	}
 	jobStatus := JobBlocked
 	if stepStatus == StepFailed {
 		jobStatus = JobFailed
@@ -1028,6 +1033,121 @@ func (s *Store) ResumeJob(ctx context.Context, jobID string, resumeState json.Ra
 	return s.transitionJob(ctx, jobID, actor, []JobStatus{JobPaused, JobBlocked, JobFailed}, JobQueued, "job.resumed", resumeState)
 }
 
+type reconciliationInput struct {
+	BlockerCode    string `json:"blocker_code"`
+	AttemptID      string `json:"attempt_id"`
+	Decision       string `json:"decision"`
+	Confirmed      bool   `json:"confirmed"`
+	EvidenceSHA256 string `json:"evidence_sha256"`
+	ObservedAt     string `json:"observed_at"`
+	ObservedHash   string `json:"observed_hash,omitempty"`
+}
+
+func addReconciliationTemplate(blockers, nextActions, resumeState json.RawMessage, attemptID string) (json.RawMessage, error) {
+	blockerCode, err := unsafeReplayBlocker(blockers)
+	if err != nil || blockerCode == "" {
+		return resumeState, err
+	}
+	var state map[string]any
+	if err := json.Unmarshal(resumeState, &state); err != nil || state == nil {
+		return nil, errors.New("resume state must be a JSON object")
+	}
+	template := map[string]any{
+		"blocker_code": blockerCode, "attempt_id": attemptID,
+		"decision": "unreconciled", "confirmed": false,
+	}
+	if blockerCode == "downloader_partial_add_requires_reconciliation" {
+		var actions []struct {
+			Parameters map[string]any `json:"parameters"`
+		}
+		if json.Unmarshal(nextActions, &actions) == nil && len(actions) > 0 {
+			if observed, ok := actions[0].Parameters["observed_hash"].(string); ok && strings.TrimSpace(observed) != "" {
+				template["required_observed_hash"] = strings.ToLower(strings.TrimSpace(observed))
+			}
+		}
+	}
+	state["reconciliation"] = template
+	body, err := json.Marshal(state)
+	if err != nil {
+		return nil, err
+	}
+	return canonicalJSON(body)
+}
+
+func validateResumeReconciliation(
+	blockers, currentResumeState, proposedResumeState json.RawMessage,
+	currentAttemptID string,
+	now time.Time,
+) (map[string]any, error) {
+	blockerCode, err := unsafeReplayBlocker(blockers)
+	if err != nil {
+		return nil, fmt.Errorf("inspect reconciliation blockers: %w", err)
+	}
+	if blockerCode == "" {
+		return nil, nil
+	}
+	var proposed map[string]json.RawMessage
+	if err := json.Unmarshal(proposedResumeState, &proposed); err != nil || proposed == nil {
+		return nil, fmt.Errorf("%w: resume_state must contain an explicit reconciliation object", ErrReconciliation)
+	}
+	raw, exists := proposed["reconciliation"]
+	if !exists {
+		return nil, fmt.Errorf("%w: blocker %s must be reconciled before resume", ErrReconciliation, blockerCode)
+	}
+	var reconciliation reconciliationInput
+	if err := json.Unmarshal(raw, &reconciliation); err != nil {
+		return nil, fmt.Errorf("%w: reconciliation input is invalid", ErrReconciliation)
+	}
+	if reconciliation.BlockerCode != blockerCode || reconciliation.AttemptID == "" || reconciliation.AttemptID != currentAttemptID {
+		return nil, fmt.Errorf("%w: reconciliation must bind the current blocker and attempt", ErrReconciliation)
+	}
+	if !reconciliation.Confirmed {
+		return nil, fmt.Errorf("%w: reconciliation.confirmed must be true", ErrReconciliation)
+	}
+	evidenceBytes, evidenceErr := hex.DecodeString(reconciliation.EvidenceSHA256)
+	if evidenceErr != nil || len(evidenceBytes) != sha256.Size || reconciliation.EvidenceSHA256 != strings.ToLower(reconciliation.EvidenceSHA256) {
+		return nil, fmt.Errorf("%w: reconciliation.evidence_sha256 must be a lowercase SHA-256", ErrReconciliation)
+	}
+	observedAt, err := time.Parse(time.RFC3339, reconciliation.ObservedAt)
+	if err != nil || observedAt.IsZero() || observedAt.After(now.Add(5*time.Minute)) {
+		return nil, fmt.Errorf("%w: reconciliation.observed_at must be an RFC3339 time that is not in the future", ErrReconciliation)
+	}
+
+	var current map[string]json.RawMessage
+	if err := json.Unmarshal(currentResumeState, &current); err != nil {
+		return nil, fmt.Errorf("inspect current reconciliation state: %w", err)
+	}
+	var template struct {
+		BlockerCode          string `json:"blocker_code"`
+		AttemptID            string `json:"attempt_id"`
+		RequiredObservedHash string `json:"required_observed_hash"`
+	}
+	if err := json.Unmarshal(current["reconciliation"], &template); err != nil || template.BlockerCode != blockerCode || template.AttemptID != currentAttemptID {
+		return nil, fmt.Errorf("%w: persisted reconciliation template is missing or stale", ErrReconciliation)
+	}
+
+	switch blockerCode {
+	case "target_upload_outcome_unknown":
+		if reconciliation.Decision != "verified_not_applied" {
+			return nil, fmt.Errorf("%w: target upload unknown outcomes only support verified_not_applied before a fresh duplicate gate", ErrReconciliation)
+		}
+	case "downloader_partial_add_requires_reconciliation":
+		if reconciliation.Decision != "verified_remote_state" || template.RequiredObservedHash == "" ||
+			!strings.EqualFold(reconciliation.ObservedHash, template.RequiredObservedHash) {
+			return nil, fmt.Errorf("%w: downloader reconciliation must verify the exact observed hash", ErrReconciliation)
+		}
+	default:
+		return nil, fmt.Errorf("%w: blocker %s has no implemented safe resume decision", ErrReconciliation, blockerCode)
+	}
+	reconciliationHashBody, _ := canonicalJSON(raw)
+	return map[string]any{
+		"blocker_code": blockerCode, "attempt_id": currentAttemptID, "decision": reconciliation.Decision,
+		"evidence_sha256": reconciliation.EvidenceSHA256, "observed_at": observedAt.UTC().Format(time.RFC3339),
+		"observed_hash":         strings.ToLower(strings.TrimSpace(reconciliation.ObservedHash)),
+		"reconciliation_sha256": sha256Hex(reconciliationHashBody),
+	}, nil
+}
+
 func (s *Store) CancelJob(ctx context.Context, jobID string, actor Actor) (Job, error) {
 	return s.transitionJob(ctx, jobID, actor, []JobStatus{JobDraft, JobQueued, JobRunning, JobPaused, JobBlocked, JobFailed}, JobCancelled, "job.cancelled", nil)
 }
@@ -1047,14 +1167,34 @@ func (s *Store) transitionJob(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var current JobStatus
-	var currentStepKey string
-	if err := tx.QueryRow(ctx, "SELECT status, COALESCE(current_step_key, '') FROM jobs WHERE id = $1 FOR UPDATE", jobID).Scan(&current, &currentStepKey); errors.Is(err, pgx.ErrNoRows) {
+	var currentStepKey, currentAttemptID string
+	var currentBlockers, currentResumeState json.RawMessage
+	if err := tx.QueryRow(ctx, `
+		SELECT j.status, COALESCE(j.current_step_key, ''), j.blockers, j.resume_state,
+		       COALESCE((
+		           SELECT sa.id::text FROM step_attempts sa
+		           JOIN job_steps js ON js.id = sa.job_step_id
+		           WHERE js.job_id = j.id AND js.step_key = j.current_step_key
+		           ORDER BY sa.attempt DESC LIMIT 1
+		       ), '')
+		FROM jobs j WHERE j.id = $1 FOR UPDATE`, jobID).Scan(
+		&current, &currentStepKey, &currentBlockers, &currentResumeState, &currentAttemptID,
+	); errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	} else if err != nil {
 		return Job{}, fmt.Errorf("lock job: %w", err)
 	}
 	if !containsStatus(allowed, current) {
 		return Job{}, fmt.Errorf("%w: cannot transition job from %s to %s", ErrConflict, current, target)
+	}
+	var reconciliationAudit map[string]any
+	if target == JobQueued {
+		reconciliationAudit, err = validateResumeReconciliation(
+			currentBlockers, currentResumeState, resumeState, currentAttemptID, time.Now().UTC(),
+		)
+		if err != nil {
+			return Job{}, err
+		}
 	}
 	var interruptedStepID, interruptedAttemptID string
 	if current == JobRunning && (target == JobPaused || target == JobCancelled) {
@@ -1127,6 +1267,11 @@ func (s *Store) transitionJob(
 			UPDATE job_steps SET status = 'cancelled', finished_at = now(), updated_at = now()
 			WHERE job_id = $1 AND status NOT IN ('complete', 'skipped', 'cancelled')`, jobID); err != nil {
 			return Job{}, fmt.Errorf("cancel job steps: %w", err)
+		}
+	}
+	if reconciliationAudit != nil {
+		if _, err := appendEvent(ctx, tx, jobID, "", currentAttemptID, "job.reconciliation_acknowledged", actor, reconciliationAudit); err != nil {
+			return Job{}, err
 		}
 	}
 	if _, err := appendEvent(ctx, tx, jobID, "", "", eventType, actor, map[string]any{"from": current, "to": target}); err != nil {
