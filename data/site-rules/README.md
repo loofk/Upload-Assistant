@@ -34,7 +34,20 @@ PostgreSQL 和 `/data/rules` 持久卷中。
 
 ## 导入、审批与激活
 
-可在 Web「规则中心」粘贴整份 Markdown，也可调用 Go v2 API：
+可在 Web「规则中心」粘贴整份 Markdown，或使用原生 Go CLI：
+
+```bash
+upload-assistant cli rules import --file data/site-rules/U2.md
+upload-assistant cli rules list U2
+upload-assistant cli rules get <revision-id>
+upload-assistant cli rules approve <revision-id> \
+  --fingerprint <server-computed-sha256> \
+  --comment '已核对当前规则原文和结构化策略' --confirm
+upload-assistant cli rules activate <revision-id> --confirm
+```
+
+CLI 的审批和激活必须显式传入 `--confirm`；它不能绕过服务端的完整性、状态或 fingerprint
+检查。也可直接调用 Go v2 API：
 
 ```http
 POST /api/v2/site-rules/import

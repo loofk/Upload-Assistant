@@ -24,6 +24,8 @@ import (
 
 var ErrReported = errors.New("CLI error was reported as JSON")
 
+const maxRuleMarkdownBytes = 8 << 20
+
 type Streams struct {
 	In         io.Reader
 	Out        io.Writer
@@ -574,14 +576,122 @@ func (r runner) candidates(ctx context.Context, args []string) (json.RawMessage,
 }
 
 func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, error) {
-	if len(args) != 2 || args[0] != "active" {
-		return nil, errors.New("usage: rules active <site-code>")
+	if len(args) == 0 {
+		return nil, errors.New("usage: rules list|active|get|import|approve|activate ...")
 	}
-	site, err := validSite(args[1])
+	switch args[0] {
+	case "list", "active":
+		if len(args) != 2 {
+			return nil, fmt.Errorf("usage: rules %s <site-code>", args[0])
+		}
+		site, err := validSite(args[1])
+		if err != nil {
+			return nil, err
+		}
+		suffix := "/rules"
+		if args[0] == "active" {
+			suffix += "/active"
+		}
+		return r.request(ctx, http.MethodGet, "/api/v2/sites/"+site+suffix, nil, nil, nil, true)
+	case "get":
+		if len(args) != 2 {
+			return nil, errors.New("usage: rules get <revision-id>")
+		}
+		id, err := validUUID(args[1], "rule revision ID")
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodGet, "/api/v2/site-rules/"+id, nil, nil, nil, true)
+	case "import":
+		flags := newFlags("rules import")
+		filename := flags.String("file", "", "local structured Markdown rule file")
+		if err := parseFlags(flags, args[1:]); err != nil {
+			return nil, err
+		}
+		markdown, err := readRuleMarkdown(*filename)
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/import", nil, map[string]any{"markdown": string(markdown)}, nil, true)
+	case "approve":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules approve <revision-id> --fingerprint SHA256 [--comment TEXT] --confirm")
+		}
+		id, err := validUUID(args[1], "rule revision ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules approve")
+		fingerprint := flags.String("fingerprint", "", "exact server-computed lowercase rule fingerprint")
+		comment := flags.String("comment", "", "review audit comment")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm review and approval")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if !validLowerSHA256(*fingerprint) {
+			return nil, errors.New("--fingerprint must be the exact lowercase SHA-256 returned for this revision")
+		}
+		if !*confirmed {
+			return nil, errors.New("rule approval requires --confirm")
+		}
+		body := map[string]any{"fingerprint": strings.TrimSpace(*fingerprint)}
+		if strings.TrimSpace(*comment) != "" {
+			body["comment"] = strings.TrimSpace(*comment)
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/"+id+"/approve", nil, body, nil, true)
+	case "activate":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules activate <revision-id> --confirm")
+		}
+		id, err := validUUID(args[1], "rule revision ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules activate")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm activation")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if !*confirmed {
+			return nil, errors.New("rule activation requires --confirm")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/"+id+"/activate", nil, map[string]any{}, nil, true)
+	default:
+		return nil, fmt.Errorf("unknown rules command %q", args[0])
+	}
+}
+
+func readRuleMarkdown(filename string) ([]byte, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return nil, errors.New("rules import requires --file")
+	}
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open rule Markdown: %w", err)
 	}
-	return r.request(ctx, http.MethodGet, "/api/v2/sites/"+site+"/rules/active", nil, nil, nil, true)
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect rule Markdown: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("rule Markdown must be a regular file")
+	}
+	if info.Size() > maxRuleMarkdownBytes {
+		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", maxRuleMarkdownBytes)
+	}
+	body, err := io.ReadAll(io.LimitReader(file, maxRuleMarkdownBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read rule Markdown: %w", err)
+	}
+	if len(body) > maxRuleMarkdownBytes {
+		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", maxRuleMarkdownBytes)
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return nil, errors.New("rule Markdown is empty")
+	}
+	return body, nil
 }
 
 func (r runner) integrations(ctx context.Context, args []string) (json.RawMessage, error) {
@@ -987,7 +1097,11 @@ Usage:
   upload-assistant cli [global options] retorrent create --source-url URL --target SITE [options]
   upload-assistant cli [global options] candidates list|scan|submit ...
   upload-assistant cli [global options] sites
-  upload-assistant cli [global options] rules active SITE
+  upload-assistant cli [global options] rules list|active SITE
+  upload-assistant cli [global options] rules get REVISION_ID
+  upload-assistant cli [global options] rules import --file MARKDOWN_FILE
+  upload-assistant cli [global options] rules approve REVISION_ID --fingerprint SHA256 [--comment TEXT] --confirm
+  upload-assistant cli [global options] rules activate REVISION_ID --confirm
   upload-assistant cli [global options] integrations list COLLECTION
   upload-assistant cli [global options] notifications [--limit N]
   upload-assistant cli [global options] notifications reconcile NOTIFICATION_ID --decision DECISION --evidence-sha256 SHA256 --observed-at RFC3339 --confirm [--message-id ID]

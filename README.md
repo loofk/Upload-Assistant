@@ -77,6 +77,9 @@ upload-assistant cli health
 upload-assistant cli tools
 upload-assistant cli jobs list --limit 20
 upload-assistant cli candidates list --source U2 --target MTEAM
+upload-assistant cli rules import --file data/site-rules/U2.md
+upload-assistant cli rules approve <revision-id> --fingerprint <sha256> --comment '已人工核对' --confirm
+upload-assistant cli rules activate <revision-id> --confirm
 upload-assistant cli audit list --resource-type downloader --resource-id box
 upload-assistant cli readiness live \
   --source U2 --target MTEAM \
@@ -106,7 +109,7 @@ UA_POSTGRES_PASSWORD=compose-config-fixture make go-compose-config
 make verify-go-v2-local
 ```
 
-`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、45 个 AI 工具、带 golden fingerprint 的 26 项适配器能力契约、Agent Skill、中文 Web、CLI、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
+`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、45 个 AI 工具、带 golden fingerprint 的 26 项适配器能力契约、Agent Skill、中文 Web、CLI 规则导入/审批/激活、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
 
 本地与 CI 测试只使用 fixture、`httptest` 和隔离 PostgreSQL，不联系真实 Tracker、下载器或图床。真实 U2→MTEAM、CHD→MTEAM、qBittorrent、MediaInfo/BDInfo/截图/mkbrr 与 imgbb/PTPimg 闭环必须由操作者提供合法账号、资源和显式授权后执行；在此之前必须保持为外部验证阻塞，不能伪造完成。
 

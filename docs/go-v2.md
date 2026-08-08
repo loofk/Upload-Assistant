@@ -36,6 +36,10 @@ upload-assistant cli health
 upload-assistant cli jobs list --limit 20
 upload-assistant cli jobs summary <job-id>
 upload-assistant cli candidates list --source U2 --target MTEAM
+upload-assistant cli rules import --file data/site-rules/U2.md
+upload-assistant cli rules list U2
+upload-assistant cli rules approve <revision-id> --fingerprint <sha256> --comment '已人工核对' --confirm
+upload-assistant cli rules activate <revision-id> --confirm
 upload-assistant cli integrations list downloaders
 upload-assistant cli audit list --resource-type downloader --resource-id box
 upload-assistant cli readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default --tmdb-provider tmdb-main --ptgen-provider ptgen-main

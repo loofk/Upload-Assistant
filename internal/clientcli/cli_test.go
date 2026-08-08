@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -251,6 +253,103 @@ func TestAdaptersUsesOptionalKindFilter(t *testing.T) {
 	err := Run(context.Background(), []string{"--api-url", server.URL, "adapters", "--kind", "site"}, testStreams(&output, nil))
 	if err != nil || !strings.Contains(output.String(), `"catalog_sha256": "aaaaaaaa`) {
 		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
+func TestRulesImportReadsLocalMarkdownAndCreatesDraft(t *testing.T) {
+	rulePath := filepath.Join(t.TempDir(), "U2.md")
+	ruleMarkdown := "---\nschema_version: 1\n---\n\n# 原始规则\nfixture\n"
+	if err := os.WriteFile(rulePath, []byte(ruleMarkdown), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v2/site-rules/import" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		var payload struct {
+			Markdown string `json:"markdown"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.Markdown != ruleMarkdown {
+			t.Fatalf("import payload/error = %q/%v", payload.Markdown, err)
+		}
+		response.WriteHeader(http.StatusCreated)
+		_, _ = response.Write([]byte(`{"ok":true,"status":"draft","rule_revision_id":"11111111-1111-4111-8111-111111111111"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "import", "--file", rulePath}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"status": "draft"`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
+func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
+	revisionID := "11111111-1111-4111-8111-111111111111"
+	fingerprint := strings.Repeat("a", 64)
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestNumber++
+		expectedPath := "/api/v2/site-rules/" + revisionID + "/approve"
+		if requestNumber == 2 {
+			expectedPath = "/api/v2/site-rules/" + revisionID + "/activate"
+		}
+		if request.Method != http.MethodPost || request.URL.Path != expectedPath {
+			t.Fatalf("request %d = %s %s", requestNumber, request.Method, request.URL.Path)
+		}
+		body, _ := io.ReadAll(request.Body)
+		if requestNumber == 1 && (!bytes.Contains(body, []byte(`"fingerprint":"`+fingerprint+`"`)) || !bytes.Contains(body, []byte(`"comment":"reviewed current rules"`))) {
+			t.Fatalf("approval body = %s", body)
+		}
+		if requestNumber == 2 && string(body) != `{}` {
+			t.Fatalf("activation body = %s", body)
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"approved"}`))
+	}))
+	defer server.Close()
+
+	for _, command := range [][]string{
+		{"rules", "approve", revisionID, "--fingerprint", fingerprint},
+		{"rules", "activate", revisionID},
+	} {
+		var output bytes.Buffer
+		err := Run(context.Background(), command, testStreams(&output, nil))
+		if !errors.Is(err, ErrReported) || !strings.Contains(output.String(), "requires --confirm") {
+			t.Fatalf("Run(%v) err=%v output=%s", command, err, output.String())
+		}
+	}
+
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "approve", revisionID, "--fingerprint", fingerprint, "--comment", "reviewed current rules", "--confirm"}, testStreams(&output, nil))
+	if err != nil {
+		t.Fatalf("approve err=%v output=%s", err, output.String())
+	}
+	output.Reset()
+	err = Run(context.Background(), []string{"--api-url", server.URL, "rules", "activate", revisionID, "--confirm"}, testStreams(&output, nil))
+	if err != nil || requestNumber != 2 {
+		t.Fatalf("activate err=%v requests=%d output=%s", err, requestNumber, output.String())
+	}
+}
+
+func TestRulesReadCommandsValidateIdentifiersAndRoutes(t *testing.T) {
+	revisionID := "11111111-1111-4111-8111-111111111111"
+	wantPaths := []string{"/api/v2/sites/U2/rules", "/api/v2/sites/U2/rules/active", "/api/v2/site-rules/" + revisionID}
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || requestNumber >= len(wantPaths) || request.URL.Path != wantPaths[requestNumber] {
+			t.Fatalf("request %d = %s %s", requestNumber, request.Method, request.URL.Path)
+		}
+		requestNumber++
+		_, _ = response.Write([]byte(`{"ok":true,"status":"ready"}`))
+	}))
+	defer server.Close()
+	for _, command := range [][]string{{"rules", "list", "u2"}, {"rules", "active", "u2"}, {"rules", "get", revisionID}} {
+		var output bytes.Buffer
+		if err := Run(context.Background(), append([]string{"--api-url", server.URL}, command...), testStreams(&output, nil)); err != nil {
+			t.Fatalf("Run(%v) err=%v output=%s", command, err, output.String())
+		}
+	}
+	if requestNumber != len(wantPaths) {
+		t.Fatalf("requests = %d, want %d", requestNumber, len(wantPaths))
 	}
 }
 

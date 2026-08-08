@@ -85,6 +85,16 @@ readiness_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url
 cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact audit list --limit 2)"
 adapters_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact adapters --kind site)"
 readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default --tmdb-provider tmdb-main --ptgen-provider ptgen-main)"
+rule_fixture_container="/data/tmp/go-v2-complete-rule.md"
+compose cp "$root_dir/scripts/fixtures/go-v2-complete-rule.md" "upload-assistant:$rule_fixture_container" >/dev/null
+rule_import_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules import --file "$rule_fixture_container")"
+rule_revision_id="$(jq -er '.rule_revision_id' <<<"$rule_import_cli_json")"
+rule_fingerprint="$(jq -er '.fingerprint' <<<"$rule_import_cli_json")"
+rule_list_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules list TTG)"
+rule_get_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules get "$rule_revision_id")"
+rule_approve_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules approve "$rule_revision_id" --fingerprint "$rule_fingerprint" --comment local-compose-verification --confirm)"
+rule_activate_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules activate "$rule_revision_id" --confirm)"
+rule_active_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules active TTG)"
 
 jq -e '.ok == true and .status == "ready" and .checks.database == "ready" and .checks.data_dir == "ready"' <<<"$health_json" >/dev/null
 jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/jobs/{job_id}/attempts"] and .paths["/api/v2/jobs/{job_id}/replay"] and .paths["/api/v2/adapters"] and .paths["/api/v2/audit-events"] and .paths["/api/v2/readiness/live"] and .components.schemas.RetorrentSummary and .components.schemas.ReplayJobRequest and .components.schemas.JobReconciliation and .components.schemas.AdapterCatalogEnvelope and .components.schemas.StepAttemptListEnvelope and .components.schemas.LiveReadinessReport' <<<"$openapi_json" >/dev/null
@@ -95,6 +105,12 @@ jq -e '.ok == true and .status == "ready" and (.audit_events | type == "array")'
 jq -e '.ok == true and .status == "ready" and .count == 11 and (.catalog_sha256 | test("^[a-f0-9]{64}$")) and all(.adapters[]; .kind == "site")' <<<"$adapters_cli_json" >/dev/null
 jq -e '.status == "blocked" and .configuration_ready == false and .external_calls_performed == false and .live_upload_authorized == false and .resume_state.confirm_upload == false and (.blockers | length > 0)' <<<"$readiness_json" >/dev/null
 jq -e '.status == "blocked" and .external_calls_performed == false and .live_upload_authorized == false and .resume_state.confirm_upload == false' <<<"$readiness_cli_json" >/dev/null
+jq -e --arg id "$rule_revision_id" --arg fingerprint "$rule_fingerprint" '.status == "draft" and .rule_revision_id == $id and .fingerprint == $fingerprint' <<<"$rule_import_cli_json" >/dev/null
+jq -e --arg id "$rule_revision_id" 'any(.revisions[]; .id == $id and .status == "draft")' <<<"$rule_list_cli_json" >/dev/null
+jq -e --arg id "$rule_revision_id" --arg fingerprint "$rule_fingerprint" '.rule_revision_id == $id and .fingerprint == $fingerprint and .status == "draft"' <<<"$rule_get_cli_json" >/dev/null
+jq -e --arg id "$rule_revision_id" '.rule_revision_id == $id and .status == "approved"' <<<"$rule_approve_cli_json" >/dev/null
+jq -e --arg id "$rule_revision_id" '.rule_revision_id == $id and .status == "approved"' <<<"$rule_activate_cli_json" >/dev/null
+jq -e --arg id "$rule_revision_id" --arg fingerprint "$rule_fingerprint" '.rule_revision_id == $id and .fingerprint == $fingerprint and .status == "approved"' <<<"$rule_active_cli_json" >/dev/null
 
 unauthorized_status="$(curl --silent --show-error -o "$verify_root/unauthorized.json" -w '%{http_code}' "$base_url/api/v2/jobs")"
 if [[ "$unauthorized_status" != "401" ]] || ! jq -e '.error.code == "authentication_required"' "$verify_root/unauthorized.json" >/dev/null; then
@@ -227,6 +243,7 @@ jq -n \
       agent_skill: "ready",
       web: "ready",
       cli: "ready",
+      cli_rule_lifecycle: "ready",
       migrations: "ready",
       postgres_integration_tests: "ready",
       idempotency: "ready",
