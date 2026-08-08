@@ -132,3 +132,88 @@ export interface CreateJobInput {
   screenshotProfile: string;
   imageHost: string;
 }
+
+export interface EndpointConfig {
+  endpoint: string;
+  timeout_seconds?: number;
+  options?: Record<string, JsonValue>;
+}
+
+export interface PathMapping {
+  remote_path: string;
+  local_path: string;
+  priority?: number;
+}
+
+export interface Downloader {
+  id: string;
+  name: string;
+  adapter: string;
+  enabled: boolean;
+  config: EndpointConfig;
+  credential_fields: string[];
+  path_mappings: PathMapping[];
+  health_status: string;
+  last_health_check_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImageHost {
+  id: string;
+  name: string;
+  adapter: string;
+  enabled: boolean;
+  priority: number;
+  config: EndpointConfig;
+  credential_fields: string[];
+  health_status: string;
+  last_health_check_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScreenshotProfile {
+  id: string;
+  name: string;
+  revision: number;
+  enabled: boolean;
+  config: Record<string, JsonValue>;
+  created_at: string;
+}
+
+export interface SiteSummary {
+  id: string;
+  code: string;
+  name: string;
+  adapter: string;
+  enabled: boolean;
+  live_validation_status: string;
+  active_rule_revision_id?: string;
+  active_rule_fingerprint?: string;
+}
+
+export interface RuleRevision {
+  id: string;
+  site_id: string;
+  site_code: string;
+  revision: number;
+  status: "draft" | "approved" | "active" | string;
+  fingerprint: string;
+  source_url: string;
+  captured_at?: string;
+  markdown_path: string;
+  markdown_sha256: string;
+  policy: Record<string, JsonValue>;
+  obligations: JsonValue[];
+  created_at: string;
+}
+
+export interface SiteCredential {
+  id: string;
+  site_code: string;
+  name: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,11 +1,18 @@
 import type {
   CreateJobInput,
   EventsEnvelope,
+  Downloader,
+  ImageHost,
   JobEnvelope,
   JobListEnvelope,
   JobStatus,
   JobSummaryEnvelope,
   JsonValue,
+  PathMapping,
+  RuleRevision,
+  ScreenshotProfile,
+  SiteCredential,
+  SiteSummary,
 } from "./types";
 
 interface ProblemBody {
@@ -89,6 +96,100 @@ export class ApiClient {
     });
     if (!response.ok) await this.throwResponseError(response);
     return response.blob();
+  }
+
+  async listDownloaders(): Promise<Downloader[]> {
+    const response = await this.request<{downloaders: Downloader[]}>("/api/v2/downloaders");
+    return response.downloaders;
+  }
+
+  async putDownloader(name: string, input: {
+    adapter: string;
+    endpoint: string;
+    credentials: Record<string, string>;
+    pathMappings: PathMapping[];
+  }): Promise<void> {
+    await this.request(`/api/v2/downloaders/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        adapter: input.adapter, enabled: true,
+        config: {endpoint: input.endpoint, timeout_seconds: 30, options: {}},
+        credentials: input.credentials, path_mappings: input.pathMappings,
+      }),
+    });
+  }
+
+  async probeDownloader(name: string): Promise<JsonValue> {
+    return this.request(`/api/v2/downloaders/${encodeURIComponent(name)}/probe`, {method: "POST"});
+  }
+
+  async listImageHosts(): Promise<ImageHost[]> {
+    const response = await this.request<{image_hosts: ImageHost[]}>("/api/v2/image-hosts");
+    return response.image_hosts;
+  }
+
+  async putImageHost(name: string, input: {adapter: string; endpoint: string; apiKey: string; priority: number}): Promise<void> {
+    await this.request(`/api/v2/image-hosts/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        adapter: input.adapter, enabled: true, priority: input.priority,
+        config: {endpoint: input.endpoint, timeout_seconds: 30, options: {}},
+        credentials: input.apiKey ? {api_key: input.apiKey} : {},
+      }),
+    });
+  }
+
+  async listScreenshotProfiles(): Promise<ScreenshotProfile[]> {
+    const response = await this.request<{screenshot_profiles: ScreenshotProfile[]}>("/api/v2/screenshot-profiles");
+    return response.screenshot_profiles;
+  }
+
+  async createScreenshotProfile(input: {name: string; count: number; format: string; width: number; quality: number; startPercent: number; endPercent: number}): Promise<void> {
+    await this.request("/api/v2/screenshot-profiles", {
+      method: "POST",
+      body: JSON.stringify({name: input.name, enabled: true, config: {
+        count: input.count, format: input.format, width: input.width, quality: input.quality,
+        start_percent: input.startPercent, end_percent: input.endPercent, comparison: false,
+      }}),
+    });
+  }
+
+  async listSites(): Promise<SiteSummary[]> {
+    const response = await this.request<{sites: SiteSummary[]}>("/api/v2/sites");
+    return response.sites;
+  }
+
+  async listRuleRevisions(siteCode: string): Promise<RuleRevision[]> {
+    const response = await this.request<{revisions: RuleRevision[]}>(`/api/v2/sites/${encodeURIComponent(siteCode)}/rules`);
+    return response.revisions;
+  }
+
+  async importRuleMarkdown(markdown: string): Promise<RuleRevision> {
+    const response = await this.request<{revision: RuleRevision}>("/api/v2/site-rules/import", {
+      method: "POST", body: JSON.stringify({markdown}),
+    });
+    return response.revision;
+  }
+
+  async approveRule(revision: RuleRevision, comment: string): Promise<void> {
+    await this.request(`/api/v2/site-rules/${encodeURIComponent(revision.id)}/approve`, {
+      method: "POST", body: JSON.stringify({fingerprint: revision.fingerprint, comment}),
+    });
+  }
+
+  async activateRule(revisionID: string): Promise<void> {
+    await this.request(`/api/v2/site-rules/${encodeURIComponent(revisionID)}/activate`, {method: "POST"});
+  }
+
+  async listSiteCredentials(siteCode: string): Promise<SiteCredential[]> {
+    const response = await this.request<{credentials: SiteCredential[]}>(`/api/v2/sites/${encodeURIComponent(siteCode)}/credentials`);
+    return response.credentials;
+  }
+
+  async putSiteCredential(siteCode: string, name: string, value: string): Promise<void> {
+    await this.request(`/api/v2/sites/${encodeURIComponent(siteCode)}/credentials/${encodeURIComponent(name)}`, {
+      method: "PUT", body: JSON.stringify({value}),
+    });
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

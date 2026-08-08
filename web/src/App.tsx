@@ -1,5 +1,6 @@
 import {FormEvent, useCallback, useEffect, useMemo, useState} from "react";
 import {ApiClient, ApiError} from "./api";
+import Configuration from "./Configuration";
 import type {
   Artifact,
   AuditEvent,
@@ -91,6 +92,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [section, setSection] = useState<"jobs" | "configuration">("jobs");
 
   const describeError = useCallback((reason: unknown) => {
     if (reason instanceof ApiError && reason.status === 401) return "API Token 无效、已撤销或已过期。";
@@ -155,6 +157,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
           <div className="brand-mark small" aria-hidden="true">UA</div>
           <div><strong>Upload Assistant</strong><span>可审计转种控制台</span></div>
         </div>
+        <nav className="main-nav" aria-label="主导航"><button className={section === "jobs" ? "active" : ""} onClick={() => setSection("jobs")}>任务</button><button className={section === "configuration" ? "active" : ""} onClick={() => setSection("configuration")}>配置</button></nav>
         <div className="topbar-actions">
           <span className="service-state"><i /> 本地服务已连接</span>
           <button className="ghost" onClick={() => void refreshAll()}>刷新</button>
@@ -164,7 +167,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
 
       {error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
 
-      <div className="workspace">
+      {section === "configuration" ? <Configuration client={client} onError={(reason) => setError(describeError(reason))} /> : <div className="workspace">
         <aside className="job-sidebar">
           <div className="sidebar-heading">
             <div><p className="eyebrow">DURABLE JOBS</p><h2>任务</h2></div>
@@ -196,7 +199,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
             /> : <DetailSkeleton />
           ) : <WelcomePanel onCreate={() => setCreateOpen(true)} />}
         </main>
-      </div>
+      </div>}
 
       {createOpen && <CreateJobDialog
         client={client}
