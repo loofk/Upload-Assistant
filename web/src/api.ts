@@ -9,6 +9,7 @@ import type {
 	DownloaderAdapterCapability,
   ImageHost,
 	MediaManager,
+	MetadataProvider,
 	NotificationChannel,
   JobEnvelope,
   JobListEnvelope,
@@ -260,6 +261,18 @@ export class ApiClient {
 
   async probeMediaManager(name: string): Promise<JsonValue> {
     return this.request(`/api/v2/media-managers/${encodeURIComponent(name)}/probe`, {method: "POST"});
+  }
+
+  async listMetadataProviders(): Promise<MetadataProvider[]> {
+    const response = await this.request<{metadata_providers: MetadataProvider[]}>('/api/v2/metadata-providers');
+    return response.metadata_providers;
+  }
+
+  async putMetadataProvider(name: string, input: {adapter: "tmdb" | "ptgen"; enabled: boolean; endpoint: string; apiKey: string}): Promise<void> {
+    await this.request(`/api/v2/metadata-providers/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({adapter: input.adapter, enabled: input.enabled, config: {endpoint: input.endpoint, timeout_seconds: 30, options: {}}, credentials: input.apiKey ? {api_key: input.apiKey} : {}}),
+    });
   }
 
   async putImageHost(name: string, input: {adapter: string; endpoint: string; apiKey: string; priority: number}): Promise<void> {

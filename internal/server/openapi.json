@@ -359,6 +359,15 @@
     "/api/v2/media-managers/{name}/lookup": {
       "post": {"operationId": "lookupMediaManagerMetadata", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaManagerLookupRequest"}}}}, "responses": {"200": {"description": "Normalized metadata and hash evidence"}, "400": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
+    "/api/v2/metadata-providers": {
+      "get": {"operationId": "listMetadataProviders", "responses": {"200": {"description": "TMDb and PTGen providers with credential field names only", "content": {"application/json": {"schema": {"type": "object"}}}}}}
+    },
+    "/api/v2/metadata-providers/{name}": {
+      "put": {"operationId": "putMetadataProvider", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MetadataProviderInput"}}}}, "responses": {"200": {"description": "Metadata provider configured"}, "400": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/metadata-providers/{name}/resolve": {
+      "post": {"operationId": "resolveExternalMetadata", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MetadataResolveRequest"}}}}, "responses": {"200": {"description": "Normalized IDs, bounded description, and hash evidence"}, "400": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}}
+    },
     "/api/v2/screenshot-profiles": {
       "get": {"operationId": "listScreenshotProfiles", "responses": {"200": {"description": "Immutable screenshot profile revisions", "content": {"application/json": {"schema": {"type": "object"}}}}}},
       "post": {"operationId": "createScreenshotProfile", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScreenshotProfileInput"}}}}, "responses": {"201": {"description": "New screenshot profile revision created", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}}}
@@ -873,6 +882,8 @@
       "NotificationChannelInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "const": "discord_webhook"}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/NotificationChannelConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"webhook_url": {"type": "string", "format": "uri", "writeOnly": true}}}}},
       "MediaManagerInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["sonarr", "radarr"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"api_key": {"type": "string", "writeOnly": true}}}}},
       "MediaManagerLookupRequest": {"type": "object", "additionalProperties": false, "properties": {"tvdb_id": {"type": "integer", "minimum": 1}, "tmdb_id": {"type": "integer", "minimum": 1}, "path": {"type": "string"}, "title": {"type": "string"}}},
+      "MetadataProviderInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["tmdb", "ptgen"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"api_key": {"type": "string", "writeOnly": true}}}}},
+      "MetadataResolveRequest": {"type": "object", "additionalProperties": false, "properties": {"imdb_id": {"type": "string", "pattern": "^tt[0-9]{5,12}$"}, "tmdb_id": {"type": "string", "pattern": "^[0-9]{1,16}$"}, "tmdb_type": {"type": "string", "enum": ["movie", "tv"]}, "douban_id": {"type": "string", "pattern": "^[0-9]{1,16}$"}}, "anyOf": [{"required": ["imdb_id"]}, {"required": ["tmdb_id", "tmdb_type"]}, {"required": ["douban_id"]}]},
       "ScreenshotConfig": {
         "type": "object", "additionalProperties": false,
         "properties": {

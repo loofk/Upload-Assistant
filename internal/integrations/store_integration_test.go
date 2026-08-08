@@ -53,6 +53,7 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM image_hosts WHERE name = $1", "imgbb-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM notification_channels WHERE name = $1", "discord-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM media_managers WHERE name = $1", "sonarr-"+nameSuffix)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM metadata_providers WHERE name = $1", "tmdb-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM screenshot_profiles WHERE name = $1", "default-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM site_credentials WHERE name = $1", "cookie-"+nameSuffix)
 		for _, secretID := range secretIDs {
@@ -270,6 +271,35 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		t.Fatalf("ListMediaManagers() = %#v/%v", mediaManagers, err)
 	}
 
+	metadataProvider, err := store.UpsertMetadataProvider(ctx, "tmdb-"+nameSuffix, MetadataProviderInput{
+		Adapter: "tmdb", Enabled: &enabled,
+		Config:      EndpointConfig{Endpoint: "https://api.themoviedb.org", Options: map[string]any{"language": "zh-CN"}},
+		Credentials: map[string]string{"api_key": "encrypted-tmdb-key"},
+	}, actor)
+	if err != nil || len(metadataProvider.CredentialFields) != 1 {
+		t.Fatalf("UpsertMetadataProvider() provider/error = %#v/%v", metadataProvider, err)
+	}
+	runtimeMetadataProvider, err := store.GetRuntimeMetadataProvider(ctx, metadataProvider.Name)
+	if err != nil || runtimeMetadataProvider.Credentials["api_key"] != "encrypted-tmdb-key" || len(runtimeMetadataProvider.ConfigurationSHA256) != 64 {
+		t.Fatalf("GetRuntimeMetadataProvider() runtime/error = %#v/%v", runtimeMetadataProvider, err)
+	}
+	if err := store.RecordMetadataProviderHealth(ctx, metadataProvider.Name, "ready", map[string]any{"response_count": 1}, actor); err != nil {
+		t.Fatal(err)
+	}
+	afterMetadataHealth, err := store.GetRuntimeMetadataProvider(ctx, metadataProvider.Name)
+	if err != nil || afterMetadataHealth.ConfigurationSHA256 != runtimeMetadataProvider.ConfigurationSHA256 {
+		t.Fatalf("metadata provider health changed configuration fingerprint: before=%s after=%s error=%v", runtimeMetadataProvider.ConfigurationSHA256, afterMetadataHealth.ConfigurationSHA256, err)
+	}
+	if err := store.AuditMetadataProviderAction(ctx, metadataProvider.Name, "resolve", map[string]any{"query_sha256": strings.Repeat("c", 64)}, actor); err != nil {
+		t.Fatal(err)
+	}
+	metadataProviders, err := store.ListMetadataProviders(ctx)
+	if err != nil || !slices.ContainsFunc(metadataProviders, func(item MetadataProvider) bool {
+		return item.ID == metadataProvider.ID && item.HealthStatus == "ready"
+	}) {
+		t.Fatalf("ListMetadataProviders() = %#v/%v", metadataProviders, err)
+	}
+
 	first, err := store.CreateScreenshotProfile(ctx, ScreenshotProfileInput{
 		Name: "default-" + nameSuffix, Enabled: &enabled,
 		Config: map[string]any{"count": 6, "format": "png", "comparison": false},
@@ -294,7 +324,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		UNION ALL SELECT secret_id::text FROM downloaders WHERE id = $2
 		UNION ALL SELECT secret_id::text FROM image_hosts WHERE id = $3
 		UNION ALL SELECT secret_id::text FROM notification_channels WHERE id = $4
-		UNION ALL SELECT secret_id::text FROM media_managers WHERE id = $5`, credential.ID, downloader.ID, imageHost.ID, notificationChannel.ID, mediaManager.ID)
+		UNION ALL SELECT secret_id::text FROM media_managers WHERE id = $5
+		UNION ALL SELECT secret_id::text FROM metadata_providers WHERE id = $6`, credential.ID, downloader.ID, imageHost.ID, notificationChannel.ID, mediaManager.ID, metadataProvider.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,8 +337,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		secretIDs = append(secretIDs, secretID)
 	}
 	rows.Close()
-	if len(secretIDs) != 6 {
-		t.Fatalf("encrypted secret count = %d, want 6", len(secretIDs))
+	if len(secretIDs) != 7 {
+		t.Fatalf("encrypted secret count = %d, want 7", len(secretIDs))
 	}
 }
 

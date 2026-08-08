@@ -1010,7 +1010,7 @@ func (s *Store) RecordMediaManagerHealth(ctx context.Context, name, status strin
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var id string
-	if err := tx.QueryRow(ctx, `UPDATE media_managers SET health_status = $2, last_health_check_at = now(), updated_at = now() WHERE name = $1 RETURNING id::text`, name, status).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+	if err := tx.QueryRow(ctx, `UPDATE media_managers SET health_status = $2, last_health_check_at = now() WHERE name = $1 RETURNING id::text`, name, status).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return fmt.Errorf("update media manager health: %w", err)
@@ -1036,6 +1036,195 @@ func (s *Store) AuditMediaManagerAction(ctx context.Context, name, action string
 		return fmt.Errorf("lock media manager for action audit: %w", err)
 	}
 	if err := audit(ctx, tx, actor, "media_manager."+action, "media_manager", id, copyMap(details)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) UpsertMetadataProvider(ctx context.Context, name string, input MetadataProviderInput, actor workflow.Actor) (MetadataProvider, error) {
+	name = strings.TrimSpace(name)
+	input.Adapter = strings.ToLower(strings.TrimSpace(input.Adapter))
+	if err := validateResourceName("metadata provider", name); err != nil {
+		return MetadataProvider{}, err
+	}
+	if input.Adapter != "tmdb" && input.Adapter != "ptgen" {
+		return MetadataProvider{}, fmt.Errorf("%w: metadata provider adapter must be tmdb or ptgen", ErrValidation)
+	}
+	config, err := validateEndpointConfig(input.Config)
+	if err != nil {
+		return MetadataProvider{}, err
+	}
+	fields, payload, err := validateCredentials(input.Credentials)
+	if err != nil {
+		return MetadataProvider{}, err
+	}
+	if len(fields) > 0 && !slices.Equal(fields, []string{"api_key"}) {
+		return MetadataProvider{}, fmt.Errorf("%w: metadata providers only accept api_key credentials", ErrValidation)
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	if enabled && input.Adapter == "tmdb" && len(fields) == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM metadata_providers WHERE name = $1 AND adapter = $2 AND secret_id IS NOT NULL)`, name, input.Adapter).Scan(&exists); err != nil {
+			return MetadataProvider{}, fmt.Errorf("check metadata provider credentials: %w", err)
+		}
+		if !exists {
+			return MetadataProvider{}, fmt.Errorf("%w: enabled TMDb provider requires api_key", ErrValidation)
+		}
+	}
+	var newSecretID any
+	if payload != nil {
+		secretID, err := s.secrets.Put(ctx, "metadata_providers."+name+".credentials", payload, actor.ID)
+		if err != nil {
+			return MetadataProvider{}, err
+		}
+		newSecretID = secretID
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return MetadataProvider{}, fmt.Errorf("begin metadata provider transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var item MetadataProvider
+	var secretID string
+	var checked pgtype.Timestamptz
+	err = tx.QueryRow(ctx, `
+		INSERT INTO metadata_providers(name, adapter, enabled, config, secret_id)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (name) DO UPDATE SET adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled,
+			config = EXCLUDED.config,
+			secret_id = CASE WHEN metadata_providers.adapter IS DISTINCT FROM EXCLUDED.adapter
+			                 THEN EXCLUDED.secret_id ELSE COALESCE(EXCLUDED.secret_id, metadata_providers.secret_id) END,
+			updated_at = now()
+		RETURNING id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		          last_health_check_at, created_at, updated_at`,
+		name, input.Adapter, enabled, config, newSecretID,
+	).Scan(&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+		&item.HealthStatus, &checked, &item.CreatedAt, &item.UpdatedAt)
+	if err != nil {
+		return MetadataProvider{}, fmt.Errorf("upsert metadata provider: %w", err)
+	}
+	item.LastHealthCheck = timePointer(checked)
+	if err := audit(ctx, tx, actor, "metadata_provider.upsert", "metadata_provider", item.ID, map[string]any{
+		"name": name, "adapter": input.Adapter, "enabled": enabled, "credential_fields": fields,
+	}); err != nil {
+		return MetadataProvider{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return MetadataProvider{}, fmt.Errorf("commit metadata provider: %w", err)
+	}
+	if newSecretID == nil {
+		item.CredentialFields, err = s.loadCredentialFields(ctx, secretID, "metadata_providers."+name+".credentials")
+	} else {
+		item.CredentialFields = fields
+	}
+	return item, err
+}
+
+func (s *Store) ListMetadataProviders(ctx context.Context) ([]MetadataProvider, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		       last_health_check_at, created_at, updated_at FROM metadata_providers ORDER BY adapter, name`)
+	if err != nil {
+		return nil, fmt.Errorf("list metadata providers: %w", err)
+	}
+	defer rows.Close()
+	result := make([]MetadataProvider, 0)
+	for rows.Next() {
+		var item MetadataProvider
+		var secretID string
+		var checked pgtype.Timestamptz
+		if err := rows.Scan(&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+			&item.HealthStatus, &checked, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan metadata provider: %w", err)
+		}
+		item.LastHealthCheck = timePointer(checked)
+		item.CredentialFields, err = s.loadCredentialFields(ctx, secretID, "metadata_providers."+item.Name+".credentials")
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetRuntimeMetadataProvider(ctx context.Context, name string) (RuntimeMetadataProvider, error) {
+	var runtime RuntimeMetadataProvider
+	var secretID string
+	var checked pgtype.Timestamptz
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		       last_health_check_at, created_at, updated_at FROM metadata_providers WHERE name = $1`, strings.TrimSpace(name)).Scan(
+		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.Config, &secretID,
+		&runtime.HealthStatus, &checked, &runtime.CreatedAt, &runtime.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeMetadataProvider{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeMetadataProvider{}, fmt.Errorf("load runtime metadata provider: %w", err)
+	}
+	if !runtime.Enabled {
+		return RuntimeMetadataProvider{}, fmt.Errorf("%w: metadata provider is disabled", ErrValidation)
+	}
+	runtime.LastHealthCheck = timePointer(checked)
+	if err := json.Unmarshal(runtime.Config, &runtime.EndpointConfig); err != nil {
+		return RuntimeMetadataProvider{}, fmt.Errorf("decode runtime metadata provider config: %w", err)
+	}
+	runtime.Credentials = map[string]string{}
+	if secretID != "" {
+		plaintext, err := s.secrets.Get(ctx, secretID, "metadata_providers."+runtime.Name+".credentials")
+		if err != nil {
+			return RuntimeMetadataProvider{}, err
+		}
+		if err := json.Unmarshal(plaintext, &runtime.Credentials); err != nil {
+			return RuntimeMetadataProvider{}, fmt.Errorf("decode runtime metadata provider credentials: %w", err)
+		}
+	}
+	if runtime.Adapter == "tmdb" && strings.TrimSpace(runtime.Credentials["api_key"]) == "" {
+		return RuntimeMetadataProvider{}, fmt.Errorf("%w: TMDb provider api_key is missing", ErrValidation)
+	}
+	runtime.ConfigurationSHA256 = integrationConfigurationSHA(runtime.ID, runtime.Adapter, runtime.Config, secretID, runtime.UpdatedAt)
+	return runtime, nil
+}
+
+func (s *Store) RecordMetadataProviderHealth(ctx context.Context, name, status string, details map[string]any, actor workflow.Actor) error {
+	if status != "ready" && status != "failed" && status != "unknown" {
+		return fmt.Errorf("%w: invalid metadata provider health status", ErrValidation)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin metadata provider health update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var id string
+	if err := tx.QueryRow(ctx, `UPDATE metadata_providers SET health_status = $2, last_health_check_at = now() WHERE name = $1 RETURNING id::text`, name, status).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("update metadata provider health: %w", err)
+	}
+	payload := copyMap(details)
+	payload["status"] = status
+	if err := audit(ctx, tx, actor, "metadata_provider.health", "metadata_provider", id, payload); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) AuditMetadataProviderAction(ctx context.Context, name, action string, details map[string]any, actor workflow.Actor) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin metadata provider action audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM metadata_providers WHERE name = $1 FOR UPDATE`, name).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock metadata provider for action audit: %w", err)
+	}
+	if err := audit(ctx, tx, actor, "metadata_provider."+action, "metadata_provider", id, copyMap(details)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

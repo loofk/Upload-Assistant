@@ -86,7 +86,7 @@ readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_
 
 jq -e '.ok == true and .status == "ready" and .checks.database == "ready" and .checks.data_dir == "ready"' <<<"$health_json" >/dev/null
 jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/audit-events"] and .paths["/api/v2/readiness/live"] and .components.schemas.RetorrentSummary and .components.schemas.LiveReadinessReport' <<<"$openapi_json" >/dev/null
-jq -e '.ok == true and .status == "ready" and .count >= 38 and any(.tools[]; .name == "list_audit_events") and any(.tools[]; .name == "get_live_readiness")' <<<"$tools_json" >/dev/null
+jq -e '.ok == true and .status == "ready" and .count >= 41 and any(.tools[]; .name == "list_audit_events") and any(.tools[]; .name == "get_live_readiness") and any(.tools[]; .name == "resolve_external_metadata")' <<<"$tools_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and (.audit_events | type == "array")' <<<"$audit_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and (.audit_events | type == "array")' <<<"$cli_json" >/dev/null
 jq -e '.status == "blocked" and .configuration_ready == false and .external_calls_performed == false and .live_upload_authorized == false and .resume_state.confirm_upload == false and (.blockers | length > 0)' <<<"$readiness_json" >/dev/null

@@ -1,8 +1,8 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from "react";
 import {ApiClient} from "./api";
-import type {Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, MediaManager, NotificationChannel, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
+import type {Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, MediaManager, MetadataProvider, NotificationChannel, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
 
-type ConfigTab = "downloaders" | "image-hosts" | "notifications" | "media-managers" | "screenshots" | "rules" | "migration";
+type ConfigTab = "downloaders" | "image-hosts" | "notifications" | "media-managers" | "metadata-providers" | "screenshots" | "rules" | "migration";
 
 export default function Configuration({client, onError}: {client: ApiClient; onError: (reason: unknown) => void}) {
   const [tab, setTab] = useState<ConfigTab>("downloaders");
@@ -11,6 +11,7 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
   const [imageHosts, setImageHosts] = useState<ImageHost[]>([]);
   const [notificationChannels, setNotificationChannels] = useState<NotificationChannel[]>([]);
   const [mediaManagers, setMediaManagers] = useState<MediaManager[]>([]);
+  const [metadataProviders, setMetadataProviders] = useState<MetadataProvider[]>([]);
   const [screenshots, setScreenshots] = useState<ScreenshotProfile[]>([]);
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,14 +19,15 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-		const [nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextNotificationChannels, nextMediaManagers, nextScreenshots, nextSites] = await Promise.all([
-			client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listNotificationChannels(), client.listMediaManagers(), client.listScreenshotProfiles(), client.listSites(),
+		const [nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextNotificationChannels, nextMediaManagers, nextMetadataProviders, nextScreenshots, nextSites] = await Promise.all([
+			client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listNotificationChannels(), client.listMediaManagers(), client.listMetadataProviders(), client.listScreenshotProfiles(), client.listSites(),
       ]);
       setDownloaders(nextDownloaders);
 		setDownloaderAdapters(nextDownloaderAdapters);
       setImageHosts(nextImageHosts);
       setNotificationChannels(nextNotificationChannels);
       setMediaManagers(nextMediaManagers);
+      setMetadataProviders(nextMetadataProviders);
       setScreenshots(nextScreenshots);
       setSites(nextSites);
     } catch (reason) {
@@ -43,14 +45,15 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
       <button className="secondary" onClick={() => void reload()} disabled={loading}>刷新配置</button>
     </header>
     <nav className="config-tabs">
-      {(["downloaders", "image-hosts", "notifications", "media-managers", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
-        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "notifications" ? `通知 ${notificationChannels.length}` : value === "media-managers" ? `Sonarr/Radarr ${mediaManagers.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
+      {(["downloaders", "image-hosts", "notifications", "media-managers", "metadata-providers", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
+        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "notifications" ? `通知 ${notificationChannels.length}` : value === "media-managers" ? `Sonarr/Radarr ${mediaManagers.length}` : value === "metadata-providers" ? `元数据 ${metadataProviders.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
       </button>)}
     </nav>
 		{tab === "downloaders" && <DownloadersPanel items={downloaders} adapters={downloaderAdapters} client={client} reload={reload} onError={onError} />}
     {tab === "image-hosts" && <ImageHostsPanel items={imageHosts} client={client} reload={reload} onError={onError} />}
     {tab === "notifications" && <NotificationChannelsPanel items={notificationChannels} client={client} reload={reload} onError={onError} />}
     {tab === "media-managers" && <MediaManagersPanel items={mediaManagers} client={client} reload={reload} onError={onError} />}
+    {tab === "metadata-providers" && <MetadataProvidersPanel items={metadataProviders} client={client} reload={reload} onError={onError} />}
     {tab === "screenshots" && <ScreenshotsPanel items={screenshots} client={client} reload={reload} onError={onError} />}
     {tab === "rules" && <RulesPanel sites={sites} client={client} reloadSites={reload} onError={onError} />}
     {tab === "migration" && <LegacyMigrationPanel client={client} />}
@@ -204,6 +207,26 @@ function MediaManagersPanel({items, client, reload, onError}: {items: MediaManag
     <label><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 启用实例</label>
     <label className="full">服务地址<input type="url" required value={form.endpoint} onChange={(event) => setForm({...form, endpoint: event.target.value})} /></label>
     <label className="full">API Key（新建必填，更新留空保留）<input type="password" autoComplete="new-password" value={form.apiKey} onChange={(event) => setForm({...form, apiKey: event.target.value})} /></label>
+  </ConfigForm></div>;
+}
+
+function MetadataProvidersPanel({items, client, reload, onError}: {items: MetadataProvider[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
+  const [form, setForm] = useState<{name: string; adapter: "tmdb" | "ptgen"; enabled: boolean; endpoint: string; apiKey: string}>({name: "tmdb-main", adapter: "tmdb", enabled: true, endpoint: "https://api.themoviedb.org", apiKey: ""});
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true);
+    try { await client.putMetadataProvider(form.name, form); setForm({...form, apiKey: ""}); await reload(); }
+    catch (reason) { onError(reason); } finally { setBusy(false); }
+  };
+  return <div className="config-layout"><section><ConfigSectionTitle title="TMDb / PTGen 元数据" copy="每个 provider 独立 endpoint 与加密 key；只有任务或显式解析调用才会访问外部服务，审计保存 hash 而非原始响应。" />
+    <div className="integration-grid">{items.map((item) => <IntegrationCard key={item.id} title={item.name} type={item.adapter} enabled={item.enabled} health={item.health_status} endpoint={item.config.endpoint} credentials={item.credential_fields} details={[item.adapter === "tmdb" ? "官方 API v3" : "显式 PTGen /api endpoint", "禁重定向 · 有界响应 · 可审计"]} />)}{!items.length && <ConfigEmpty text="尚未配置元数据 provider；任务不会隐式调用公共 PTGen。" />}</div>
+  </section><ConfigForm title="添加或更新元数据 provider" onSubmit={submit} busy={busy}>
+    <label>配置名称<input required value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} /></label>
+    <label>适配器<select value={form.adapter} onChange={(event) => { const adapter = event.target.value as "tmdb" | "ptgen"; setForm({...form, adapter, endpoint: adapter === "tmdb" ? "https://api.themoviedb.org" : "", name: adapter === "tmdb" ? "tmdb-main" : "ptgen-main"}); }}><option value="tmdb">TMDb</option><option value="ptgen">PTGen</option></select></label>
+    <label><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 启用 provider</label>
+    <label className="full">API 地址<input type="url" required placeholder={form.adapter === "ptgen" ? "https://your-ptgen.example/api" : "https://api.themoviedb.org"} value={form.endpoint} onChange={(event) => setForm({...form, endpoint: event.target.value})} /></label>
+    <label className="full">API Key（TMDb 新建必填；PTGen 可选；更新留空保留）<input type="password" autoComplete="new-password" value={form.apiKey} onChange={(event) => setForm({...form, apiKey: event.target.value})} /></label>
+    <div className="safety-callout full"><strong>外部边界</strong><span>保存配置不会发起网络请求；解析需通过任务或 API 显式触发，失败不会被包装成成功。</span></div>
   </ConfigForm></div>;
 }
 

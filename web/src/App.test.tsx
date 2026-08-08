@@ -29,6 +29,7 @@ describe("App authentication boundary", () => {
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
         : path === "/api/v2/notification-channels" ? {notification_channels: []}
         : path === "/api/v2/media-managers" ? {media_managers: []}
+        : path === "/api/v2/metadata-providers" ? {metadata_providers: []}
         : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
         : path === "/api/v2/sites" ? {sites: []}
         : {};
@@ -108,6 +109,7 @@ describe("App authentication boundary", () => {
 				: path === "/api/v2/image-hosts" ? {image_hosts: []}
 				: path === "/api/v2/notification-channels" ? {notification_channels: []}
 				: path === "/api/v2/media-managers" ? {media_managers: []}
+				: path === "/api/v2/metadata-providers" ? {metadata_providers: []}
 				: path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
 				: path === "/api/v2/sites" ? {sites: []} : {};
 			return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
@@ -157,6 +159,7 @@ describe("App authentication boundary", () => {
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
         : path === "/api/v2/notification-channels" ? {notification_channels: []}
         : path === "/api/v2/media-managers" ? {media_managers: []}
+        : path === "/api/v2/metadata-providers" ? {metadata_providers: []}
         : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
         : path === "/api/v2/sites" ? {sites: []}
         : path === "/api/v2/migrations/legacy/preview" ? {

@@ -30,6 +30,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/legacy"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/mediamanagers"
+	"github.com/loofk/upload-assistant/v2/internal/metadataproviders"
 	"github.com/loofk/upload-assistant/v2/internal/notifications"
 	"github.com/loofk/upload-assistant/v2/internal/readiness"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
@@ -153,6 +154,7 @@ func serve(args []string) error {
 	secretStore := security.NewSecretStore(pool, keyring)
 	integrationStore := integrations.NewStore(pool, secretStore)
 	mediaManager := mediamanagers.NewManager(integrationStore, nil)
+	metadataProvider := metadataproviders.NewManager(integrationStore, nil)
 	auditLogStore := auditlog.NewStore(pool)
 	legacyService, err := legacy.NewService(pool, secretStore, integrationStore, cfg.LegacyDir, logger)
 	if err != nil {
@@ -252,6 +254,7 @@ func serve(args []string) error {
 		Schedules:     scheduleStore,
 		Legacy:        legacyService,
 		MediaManagers: mediaManager,
+		Metadata:      metadataProvider,
 		AuditLog:      auditLogStore,
 		LiveReadiness: liveReadiness,
 		DataDir:       cfg.DataDir,

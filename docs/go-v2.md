@@ -108,6 +108,12 @@ Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最�
 - `POST /api/v2/media-managers/{name}/lookup` 复刻 legacy 的只读补元数据语义：Sonarr 接受 TVDB ID 或 path+title，Radarr 接受 TMDb ID 或精确 path。审计只保存 query/response SHA-256 与规范化 ID，不保存 API key、原始响应或本地路径。
 - HTTP 重定向被禁止，响应体有大小上限，失败只持久化稳定错误码。当前它们是显式 metadata helper，不会向 Sonarr/Radarr 添加、删除、重命名或刷新媒体。
 
+## TMDb / PTGen 元数据 provider
+
+- `GET/PUT /api/v2/metadata-providers` 独立管理 TMDb/PTGen endpoint；key 加密保存且只回显字段名。TMDb 启用时必须提供 key，PTGen key 可选，但 endpoint 始终必须显式配置，不会回退到公共服务。
+- `POST /api/v2/metadata-providers/{name}/resolve` 是显式 external-read。TMDb 按官方 v3 `find/{imdb}` 或 `movie|tv/{id}/external_ids` 契约规范化 IMDb/TMDb ID，并阻断跨类型歧义或 ID 冲突；PTGen 兼容 legacy 的 IMDb→豆瓣二段查询和直接豆瓣 subject 查询。
+- 所有请求禁重定向、限时、限响应大小。全局审计只保存配置、查询、响应和 PTGen 描述 SHA-256、规范化 ID 与字节数，不保存 API key、原始响应或简介。配置成功不是联网许可，`matched=false` 也不是材料已完成。
+
 ## 远程下载器
 
 - `GET /api/v2/downloader-adapters` 是运行时能力的权威目录。调用方应先检查 `runtime_supported` 和逐项 `operations`，不能只依据 adapter 名称推断能力。

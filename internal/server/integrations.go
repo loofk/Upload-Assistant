@@ -22,6 +22,8 @@ type IntegrationService interface {
 	ListNotificationChannels(context.Context) ([]integrations.NotificationChannel, error)
 	UpsertMediaManager(context.Context, string, integrations.MediaManagerInput, workflow.Actor) (integrations.MediaManager, error)
 	ListMediaManagers(context.Context) ([]integrations.MediaManager, error)
+	UpsertMetadataProvider(context.Context, string, integrations.MetadataProviderInput, workflow.Actor) (integrations.MetadataProvider, error)
+	ListMetadataProviders(context.Context) ([]integrations.MetadataProvider, error)
 	CreateScreenshotProfile(context.Context, integrations.ScreenshotProfileInput, workflow.Actor) (integrations.ScreenshotProfile, error)
 	ListScreenshotProfiles(context.Context) ([]integrations.ScreenshotProfile, error)
 }
@@ -50,6 +52,38 @@ func registerIntegrationRoutes(mux *http.ServeMux, service IntegrationService) {
 	mux.HandleFunc("PUT /api/v2/notification-channels/{name}", api.putNotificationChannel)
 	mux.HandleFunc("GET /api/v2/media-managers", api.listMediaManagers)
 	mux.HandleFunc("PUT /api/v2/media-managers/{name}", api.putMediaManager)
+	mux.HandleFunc("GET /api/v2/metadata-providers", api.listMetadataProviders)
+	mux.HandleFunc("PUT /api/v2/metadata-providers/{name}", api.putMetadataProvider)
+}
+
+func (api integrationsAPI) listMetadataProviders(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "config:read"); !ok {
+		return
+	}
+	items, err := api.service.ListMetadataProviders(r.Context())
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "ready", "metadata_providers": items, "blockers": []any{}, "next_actions": []any{}})
+}
+
+func (api integrationsAPI) putMetadataProvider(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "config:manage")
+	if !ok {
+		return
+	}
+	var request integrations.MetadataProviderInput
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	item, err := api.service.UpsertMetadataProvider(r.Context(), strings.TrimSpace(r.PathValue("name")), request, workflow.Actor{Type: "user", ID: principal.UserID})
+	if err != nil {
+		writeIntegrationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationEnvelope("configured", "metadata_provider", item))
 }
 
 func (api integrationsAPI) listNotificationChannels(w http.ResponseWriter, r *http.Request) {

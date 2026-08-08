@@ -30,6 +30,7 @@ type Dependencies struct {
 	Schedules     ScheduleService
 	Legacy        LegacyMigrationService
 	MediaManagers MediaManagerService
+	Metadata      MetadataProviderService
 	AuditLog      AuditLogService
 	LiveReadiness LiveReadinessService
 	DataDir       string
@@ -107,6 +108,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.MediaManagers != nil {
 		registerMediaManagerRoutes(mux, deps.MediaManagers)
+	}
+	if deps.Metadata != nil {
+		registerMetadataProviderRoutes(mux, deps.Metadata)
 	}
 	if deps.AuditLog != nil {
 		registerAuditLogRoutes(mux, deps.AuditLog)

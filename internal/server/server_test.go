@@ -88,6 +88,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		"/api/v2/notification-channels", "/api/v2/notification-channels/{name}",
 		"/api/v2/media-managers", "/api/v2/media-managers/{name}",
 		"/api/v2/media-managers/{name}/probe", "/api/v2/media-managers/{name}/lookup",
+		"/api/v2/metadata-providers", "/api/v2/metadata-providers/{name}",
+		"/api/v2/metadata-providers/{name}/resolve",
 		"/api/v2/downloader-adapters",
 		"/api/v2/migrations/legacy/preview", "/api/v2/migrations/legacy",
 		"/api/v2/migrations/legacy/{import_id}",
@@ -123,8 +125,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 38 {
-		t.Fatalf("tool count = %d, want 38", len(tools))
+	if len(tools) != 41 {
+		t.Fatalf("tool count = %d, want 41", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {

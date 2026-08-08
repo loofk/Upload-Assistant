@@ -275,6 +275,19 @@ export interface MediaManager {
   updated_at: string;
 }
 
+export interface MetadataProvider {
+  id: string;
+  name: string;
+  adapter: "tmdb" | "ptgen";
+  enabled: boolean;
+  config: EndpointConfig;
+  credential_fields: string[];
+  health_status: string;
+  last_health_check_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ScreenshotProfile {
   id: string;
   name: string;

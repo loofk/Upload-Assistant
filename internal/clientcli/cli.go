@@ -522,12 +522,13 @@ func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, erro
 
 func (r runner) integrations(ctx context.Context, args []string) (json.RawMessage, error) {
 	if len(args) != 2 || args[0] != "list" {
-		return nil, errors.New("usage: integrations list downloaders|image-hosts|screenshot-profiles|notification-channels|media-managers")
+		return nil, errors.New("usage: integrations list downloaders|image-hosts|screenshot-profiles|notification-channels|media-managers|metadata-providers")
 	}
 	allowed := map[string]string{
 		"downloaders": "/api/v2/downloaders", "image-hosts": "/api/v2/image-hosts",
 		"screenshot-profiles": "/api/v2/screenshot-profiles", "notification-channels": "/api/v2/notification-channels",
-		"media-managers": "/api/v2/media-managers",
+		"media-managers":     "/api/v2/media-managers",
+		"metadata-providers": "/api/v2/metadata-providers",
 	}
 	requestPath, exists := allowed[args[1]]
 	if !exists {

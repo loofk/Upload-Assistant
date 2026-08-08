@@ -28,7 +28,7 @@ Before any external probe or controlled live workflow, call `GET /api/v2/readine
 - Create or read daily candidate jobs when the operator wants recommendations. Treat schedules and every notification channel as discovery only.
 - Read status and summary for normal progress. Read job events and verified artifacts for a workflow integrity audit. Read `/api/v2/audit-events` for global configuration or external-action history; it is redacted and paginated but is not the per-job hash chain.
 - Resume only with the values named by `blockers`, `next_actions`, and `resume_state`.
-- Change rules, downloaders, image hosts, notification channels, Sonarr/Radarr instances, screenshot profiles, or site credentials only when the operator explicitly asks.
+- Change rules, downloaders, image hosts, notification channels, Sonarr/Radarr instances, TMDb/PTGen metadata providers, screenshot profiles, or site credentials only when the operator explicitly asks.
 - Preview or execute legacy configuration migration only when the operator explicitly asks.
 
 ## Run a Retorrent Workflow
@@ -62,7 +62,7 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 - Do not reveal cookies, passkeys, announce URLs, API keys, signed URLs, raw torrent bytes, or decrypted credentials.
 - Cancellation does not delete downloaded data or audit artifacts. Do not claim otherwise.
 - Do not run live tracker, downloader, or image-host probes merely to test connectivity without operator authorization.
-- Do not probe Sonarr/Radarr or deliver a test Discord message without operator authorization. A configured endpoint is not consent to contact it except when an explicitly configured schedule becomes terminal.
+- Do not query TMDb/PTGen, probe Sonarr/Radarr, or deliver a test Discord message without operator authorization. A configured endpoint is not consent to contact it except when an explicitly configured job or schedule reaches that declared boundary.
 - Never interpret a schedule firing, candidate rank, or notification as permission to submit a candidate or upload a torrent.
 
 ## Manage Rules and Configuration
@@ -74,6 +74,8 @@ Credentials are write-only inputs. Confirm successful storage from redacted API 
 Discord uses an encrypted incoming `webhook_url`, not the legacy bot token. Select channel names explicitly in `DailyCandidateScheduleConfig.notification_channels`. Inspect `status`, `attempts`, `payload_sha256`, and `remote_receipt` in `/api/v2/notifications`; retry state never authorizes candidate submission or upload.
 
 Sonarr and Radarr are independent read-only metadata helpers. Configure each v3 base endpoint and encrypted `api_key`, explicitly probe it before relying on it, then use lookup with Sonarr `tvdb_id` or `path` plus `title`, or Radarr `tmdb_id` or exact `path`. Treat `matched=false` as a normal miss and continue with other metadata sources. Audit records intentionally store query/response hashes and normalized IDs instead of paths or raw responses.
+
+TMDb and PTGen are independent metadata providers. Configure an explicit endpoint and encrypted `api_key` when required; PTGen must never fall back to an implicit public endpoint. Resolve only when the operator requested the workflow or the job input explicitly names that provider. Treat ambiguous/conflicting IDs, failed calls, missing PTGen text, and `matched=false` as recoverable non-success states. Audit evidence contains hashes and normalized IDs, not credentials, raw responses, or raw descriptions.
 
 Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported`, every `operations` flag, and every `constraints` entry. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission, rTorrent, and Deluge report `skip_checking=false`; do not request or simulate that behavior. Deluge uses its Web JSON-RPC endpoint and Web password, requires the Web session to be connected to a daemon, and reports `category=false` and `tags=false`; set `apply_labels=false` explicitly and leave category/tags empty for both source and target downloader controls, never silently discard them or substitute native daemon RPC credentials. For rTorrent, treat an ineffective named-throttle response as a blocker and never claim the requested limit was enforced.
 

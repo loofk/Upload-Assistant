@@ -173,6 +173,35 @@ type RuntimeMediaManager struct {
 	Credentials         map[string]string `json:"-"`
 }
 
+type MetadataProviderInput struct {
+	Adapter     string            `json:"adapter"`
+	Enabled     *bool             `json:"enabled,omitempty"`
+	Config      EndpointConfig    `json:"config"`
+	Credentials map[string]string `json:"credentials,omitempty"`
+}
+
+type MetadataProvider struct {
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Adapter          string          `json:"adapter"`
+	Enabled          bool            `json:"enabled"`
+	Config           json.RawMessage `json:"config"`
+	CredentialFields []string        `json:"credential_fields"`
+	HealthStatus     string          `json:"health_status"`
+	LastHealthCheck  *time.Time      `json:"last_health_check_at,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+// RuntimeMetadataProvider is an in-process-only view. Decrypted credentials
+// must never be serialized into HTTP responses, workflow snapshots, or audits.
+type RuntimeMetadataProvider struct {
+	MetadataProvider
+	EndpointConfig      EndpointConfig    `json:"-"`
+	ConfigurationSHA256 string            `json:"-"`
+	Credentials         map[string]string `json:"-"`
+}
+
 type ScreenshotProfileInput struct {
 	Name    string         `json:"name"`
 	Enabled *bool          `json:"enabled,omitempty"`
