@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-compose_file="$root_dir/docker-compose.go.yml"
+compose_file="$root_dir/docker-compose.yml"
 report_path="${1:-$root_dir/tmp/go-v2-local-ready.json}"
 
 for command_name in docker curl jq openssl; do
@@ -127,6 +127,16 @@ if [[ "$container_identity" != "1000:1000:600" ]]; then
   echo "unexpected service identity or master-key permissions: $container_identity" >&2
   exit 1
 fi
+service_container_id="$(compose ps -q upload-assistant)"
+postgres_container_id="$(compose ps -q postgres)"
+if ! docker inspect "$service_container_id" | jq -e '.[0].HostConfig.ReadonlyRootfs == true and (.[0].HostConfig.CapDrop | index("ALL")) != null and any(.[0].HostConfig.SecurityOpt[]; startswith("no-new-privileges"))' >/dev/null; then
+  echo "service container hardening is incomplete" >&2
+  exit 1
+fi
+if ! docker inspect "$postgres_container_id" | jq -e '((.[0].HostConfig.PortBindings // {}) | length) == 0' >/dev/null; then
+  echo "PostgreSQL must not publish a host port" >&2
+  exit 1
+fi
 image_id="$(compose images -q upload-assistant | head -n 1)"
 image_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_id")"
 if [[ "$image_platform" != "linux/amd64" ]]; then
@@ -181,6 +191,10 @@ jq -n \
       authentication: "ready",
       security_headers: "ready",
       non_root_runtime: "ready",
+      read_only_root_filesystem: "ready",
+      capabilities_dropped: "ready",
+      no_new_privileges: "ready",
+      postgres_not_published: "ready",
       master_key_permissions: "ready",
       openapi: "ready",
       tools: "ready",
@@ -210,5 +224,5 @@ jq -n \
     }
   }' >"$report_path"
 
-unset api_token auth_header bootstrap_json UA_POSTGRES_PASSWORD
+unset api_token auth_header bootstrap_json
 jq . "$report_path"

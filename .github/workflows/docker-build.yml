@@ -1,4 +1,4 @@
-name: Docker Build & Push
+name: Go v2 Docker Build & Push
 
 on:
   push:
@@ -43,10 +43,14 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.ptcli
+          file: ./Dockerfile.v2
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=main
+            COMMIT=${{ github.sha }}
+            BUILT_AT=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

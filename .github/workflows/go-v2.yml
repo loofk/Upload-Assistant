@@ -1,0 +1,70 @@
+name: Go v2 LOCAL_READY
+
+on:
+  push:
+    branches: [master, codex/new-feature]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  local-ready:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: upload_assistant
+          POSTGRES_USER: upload_assistant
+          POSTGRES_PASSWORD: integration-fixture-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U upload_assistant -d upload_assistant"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      UA_POSTGRES_PASSWORD: compose-and-isolated-fixture-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.13.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: Go and Web gates
+        run: make go-check
+
+      - name: PostgreSQL integration gates
+        env:
+          UA_TEST_DATABASE_URL: postgres://upload_assistant:integration-fixture-password@127.0.0.1:5432/upload_assistant?sslmode=disable
+        run: go test -p 1 ./internal/... ./migrations -count=1
+
+      - name: Race detector
+        run: go test -race ./internal/...
+
+      - name: Compose contract
+        run: make go-compose-config
+
+      - name: Isolated Compose LOCAL_READY
+        run: ./scripts/verify_go_v2_local_ready.sh go-v2-local-ready.json
+
+      - name: Upload machine-readable readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-v2-local-ready
+          path: go-v2-local-ready.json
+          if-no-files-found: warn

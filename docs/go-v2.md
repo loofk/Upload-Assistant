@@ -5,8 +5,10 @@ v2 是当前重构目标：Docker Compose 启动 Go 常驻服务和 PostgreSQL�
 ## 本地启动
 
 ```bash
-docker compose -f docker-compose.go.yml up -d --build
-docker compose -f docker-compose.go.yml exec upload-assistant upload-assistant admin bootstrap --username admin
+cp .env.example .env
+# 先把 `openssl rand -hex 32` 的结果填入 .env 的 UA_POSTGRES_PASSWORD
+docker compose up -d --build
+docker compose exec upload-assistant upload-assistant admin bootstrap --username admin
 ```
 
 第二条命令会交互式读取管理员密码，并且只显示一次初始 API token。将 token 保存到密码管理器，不要写入仓库、URL 或命令参数。
@@ -73,7 +75,7 @@ live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新�
 
 ```bash
 export UA_LEGACY_DATA_HOST_PATH=/absolute/path/to/old-upload-assistant/data
-docker compose -f docker-compose.go.yml up -d --build
+docker compose up -d --build
 ```
 
 容器内固定挂载为 `/legacy:ro`。服务只读取 `/legacy/config.py` 和 allowlist 内的 `/legacy/cookies/{SITE}.txt`，不会执行 Python，也不接受 API 传入任意文件路径。
@@ -129,10 +131,10 @@ Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最�
 
 ```bash
 make go-check
-docker compose -f docker-compose.go.yml config --quiet
+UA_POSTGRES_PASSWORD=compose-config-fixture docker compose config --quiet
 make verify-go-v2-local
 ```
 
-`verify-go-v2-local` 会创建名称和卷均隔离的临时 Compose 栈，使用随机数据库密码和临时管理员，验证 linux/amd64、非 root、主密钥权限、健康检查、安全响应头、鉴权拒绝、OpenAPI/tool/AgentSkill、中文 Web、原生 CLI、安全阻塞的 live 就绪交接、迁移完整性、任务幂等与服务重启后的任务持久性，然后精确删除临时栈和卷。机器可读结果写入 `tmp/go-v2-local-ready.json`，报告不会包含临时凭据。
+`verify-go-v2-local` 会创建名称和卷均隔离的临时 Compose 栈，使用随机数据库密码和临时管理员，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、健康检查、安全响应头、鉴权拒绝、OpenAPI/tool/AgentSkill、中文 Web、原生 CLI、安全阻塞的 live 就绪交接、迁移完整性、任务幂等与服务重启后的任务持久性，然后精确删除临时栈和卷。机器可读结果写入 `tmp/go-v2-local-ready.json`，报告不会包含临时凭据。
 
 上述测试使用本地 fixture、`httptest` 或隔离 Compose，不会访问真实站点、下载器或图床。报告中的 `live_validation.status=blocked_external` 是有意保留的真实边界。真实盒子闭环必须另行完成受控 live 验证，并保留源/目标 torrent hash、内容路径、规则指纹、查重、上传、注入、做种和 summary 证据。

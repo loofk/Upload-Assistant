@@ -1,160 +1,77 @@
+name: upload-assistant-v2
+
 services:
-  ptcli-api:
-    image: ghcr.io/loofk/upload-assistant:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.ptcli
+  postgres:
+    image: postgres:17-bookworm
     restart: unless-stopped
-    networks:
-      - ptcli-net
-    extra_hosts:
-      # Lets Linux Docker containers reach qBittorrent running on the seedbox host.
-      # If qBittorrent is another container, put both services on the same Docker network
-      # and use that container/service name in data/config.py instead.
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "127.0.0.1:8080:8080"
     environment:
-      - TZ=${TZ:-Asia/Shanghai}
-      # Optional but recommended when exposing the API outside localhost.
-      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
-      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
-      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
-      - PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}
-      - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
-      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
-      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
-      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
+      POSTGRES_DB: ${UA_POSTGRES_DB:-upload_assistant}
+      POSTGRES_USER: ${UA_POSTGRES_USER:-upload_assistant}
+      POSTGRES_PASSWORD: ${UA_POSTGRES_PASSWORD:?Set a random UA_POSTGRES_PASSWORD in .env}
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
-      - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
-      - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
-      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
-      - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
-    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+      - ${UA_POSTGRES_DATA_SOURCE:-ua-postgres}:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
       timeout: 5s
-      retries: 3
+      retries: 20
+      start_period: 10s
+    networks:
+      - ua-net
+
+  upload-assistant:
+    platform: linux/amd64
+    image: ${UA_IMAGE:-ghcr.io/loofk/upload-assistant:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.v2
+      args:
+        VERSION: ${UA_VERSION:-dev}
+        COMMIT: ${UA_COMMIT:-unknown}
+        BUILT_AT: ${UA_BUILT_AT:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      UA_LISTEN_ADDR: 0.0.0.0:8080
+      UA_DATABASE_URL: postgres://${UA_POSTGRES_USER:-upload_assistant}:${UA_POSTGRES_PASSWORD:?Set a random UA_POSTGRES_PASSWORD in .env}@postgres:5432/${UA_POSTGRES_DB:-upload_assistant}?sslmode=disable
+      UA_DATA_DIR: /data
+      UA_LEGACY_DIR: /legacy
+      UA_MASTER_KEY_FILE: /data/master-keys
+      UA_LOG_LEVEL: ${UA_LOG_LEVEL:-info}
+      UA_MKBRR_BIN: /usr/local/bin/mkbrr
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=128m
+    ports:
+      - "127.0.0.1:${UA_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ${UA_DATA_SOURCE:-ua-data}:/data
+      - ${UA_DOWNLOADS_HOST_PATH:-./tmp/downloads}:/downloads:rw
+      - ${UA_LEGACY_DATA_HOST_PATH:-./data}:/legacy:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
       start_period: 20s
-
-  ptcli:
-    image: ghcr.io/loofk/upload-assistant:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.ptcli
-    profiles:
-      - cli
-    restart: "no"
     networks:
-      - ptcli-net
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - TZ=${TZ:-Asia/Shanghai}
-      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
-      - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
-      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
-      - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
-      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
-      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
-    volumes:
-      - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
-      - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
-      - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
-      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
-      - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
-    command: ["sites", "--json"]
+      - ua-net
 
-  ptcli-daily-schedule:
-    image: ghcr.io/loofk/upload-assistant:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.ptcli
-    profiles:
-      - daily
-    restart: "no"
-    networks:
-      - ptcli-net
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - TZ=${TZ:-Asia/Shanghai}
-      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
-      - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
-      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
-      - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
-      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
-      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
-    volumes:
-      - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
-      - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
-      - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
-      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
-      - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
-    command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
+volumes:
+  ua-postgres:
+  ua-data:
 
-  ptcli-daily-scheduler:
-    image: ghcr.io/loofk/upload-assistant:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.ptcli
-    profiles:
-      - daily
-    restart: unless-stopped
-    networks:
-      - ptcli-net
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - TZ=${TZ:-Asia/Shanghai}
-      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
-      - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
-      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
-      - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
-      - PTCLI_SITE_RULES_DIR=/Upload-Assistant/data/site-rules
-      - PTCLI_SITE_POLICY_SNAPSHOT=/Upload-Assistant/data/site-rules/site-policies.generated.json
-    volumes:
-      - ${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw # map this to qBittorrent download location with matching container paths
-      - ${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw
-      - ${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw
-      - ${PTCLI_SITE_RULES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/site-rules/}:/Upload-Assistant/data/site-rules/:rw
-      - ${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw
-    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
-
-  legacy-webui:
-    image: ghcr.io/loofk/upload-assistant:latest-legacy-webui
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: UA-legacy-webui
-    profiles:
-      - legacy-webui
-    restart: unless-stopped
-    networks:
-      - ptcli-net
-    ports: 
-      # Change left side to your specific port. Use 0.0.0.0:5000:5000 to expose to ANY device.
-      # 127.0.0.1 means only accessible from the host machine. If you change to 0.0.0.0:5000:5000 it will be accessible from any device on the network
-      # including devices outside your network if your router/reverse proxy allows it.
-      - "127.0.0.1:5000:5000"
-    environment:
-      # Required if not using paths from terminal: allowlisted roots the Web UI is allowed to browse/execute within
-      - UA_BROWSE_ROOTS=/data/torrents,/Upload-Assistant/tmp
-      # Optional: set secret key as key, or use file variant to read from a file. (minimum 32 bytes) permissions handling will apply.
-      # - ENV_SESSION_SECRET="SESSION_SECRET"
-      # - ENV_SESSION_SECRET_FILE="SESSION_SECRET_FILE"
-      # Optional: only needed if you serve the UI from a different origin/domain.
-      # - UA_WEBUI_CORS_ORIGINS=https://your-ui-host
-    entrypoint: /bin/bash
-    command: -c "source /venv/bin/activate && exec python /Upload-Assistant/upload.py --webui 0.0.0.0:5000"
-    volumes:
-      - /path/to/torrents/:/data/torrents/:rw #map this to qbit download location, map exactly as qbittorent template on both sides.
-      - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw # Optional: will be created automatically if missing
-      - /mnt/user/appdata/qBittorrent/data/BT_backup/:/torrent_storage_dir:rw #map this to your qbittorrent bt_backup
-      - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp:rw #map this to your /tmp folder.
-      - /mnt/user/appdata/Upload-Assistant/webui-auth:/root/.config/upload-assistant:rw # persist web UI session auth config
 networks:
-  ptcli-net:
-    name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}
+  ua-net:
+    name: ${UA_DOCKER_NETWORK:-upload-assistant-v2}

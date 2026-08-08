@@ -70,7 +70,9 @@ go-build: ## 构建 Go 服务
 	$(GO) build -o tmp/upload-assistant-v2 ./cmd/upload-assistant
 
 go-compose-config: ## 校验 Go/PostgreSQL Compose 配置
-	docker compose -f docker-compose.go.yml config --quiet
+	cmp -s docker-compose.yml docker-compose.go.yml
+	UA_POSTGRES_PASSWORD=$${UA_POSTGRES_PASSWORD:-compose-config-fixture} docker compose config --quiet
+	UA_POSTGRES_PASSWORD=$${UA_POSTGRES_PASSWORD:-compose-config-fixture} docker compose -f docker-compose.go.yml config --quiet
 
 verify-go-v2-local: go-check go-compose-config ## 用隔离 Compose 栈生成 Go v2 LOCAL_READY 验收报告
 	./scripts/verify_go_v2_local_ready.sh
