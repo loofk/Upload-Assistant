@@ -255,6 +255,31 @@ export interface DownloaderAdapterCapability {
   unavailable_reason?: string;
 }
 
+export interface AdapterCapability {
+  id: string;
+  kind: "downloader" | "image_host" | "media_analyzer" | "media_manager" | "metadata_provider" | "notification_channel" | "screenshot_engine" | "site" | "torrent_maker";
+  adapter: string;
+  display_name: string;
+  site_code?: string;
+  runtime_supported: boolean;
+  operations: string[];
+  credential_fields: string[];
+  safety_gates: string[];
+  constraints: string[];
+  unavailable_reason?: string;
+}
+
+export interface AdapterCatalogEnvelope {
+  ok: true;
+  status: "ready";
+  catalog_version: string;
+  catalog_sha256: string;
+  count: number;
+  adapters: AdapterCapability[];
+  blockers: Blocker[];
+  next_actions: NextAction[];
+}
+
 export interface Downloader {
   id: string;
   name: string;

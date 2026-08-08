@@ -1,11 +1,12 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from "react";
 import {ApiClient} from "./api";
-import type {Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, MediaManager, MetadataProvider, NotificationChannel, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
+import type {AdapterCatalogEnvelope, Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, MediaManager, MetadataProvider, NotificationChannel, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
 
-type ConfigTab = "downloaders" | "image-hosts" | "notifications" | "media-managers" | "metadata-providers" | "screenshots" | "rules" | "migration";
+type ConfigTab = "capabilities" | "downloaders" | "image-hosts" | "notifications" | "media-managers" | "metadata-providers" | "screenshots" | "rules" | "migration";
 
 export default function Configuration({client, onError}: {client: ApiClient; onError: (reason: unknown) => void}) {
   const [tab, setTab] = useState<ConfigTab>("downloaders");
+	const [catalog, setCatalog] = useState<AdapterCatalogEnvelope | null>(null);
   const [downloaders, setDownloaders] = useState<Downloader[]>([]);
 	const [downloaderAdapters, setDownloaderAdapters] = useState<DownloaderAdapterCapability[]>([]);
   const [imageHosts, setImageHosts] = useState<ImageHost[]>([]);
@@ -19,9 +20,10 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-		const [nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextNotificationChannels, nextMediaManagers, nextMetadataProviders, nextScreenshots, nextSites] = await Promise.all([
-			client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listNotificationChannels(), client.listMediaManagers(), client.listMetadataProviders(), client.listScreenshotProfiles(), client.listSites(),
+		const [nextCatalog, nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextNotificationChannels, nextMediaManagers, nextMetadataProviders, nextScreenshots, nextSites] = await Promise.all([
+			client.listAdapterCapabilities(), client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listNotificationChannels(), client.listMediaManagers(), client.listMetadataProviders(), client.listScreenshotProfiles(), client.listSites(),
       ]);
+		setCatalog(nextCatalog);
       setDownloaders(nextDownloaders);
 		setDownloaderAdapters(nextDownloaderAdapters);
       setImageHosts(nextImageHosts);
@@ -45,10 +47,11 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
       <button className="secondary" onClick={() => void reload()} disabled={loading}>刷新配置</button>
     </header>
     <nav className="config-tabs">
-      {(["downloaders", "image-hosts", "notifications", "media-managers", "metadata-providers", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
-        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "notifications" ? `通知 ${notificationChannels.length}` : value === "media-managers" ? `Sonarr/Radarr ${mediaManagers.length}` : value === "metadata-providers" ? `元数据 ${metadataProviders.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
+      {(["capabilities", "downloaders", "image-hosts", "notifications", "media-managers", "metadata-providers", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
+        {value === "capabilities" ? `能力契约 ${catalog?.count ?? 0}` : value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "notifications" ? `通知 ${notificationChannels.length}` : value === "media-managers" ? `Sonarr/Radarr ${mediaManagers.length}` : value === "metadata-providers" ? `元数据 ${metadataProviders.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
       </button>)}
     </nav>
+		{tab === "capabilities" && <AdapterCatalogPanel catalog={catalog} />}
 		{tab === "downloaders" && <DownloadersPanel items={downloaders} adapters={downloaderAdapters} client={client} reload={reload} onError={onError} />}
     {tab === "image-hosts" && <ImageHostsPanel items={imageHosts} client={client} reload={reload} onError={onError} />}
     {tab === "notifications" && <NotificationChannelsPanel items={notificationChannels} client={client} reload={reload} onError={onError} />}
@@ -58,6 +61,14 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
     {tab === "rules" && <RulesPanel sites={sites} client={client} reloadSites={reload} onError={onError} />}
     {tab === "migration" && <LegacyMigrationPanel client={client} />}
   </main>;
+}
+
+function AdapterCatalogPanel({catalog}: {catalog: AdapterCatalogEnvelope | null}) {
+	if (!catalog) return <ConfigEmpty text="能力契约尚未加载。" />;
+	return <section><ConfigSectionTitle title="适配器能力契约" copy="本地只读目录明确每个运行时能做什么、需要哪些凭据字段、必须经过哪些 gate；不能从站点或适配器名称推断支持。" />
+		<div className="safety-callout"><strong>{catalog.catalog_version}</strong><span>contract sha256: {catalog.catalog_sha256}</span><span>修改任一 operation、gate 或 constraint 都会改变指纹并触发 golden 测试。</span></div>
+		<div className="integration-grid">{catalog.adapters.map((item) => <IntegrationCard key={item.id} title={item.site_code ? `${item.site_code} · ${item.display_name}` : item.display_name} type={`${item.kind} / ${item.adapter}`} enabled={item.runtime_supported} health={item.runtime_supported ? "callable" : "config-only"} endpoint={item.operations.length ? `operations: ${item.operations.join(", ")}` : "没有可调用 operation"} credentials={item.credential_fields} details={[...item.safety_gates.map((gate) => `gate: ${gate}`), ...item.constraints, ...(item.unavailable_reason ? [item.unavailable_reason] : [])]} />)}</div>
+	</section>;
 }
 
 function LegacyMigrationPanel({client}: {client: ApiClient}) {

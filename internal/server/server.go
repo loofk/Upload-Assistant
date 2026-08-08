@@ -54,6 +54,7 @@ func New(deps Dependencies) http.Handler {
 	webui.Register(mux)
 	registerDocumentationRoutes(mux)
 	registerAgentDiscoveryRoutes(mux)
+	registerAdapterCatalogRoutes(mux)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{
 			OK: true, Status: "alive", Service: "upload-assistant", Version: deps.Build.Version,

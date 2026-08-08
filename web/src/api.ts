@@ -7,6 +7,7 @@ import type {
   EventsEnvelope,
   Downloader,
 	DownloaderAdapterCapability,
+	AdapterCatalogEnvelope,
   ImageHost,
 	MediaManager,
 	MetadataProvider,
@@ -230,6 +231,10 @@ export class ApiClient {
   async listDownloaderAdapters(): Promise<DownloaderAdapterCapability[]> {
     const response = await this.request<{adapters: DownloaderAdapterCapability[]}>("/api/v2/downloader-adapters");
     return response.adapters;
+  }
+
+  async listAdapterCapabilities(): Promise<AdapterCatalogEnvelope> {
+    return this.request("/api/v2/adapters");
   }
 
   async putDownloader(name: string, input: {

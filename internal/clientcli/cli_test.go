@@ -214,6 +214,21 @@ func TestJobReplayUsesFreshStepModeAndIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestAdaptersUsesOptionalKindFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v2/adapters" || request.URL.Query().Get("kind") != "site" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.String())
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"ready","catalog_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","adapters":[]}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--api-url", server.URL, "adapters", "--kind", "site"}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"catalog_sha256": "aaaaaaaa`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func TestLiveReadinessUsesExactLocalOnlyInputs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		query := request.URL.Query()

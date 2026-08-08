@@ -126,8 +126,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 43 {
-		t.Fatalf("tool count = %d, want 43", len(tools))
+	if len(tools) != 44 {
+		t.Fatalf("tool count = %d, want 44", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {

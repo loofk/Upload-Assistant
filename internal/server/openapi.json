@@ -340,6 +340,17 @@
 		"/api/v2/downloader-adapters": {
 			"get": {"operationId": "listDownloaderAdapters", "description": "Authoritative native runtime capability catalog. Adapters with runtime_supported=false may only be saved disabled.", "responses": {"200": {"description": "Downloader adapter capability catalog", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "count", "adapters", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "count": {"type": "integer"}, "adapters": {"type": "array", "items": {"$ref": "#/components/schemas/DownloaderAdapterCapability"}}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}}}}}}}}
 		},
+		"/api/v2/adapters": {
+			"get": {
+				"operationId": "listAdapterCapabilities",
+				"description": "Returns the fingerprinted, credential-free capability and safety-gate contract for every callable adapter plus every configured-but-not-callable site profile. Performs no external calls.",
+				"parameters": [{"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["downloader", "image_host", "media_analyzer", "media_manager", "metadata_provider", "notification_channel", "screenshot_engine", "site", "torrent_maker"]}}],
+				"responses": {
+					"200": {"description": "Stable adapter capability catalog", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdapterCatalogEnvelope"}}}},
+					"400": {"$ref": "#/components/responses/Problem"}
+				}
+			}
+		},
     "/api/v2/downloaders/{name}": {
       "put": {
         "operationId": "putDownloader",
@@ -962,6 +973,23 @@
       "EndpointConfig": {"type": "object", "additionalProperties": false, "required": ["endpoint"], "properties": {"endpoint": {"type": "string", "format": "uri"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 30}, "options": {"type": "object", "description": "Non-secret adapter options only.", "additionalProperties": true}}},
       "PathMapping": {"type": "object", "additionalProperties": false, "required": ["remote_path", "local_path"], "properties": {"remote_path": {"type": "string", "pattern": "^/"}, "local_path": {"type": "string", "pattern": "^/"}, "priority": {"type": "integer"}}},
 		"DownloaderAdapterCapability": {"type": "object", "additionalProperties": false, "required": ["adapter", "display_name", "runtime_supported", "credential_fields", "operations"], "properties": {"adapter": {"type": "string", "enum": ["qbittorrent", "transmission", "deluge", "rtorrent"]}, "display_name": {"type": "string"}, "runtime_supported": {"type": "boolean"}, "credential_fields": {"type": "array", "items": {"type": "string"}}, "operations": {"type": "object", "additionalProperties": false, "required": ["probe", "add_torrent", "inspect", "list_files", "set_limits", "wait_complete", "category", "tags", "skip_checking"], "properties": {"probe": {"type": "boolean"}, "add_torrent": {"type": "boolean"}, "inspect": {"type": "boolean"}, "list_files": {"type": "boolean"}, "set_limits": {"type": "boolean"}, "wait_complete": {"type": "boolean"}, "category": {"type": "boolean"}, "tags": {"type": "boolean"}, "skip_checking": {"type": "boolean"}}}, "constraints": {"type": "array", "items": {"type": "string"}}, "unavailable_reason": {"type": "string"}}},
+		"AdapterCapability": {
+			"type": "object", "additionalProperties": false,
+			"required": ["id", "kind", "adapter", "display_name", "runtime_supported", "operations", "credential_fields", "safety_gates", "constraints"],
+			"properties": {
+				"id": {"type": "string"}, "kind": {"type": "string"}, "adapter": {"type": "string"}, "display_name": {"type": "string"}, "site_code": {"type": "string"},
+				"runtime_supported": {"type": "boolean"}, "operations": {"type": "array", "items": {"type": "string"}}, "credential_fields": {"type": "array", "items": {"type": "string"}},
+				"safety_gates": {"type": "array", "items": {"type": "string"}}, "constraints": {"type": "array", "items": {"type": "string"}}, "unavailable_reason": {"type": "string"}
+			}
+		},
+		"AdapterCatalogEnvelope": {
+			"type": "object", "additionalProperties": false,
+			"required": ["ok", "status", "catalog_version", "catalog_sha256", "count", "adapters", "blockers", "next_actions"],
+			"properties": {
+				"ok": {"type": "boolean", "const": true}, "status": {"type": "string", "const": "ready"}, "catalog_version": {"type": "string"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+				"count": {"type": "integer", "minimum": 0}, "adapters": {"type": "array", "items": {"$ref": "#/components/schemas/AdapterCapability"}}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}
+			}
+		},
       "DownloaderInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["qbittorrent", "rtorrent", "deluge", "transmission"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}, "path_mappings": {"type": "array", "items": {"$ref": "#/components/schemas/PathMapping"}}}},
       "AddTorrentRequest": {"type": "object", "additionalProperties": false, "required": ["torrent_base64"], "properties": {"torrent_base64": {"type": "string", "contentEncoding": "base64", "writeOnly": true}, "save_path": {"type": "string"}, "category": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "apply_labels": {"type": "boolean", "default": true, "description": "Must be explicitly false, with empty category/tags, when adapter capabilities do not support labels."}, "skip_checking": {"type": "boolean"}, "paused": {"type": "boolean"}, "upload_limit": {"type": "integer", "minimum": 0}, "download_limit": {"type": "integer", "minimum": 0}}},
       "SetTorrentLimitsRequest": {"type": "object", "additionalProperties": false, "required": ["download_limit", "upload_limit"], "properties": {"download_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}, "upload_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}}},

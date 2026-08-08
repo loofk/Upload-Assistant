@@ -24,6 +24,7 @@ describe("App authentication boundary", () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const path = String(input);
       const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+				: path === "/api/v2/adapters" ? {ok: true, status: "ready", catalog_version: "upload-assistant.adapter-catalog.v1", catalog_sha256: "a".repeat(64), count: 1, blockers: [], next_actions: [], adapters: [{id: "site/U2", kind: "site", adapter: "nexusphp", display_name: "U2", site_code: "U2", runtime_supported: true, operations: ["inspect_source"], credential_fields: ["cookie"], safety_gates: ["active_rule_revision"], constraints: ["source-only"]}]}
         : path === "/api/v2/downloaders" ? {downloaders: []}
 				: path === "/api/v2/downloader-adapters" ? {adapters: [{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: [], operations: {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: true, tags: true, skip_checking: true}}]}
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
@@ -43,6 +44,9 @@ describe("App authentication boundary", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/v2/downloaders", expect.objectContaining({credentials: "same-origin"}));
     const downloaderCall = fetchMock.mock.calls.find(([path]) => path === "/api/v2/downloaders");
     expect(new Headers(downloaderCall?.[1]?.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
+		await userEvent.click(screen.getByRole("button", {name: "能力契约 1"}));
+		expect(await screen.findByText("U2 · U2")).toBeInTheDocument();
+		expect(screen.getByText(/contract sha256: a{64}/)).toBeInTheDocument();
   });
 
   it("shows durable step attempts separately from the event chain", async () => {
@@ -173,6 +177,7 @@ describe("App authentication boundary", () => {
 		const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
 			const path = String(input);
 			const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+				: path === "/api/v2/adapters" ? {ok: true, status: "ready", catalog_version: "upload-assistant.adapter-catalog.v1", catalog_sha256: "a".repeat(64), count: 0, blockers: [], next_actions: [], adapters: []}
 				: path === "/api/v2/downloaders" ? {downloaders: []}
 				: path === "/api/v2/downloader-adapters" ? {adapters: [
 					{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: ["api_key", "password", "username"], operations: {...operations, category: true, tags: true, skip_checking: true}},
@@ -226,6 +231,7 @@ describe("App authentication boundary", () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+				: path === "/api/v2/adapters" ? {ok: true, status: "ready", catalog_version: "upload-assistant.adapter-catalog.v1", catalog_sha256: "a".repeat(64), count: 0, blockers: [], next_actions: [], adapters: []}
         : path === "/api/v2/downloaders" ? {downloaders: []}
 				: path === "/api/v2/downloader-adapters" ? {adapters: [{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: [], operations: {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: true, tags: true, skip_checking: true}}]}
         : path === "/api/v2/image-hosts" ? {image_hosts: []}

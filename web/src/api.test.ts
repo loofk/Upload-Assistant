@@ -2,6 +2,19 @@ import {afterEach, describe, expect, it, vi} from "vitest";
 import {ApiClient} from "./api";
 
 describe("ApiClient safety defaults", () => {
+	it("reads the local fingerprinted adapter catalog without external intent", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			ok: true, status: "ready", catalog_version: "upload-assistant.adapter-catalog.v1",
+			catalog_sha256: "a".repeat(64), count: 0, adapters: [], blockers: [], next_actions: [],
+		}), {status: 200, headers: {"Content-Type": "application/json"}}));
+		vi.stubGlobal("fetch", fetchMock);
+		await new ApiClient("ua_test-token-value-that-is-long-enough").listAdapterCapabilities();
+		const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(path).toBe("/api/v2/adapters");
+		expect(init.method).toBeUndefined();
+		expect(init.body).toBeUndefined();
+	});
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("authenticates requests but never infers rule acceptance or live upload confirmation", async () => {

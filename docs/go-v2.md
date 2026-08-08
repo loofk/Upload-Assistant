@@ -121,6 +121,7 @@ Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最�
 
 ## 远程下载器
 
+- `GET /api/v2/adapters` 是跨站点、下载器、图床、元数据、媒体管理器、通知与本地媒体工具的统一能力契约。响应固定排序并带 `catalog_sha256`；所有 callable adapter 必须声明 operations、credential 字段、safety gates 和 constraints，尚未实现的站点只显示为 `runtime_supported=false` 且没有 operation。契约变更必须人工更新 golden fingerprint，AI 不得根据名称猜测支持。
 - `GET /api/v2/downloader-adapters` 是运行时能力的权威目录。调用方应先检查 `runtime_supported` 和逐项 `operations`，不能只依据 adapter 名称推断能力。
 - qBittorrent、Transmission、rTorrent 与 Deluge Web 已支持独立 endpoint、加密凭据、远程路径映射、探测、加种、状态和文件查询、单种限速与等待完成；每次动作都会记录脱敏审计证据。
 - Transmission 同时兼容 4.0 及以前的旧 RPC 和 4.1 起的 JSON-RPC 2.0，并按官方 `X-Transmission-Rpc-Version` 握手自动选择协议。Transmission 不支持 `skip_checking`，请求该选项会明确失败，绝不静默忽略。加种后的限速通过独立 `torrent-set` 应用；若加种成功但限速失败，会记录 `torrent.add_partial` 审计并要求按 hash 对账后重试。

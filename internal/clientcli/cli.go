@@ -166,6 +166,15 @@ func (r runner) execute(ctx context.Context, args []string) (json.RawMessage, er
 		return r.request(ctx, http.MethodGet, "/health/ready", nil, nil, nil, false)
 	case "tools":
 		return r.request(ctx, http.MethodGet, "/api/v2/tools", nil, nil, nil, true)
+	case "adapters":
+		flags := newFlags("adapters")
+		kind := flags.String("kind", "", "optional adapter kind")
+		if err := parseFlags(flags, args[1:]); err != nil {
+			return nil, err
+		}
+		query := url.Values{}
+		setQuery(query, "kind", strings.TrimSpace(*kind))
+		return r.request(ctx, http.MethodGet, "/api/v2/adapters", query, nil, nil, true)
 	case "jobs":
 		return r.jobs(ctx, args[1:])
 	case "retorrent":
@@ -908,6 +917,7 @@ func usage() string {
 Usage:
   upload-assistant cli [global options] health
   upload-assistant cli [global options] tools
+  upload-assistant cli [global options] adapters [--kind KIND]
   upload-assistant cli [global options] jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel ...
   upload-assistant cli [global options] retorrent create --source-url URL --target SITE [options]
   upload-assistant cli [global options] candidates list|scan|submit ...
