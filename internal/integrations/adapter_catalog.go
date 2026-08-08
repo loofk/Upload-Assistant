@@ -60,25 +60,25 @@ var adapterCatalog = []AdapterCapability{
 	{
 		ID: "downloader/deluge", Kind: "downloader", Adapter: "deluge", DisplayName: "Deluge Web",
 		RuntimeSupported: true, Operations: []string{"add_torrent", "inspect", "list_files", "probe", "set_limits", "wait_complete"},
-		CredentialFields: []string{"password"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
+		CredentialFields: []string{"password"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"Web JSON-RPC only; the Web session must already be connected to a daemon", "category, tags, skip_checking, and v2-only torrents are unsupported", "workflows must explicitly set apply_labels=false"},
 	},
 	{
 		ID: "downloader/qbittorrent", Kind: "downloader", Adapter: "qbittorrent", DisplayName: "qBittorrent Web API",
 		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "probe", "set_limits", "skip_checking", "tags", "wait_complete"},
-		CredentialFields: []string{"api_key", "password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
+		CredentialFields: []string{"api_key", "password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"username and password must be supplied together when password authentication is used"},
 	},
 	{
 		ID: "downloader/rtorrent", Kind: "downloader", Adapter: "rtorrent", DisplayName: "rTorrent XML-RPC",
 		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "probe", "set_limits", "tags", "wait_complete"},
-		CredentialFields: []string{"password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
+		CredentialFields: []string{"password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"category and tags share the custom1 label", "named throttles are read back and must report an effective non-zero limit", "v2-only torrents and skip_checking are unsupported"},
 	},
 	{
 		ID: "downloader/transmission", Kind: "downloader", Adapter: "transmission", DisplayName: "Transmission RPC",
 		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "probe", "set_limits", "tags", "wait_complete"},
-		CredentialFields: []string{"password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
+		CredentialFields: []string{"password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"skip_checking is unsupported", "category and tags are represented with Transmission labels"},
 	},
 	{

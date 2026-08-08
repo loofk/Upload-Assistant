@@ -301,6 +301,104 @@ func TestManagerClassifiesUntrustworthyRemoteAddResponse(t *testing.T) {
 	}
 }
 
+func TestManagerPersistsLimitIntentBeforeRemoteWrite(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	store := qBittorrentAddStore(t, server.URL)
+	store.failAuditAction = "torrent.set_limits_intent"
+	evidence, err := NewManager(store).SetLimits(
+		context.Background(), "qbit", strings.Repeat("a", 40), 4096, 8192, workflow.Actor{Type: "test", ID: "manager"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "persist downloader limit intent") || evidence.DownloaderName != "" {
+		t.Fatalf("SetLimits() evidence/error = %#v/%v", evidence, err)
+	}
+	if calls != 0 || strings.Join(store.auditActions, ",") != "torrent.set_limits_intent" {
+		t.Fatalf("remote calls/audits = %d/%#v", calls, store.auditActions)
+	}
+}
+
+func TestManagerClassifiesPartialLimitWriteAsUnknown(t *testing.T) {
+	hash := strings.Repeat("a", 40)
+	setCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/torrents/setDownloadLimit":
+			setCalls++
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/setUploadLimit":
+			setCalls++
+			http.Error(w, "ambiguous upstream failure", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	store := qBittorrentAddStore(t, server.URL)
+	evidence, err := NewManager(store).SetLimits(
+		context.Background(), "qbit", hash, 4096, 8192, workflow.Actor{Type: "test", ID: "manager"},
+	)
+	if !errors.Is(err, ErrLimitsOutcomeUnknown) || evidence.DownloaderName != "" || setCalls != 2 {
+		t.Fatalf("SetLimits() evidence/error/calls = %#v/%v/%d", evidence, err, setCalls)
+	}
+	if strings.Join(store.auditActions, ",") != "torrent.set_limits_intent" {
+		t.Fatalf("audits = %#v", store.auditActions)
+	}
+}
+
+func TestManagerReturnsLimitEvidenceWhenResultAuditFails(t *testing.T) {
+	hash := strings.Repeat("a", 40)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/torrents/setDownloadLimit", "/api/v2/torrents/setUploadLimit":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"hash": hash, "name": "test", "state": "uploading", "progress": 1,
+				"total_size": 1, "save_path": "/downloads", "content_path": "/downloads/test",
+				"dl_limit": 4096, "up_limit": 8192,
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	store := qBittorrentAddStore(t, server.URL)
+	store.failAuditAction = "torrent.set_limits"
+	evidence, err := NewManager(store).SetLimits(
+		context.Background(), "qbit", hash, 4096, 8192, workflow.Actor{Type: "test", ID: "manager"},
+	)
+	if !errors.Is(err, ErrLimitsOutcomeUnknown) || evidence.DownloaderName != "qbit" || evidence.Torrent.Hash != hash ||
+		evidence.Torrent.DownloadLimit != 4096 || evidence.Torrent.UploadLimit != 8192 {
+		t.Fatalf("SetLimits() evidence/error = %#v/%v", evidence, err)
+	}
+	if strings.Join(store.auditActions, ",") != "torrent.set_limits_intent,torrent.set_limits" {
+		t.Fatalf("audits = %#v", store.auditActions)
+	}
+}
+
+func TestManagerValidatesLimitRequestBeforeIntent(t *testing.T) {
+	store := qBittorrentAddStore(t, "http://127.0.0.1:1")
+	manager := NewManager(store)
+	for _, fixture := range []struct {
+		hash     string
+		download int64
+	}{
+		{"invalid", 0},
+		{strings.Repeat("a", 40), -1},
+	} {
+		if _, err := manager.SetLimits(context.Background(), "qbit", fixture.hash, fixture.download, 0, workflow.Actor{Type: "test", ID: "manager"}); !errors.Is(err, integrations.ErrValidation) {
+			t.Fatalf("SetLimits(%q, %d) error = %v", fixture.hash, fixture.download, err)
+		}
+	}
+	if len(store.auditActions) != 0 {
+		t.Fatalf("invalid request audits = %#v", store.auditActions)
+	}
+}
+
 func qBittorrentAddStore(t *testing.T, endpoint string) *fakeConfigurationStore {
 	t.Helper()
 	capability, ok := integrations.DownloaderAdapterCapabilityFor("qbittorrent")

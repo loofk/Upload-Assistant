@@ -3,6 +3,7 @@ package downloaders
 import "errors"
 
 var ErrAddOutcomeUnknown = errors.New("downloader add outcome is unknown")
+var ErrLimitsOutcomeUnknown = errors.New("downloader limit outcome is unknown")
 
 // partialAddError is implemented by downloader-specific errors when the
 // remote mutation succeeded but a mandatory post-add configuration did not.

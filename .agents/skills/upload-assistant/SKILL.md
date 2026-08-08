@@ -84,6 +84,8 @@ TMDb and PTGen are independent metadata providers. Configure an explicit endpoin
 
 Before selecting any site, downloader, image host, metadata provider, media manager, notification channel, or local media tool, call `GET /api/v2/adapters` and honor its fingerprinted `runtime_supported`, operations, credential fields, safety gates, constraints, and unavailable reason. A config-only site has no callable operation. Before configuring or invoking a downloader, also use its detailed `GET /api/v2/downloader-adapters` contract. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission, rTorrent, and Deluge report `skip_checking=false`; do not request or simulate that behavior. Deluge uses its Web JSON-RPC endpoint and Web password, requires the Web session to be connected to a daemon, and reports `category=false` and `tags=false`; set `apply_labels=false` explicitly and leave category/tags empty for both source and target downloader controls, never silently discard them or substitute native daemon RPC credentials. For rTorrent, treat an ineffective named-throttle response as a blocker and never claim the requested limit was enforced.
 
+The direct per-torrent limit endpoint persists an intent before writing and reads both limits back. If it returns `downloader_limits_outcome_unknown`, do not repeat the POST. Use the exact downloader name and infohash with the read-only torrent inspection endpoint, compare both observed caps with the returned `expected` object, and report the discrepancy to the operator.
+
 ## Migrate Legacy Configuration
 
 1. Call `GET /api/v2/migrations/legacy/preview`. It reads only the fixed read-only mount and never executes Python.

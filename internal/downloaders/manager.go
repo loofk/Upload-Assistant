@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 )
 
 var ErrAdapterUnavailable = errors.New("downloader adapter is not implemented")
+
+var torrentHashPattern = regexp.MustCompile(`^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$`)
 
 type ConfigurationStore interface {
 	GetRuntimeDownloader(context.Context, string) (integrations.RuntimeDownloader, error)
@@ -301,22 +304,55 @@ func (manager *Manager) SetLimits(ctx context.Context, name, hash string, downlo
 	if err != nil {
 		return TorrentEvidence{}, err
 	}
+	hash = strings.ToLower(strings.TrimSpace(hash))
+	if !torrentHashPattern.MatchString(hash) {
+		return TorrentEvidence{}, fmt.Errorf("%w: torrent hash must be a 40 or 64 character hexadecimal infohash", integrations.ErrValidation)
+	}
+	if downloadBytesPerSecond < 0 || uploadBytesPerSecond < 0 {
+		return TorrentEvidence{}, fmt.Errorf("%w: downloader limits must not be negative", integrations.ErrValidation)
+	}
+	if runtime.Adapter == "rtorrent" && ((downloadBytesPerSecond > 0 && downloadBytesPerSecond < 1024) || (uploadBytesPerSecond > 0 && uploadBytesPerSecond < 1024)) {
+		return TorrentEvidence{}, fmt.Errorf("%w: rTorrent named throttle granularity is 1024 bytes per second", integrations.ErrValidation)
+	}
+	if runtime.Adapter == "transmission" && ((downloadBytesPerSecond > 0 && downloadBytesPerSecond < 1000) || (uploadBytesPerSecond > 0 && uploadBytesPerSecond < 1000)) {
+		return TorrentEvidence{}, fmt.Errorf("%w: Transmission limit granularity is 1000 bytes per second", integrations.ErrValidation)
+	}
+	if runtime.Adapter == "deluge" && (downloadBytesPerSecond > 1<<53 || uploadBytesPerSecond > 1<<53) {
+		return TorrentEvidence{}, fmt.Errorf("%w: Deluge limit is outside the exactly representable range", integrations.ErrValidation)
+	}
+	intent := map[string]any{
+		"hash": hash, "configuration_sha256": runtime.ConfigurationSHA256,
+		"requested_download_limit": downloadBytesPerSecond, "requested_upload_limit": uploadBytesPerSecond,
+	}
+	if err := manager.store.AuditDownloaderAction(ctx, name, "torrent.set_limits_intent", intent, actor); err != nil {
+		return TorrentEvidence{}, fmt.Errorf("persist downloader limit intent: %w", err)
+	}
 	if err := client.SetLimits(ctx, hash, downloadBytesPerSecond, uploadBytesPerSecond); err != nil {
-		return TorrentEvidence{}, err
+		return TorrentEvidence{}, fmt.Errorf("%w: downloader request ended without trustworthy limit evidence: %w", ErrLimitsOutcomeUnknown, err)
 	}
 	torrent, err := client.Get(ctx, hash)
 	if err != nil {
-		return TorrentEvidence{}, err
+		return TorrentEvidence{}, fmt.Errorf("%w: read back downloader limits: %w", ErrLimitsOutcomeUnknown, err)
 	}
 	evidence := buildTorrentEvidence(runtime, torrent)
+	if !observedLimitMatches(downloadBytesPerSecond, torrent.DownloadLimit) || !observedLimitMatches(uploadBytesPerSecond, torrent.UploadLimit) {
+		return evidence, fmt.Errorf("%w: downloader read-back limits do not satisfy the requested caps", ErrLimitsOutcomeUnknown)
+	}
 	if err := manager.store.AuditDownloaderAction(ctx, name, "torrent.set_limits", map[string]any{
 		"hash": torrent.Hash, "requested_download_limit": downloadBytesPerSecond,
 		"requested_upload_limit": uploadBytesPerSecond, "observed_download_limit": torrent.DownloadLimit,
 		"observed_upload_limit": torrent.UploadLimit,
 	}, actor); err != nil {
-		return TorrentEvidence{}, err
+		return evidence, fmt.Errorf("%w: persist downloader limit result audit", ErrLimitsOutcomeUnknown)
 	}
 	return evidence, nil
+}
+
+func observedLimitMatches(requested, observed int64) bool {
+	if requested == 0 {
+		return observed == 0
+	}
+	return observed > 0 && observed <= requested
 }
 
 func (manager *Manager) WaitComplete(ctx context.Context, name, hash string, interval time.Duration, actor workflow.Actor) (TorrentEvidence, error) {

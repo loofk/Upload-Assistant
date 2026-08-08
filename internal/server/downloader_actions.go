@@ -174,12 +174,37 @@ func (api downloaderActionsAPI) setLimits(w http.ResponseWriter, r *http.Request
 		workflow.Actor{Type: "user", ID: principal.UserID},
 	)
 	if err != nil {
+		if errors.Is(err, downloaders.ErrLimitsOutcomeUnknown) {
+			writeDownloaderLimitReconciliation(
+				w, strings.TrimSpace(r.PathValue("name")), strings.ToLower(strings.TrimSpace(r.PathValue("hash"))),
+				request.DownloadLimit, request.UploadLimit, evidence,
+			)
+			return
+		}
 		writeDownloaderError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "status": "limits_applied", "evidence": evidence,
 		"blockers": []any{}, "next_actions": []any{},
+	})
+}
+
+func writeDownloaderLimitReconciliation(w http.ResponseWriter, name, hash string, downloadLimit, uploadLimit int64, evidence downloaders.TorrentEvidence) {
+	message := "the downloader limit result is not trustworthy; inspect the exact torrent before deciding whether to apply the limits again"
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"ok": false, "status": "blocked", "evidence": evidence,
+		"expected": map[string]any{
+			"downloader_name": name, "torrent_hash": hash,
+			"download_limit": downloadLimit, "upload_limit": uploadLimit,
+		},
+		"error":    map[string]string{"code": "downloader_limits_outcome_unknown", "detail": message},
+		"blockers": []map[string]string{{"code": "downloader_limits_outcome_unknown", "message": message}},
+		"next_actions": []map[string]any{{
+			"action":      "inspect_torrent_limits_before_retry",
+			"description": "Use the read-only torrent inspection endpoint and compare both effective limits with the expected caps. Do not repeat this write blindly.",
+			"parameters":  map[string]any{"downloader_name": name, "torrent_hash": hash},
+		}},
 	})
 }
 
@@ -195,6 +220,8 @@ func writeDownloaderError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "downloader_partial_add_requires_reconciliation", err.Error())
 	case errors.Is(err, downloaders.ErrAddOutcomeUnknown):
 		writeProblem(w, http.StatusConflict, "downloader_add_outcome_unknown", "the downloader add result is not trustworthy and must be reconciled")
+	case errors.Is(err, downloaders.ErrLimitsOutcomeUnknown):
+		writeProblem(w, http.StatusConflict, "downloader_limits_outcome_unknown", "the downloader limit result is not trustworthy and must be reconciled")
 	case errors.Is(err, qbittorrent.ErrUnauthorized):
 		writeProblem(w, http.StatusBadGateway, "downloader_authentication_failed", "the downloader rejected the configured credentials")
 	case errors.Is(err, context.DeadlineExceeded):

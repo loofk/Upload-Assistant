@@ -379,7 +379,7 @@
       "get": {"operationId": "inspectDownloaderTorrent", "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}], "responses": {"200": {"description": "Torrent state and mapped path evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/downloaders/{name}/torrents/{hash}/limits": {
-      "post": {"operationId": "setDownloaderTorrentLimits", "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SetTorrentLimitsRequest"}}}}, "responses": {"200": {"description": "Per-torrent limits applied and observed", "content": {"application/json": {"schema": {"type": "object"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
+      "post": {"operationId": "setDownloaderTorrentLimits", "description": "Persists a limit-write intent before applying remote limits, then reads both limits back. Ambiguous writes, mismatched read-back, or result-audit failures return a blocked reconciliation response and must not be retried blindly.", "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SetTorrentLimitsRequest"}}}}, "responses": {"200": {"description": "Per-torrent limits applied and observed", "content": {"application/json": {"schema": {"type": "object"}}}}, "409": {"description": "Downloader limit write requires reconciliation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloaderLimitsReconciliationResponse"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/image-hosts": {
       "get": {"operationId": "listImageHosts", "responses": {"200": {"description": "Image hosts ordered by priority", "content": {"application/json": {"schema": {"type": "object"}}}}}}
@@ -871,6 +871,19 @@
 		  "status": {"type": "string", "const": "blocked"},
 		  "error": {"type": "object", "required": ["code", "detail"], "properties": {"code": {"type": "string", "enum": ["downloader_partial_add_requires_reconciliation", "downloader_add_outcome_unknown"]}, "detail": {"type": "string"}}},
 		  "evidence": {"type": "object", "description": "Credential-free submitted torrent hashes, torrent SHA-256, adapter configuration SHA-256, and any trustworthy remote observation."},
+		  "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+		  "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+		}
+	  },
+	  "DownloaderLimitsReconciliationResponse": {
+		"type": "object", "additionalProperties": false,
+		"required": ["ok", "status", "error", "expected", "evidence", "blockers", "next_actions"],
+		"properties": {
+		  "ok": {"type": "boolean", "const": false},
+		  "status": {"type": "string", "const": "blocked"},
+		  "error": {"type": "object", "required": ["code", "detail"], "properties": {"code": {"type": "string", "const": "downloader_limits_outcome_unknown"}, "detail": {"type": "string"}}},
+		  "expected": {"type": "object", "required": ["downloader_name", "torrent_hash", "download_limit", "upload_limit"], "properties": {"downloader_name": {"type": "string"}, "torrent_hash": {"type": "string"}, "download_limit": {"type": "integer", "minimum": 0}, "upload_limit": {"type": "integer", "minimum": 0}}},
+		  "evidence": {"type": "object", "description": "Credential-free read-back evidence when available; it may be empty if the read-back itself failed."},
 		  "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
 		  "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
 		}
