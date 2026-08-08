@@ -35,8 +35,10 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 - `POST /api/v2/candidates/daily` 创建 `daily_candidates` job；`candidate_rules`、`candidate_scan`、`candidate_evaluate`、`candidate_rank`、`candidate_summary` 五步均可审计和恢复。
 - `GET /api/v2/candidates/daily` 读取按日期持久化的候选、排序、推荐理由、风险、阻塞、metadata 和目标站查重证据。
 - `POST /api/v2/candidates/{candidate_id}/retorrent-job` 只创建安全的未确认转种 job；它不会推断 `accept_rules`，并固定以 `confirm_upload=false` 开始。
+- `GET/POST /api/v2/schedules/daily-candidates` 与 `PATCH /api/v2/schedules/daily-candidates/{schedule_id}` 管理 PostgreSQL 持久的每日扫描计划；`GET .../{schedule_id}/runs` 可审计每次触发、租约、重试次数和关联 job。当前 cron 明确限定为 `分 时 * * *`，避免接受服务无法可靠解释的表达式。
+- `GET /api/v2/notifications` 读取任务终态后生成的脱敏本地通知。调度、排名和通知均不代表用户批准候选，也不会自动创建正式转种任务或上传种子。
 
-当前阶段由 API 或 Web 手动触发每日扫描。常驻定时调度和主动推送仍属于后续能力；在它们完成前，不应把“每天自动推送”报告为已完成。
+常驻调度器与 Web 本地通知已可用；外部 webhook、Discord 等主动推送渠道仍属于后续能力。在外部渠道完成并有交付证据前，不应把“已主动推送到第三方渠道”报告为完成。
 
 ## 开发验收
 

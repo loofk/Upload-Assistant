@@ -48,20 +48,21 @@ func (s *Store) Upsert(ctx context.Context, input UpsertInput) (Item, error) {
 		WITH source_site AS (SELECT id FROM sites WHERE code = $1),
 		     target_site AS (SELECT id FROM sites WHERE code = $2)
 		INSERT INTO candidate_items(
-			discovery_job_id, source_site_id, target_site_id, source_torrent_id,
+			schedule_id, discovery_job_id, source_site_id, target_site_id, source_torrent_id,
 			recommendation_date, rank, score, payload, status, expires_at
 		)
-		SELECT NULLIF($3, '')::uuid, source_site.id, target_site.id, $4,
-		       $5::date, $6, $7, $8, $9, $10
+		SELECT NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, source_site.id, target_site.id, $5,
+		       $6::date, $7, $8, $9, $10, $11
 		FROM source_site CROSS JOIN target_site
 		ON CONFLICT (recommendation_date, source_site_id, target_site_id, source_torrent_id)
-		DO UPDATE SET discovery_job_id = EXCLUDED.discovery_job_id,
+		DO UPDATE SET schedule_id = COALESCE(EXCLUDED.schedule_id, candidate_items.schedule_id),
+		              discovery_job_id = EXCLUDED.discovery_job_id,
 		              rank = EXCLUDED.rank, score = EXCLUDED.score,
 		              payload = EXCLUDED.payload,
 		              status = CASE WHEN candidate_items.status = 'submitted' THEN candidate_items.status ELSE EXCLUDED.status END,
 		              expires_at = EXCLUDED.expires_at, updated_at = now()
 		RETURNING id::text`,
-		input.SourceSite, input.TargetSite, input.DiscoveryJobID, input.SourceTorrentID,
+		input.SourceSite, input.TargetSite, input.ScheduleID, input.DiscoveryJobID, input.SourceTorrentID,
 		input.RecommendationDate, input.Rank, input.Score, payload, input.Status, input.ExpiresAt,
 	)
 	var id string
@@ -150,7 +151,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Item, error) {
 }
 
 const candidateSelect = `
-	SELECT ci.id::text, COALESCE(ci.discovery_job_id::text, ''), COALESCE(ci.submitted_job_id::text, ''), source.code, target.code,
+	SELECT ci.id::text, COALESCE(ci.schedule_id::text, ''), COALESCE(ci.discovery_job_id::text, ''), COALESCE(ci.submitted_job_id::text, ''), source.code, target.code,
 	       ci.source_torrent_id, ci.recommendation_date, ci.rank, ci.score, ci.payload,
 	       CASE WHEN ci.status = 'candidate' AND ci.expires_at <= now() THEN 'expired' ELSE ci.status END,
 	       ci.discovered_at, ci.expires_at, ci.updated_at, ci.submitted_at
@@ -163,7 +164,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanItem(row rowScanner) (Item, error) {
 	var item Item
 	if err := row.Scan(
-		&item.ID, &item.DiscoveryJobID, &item.SubmittedJobID, &item.SourceSite, &item.TargetSite,
+		&item.ID, &item.ScheduleID, &item.DiscoveryJobID, &item.SubmittedJobID, &item.SourceSite, &item.TargetSite,
 		&item.SourceTorrentID, &item.RecommendationDate, &item.Rank, &item.Score,
 		&item.Payload, &item.Status, &item.DiscoveredAt, &item.ExpiresAt, &item.UpdatedAt, &item.SubmittedAt,
 	); err != nil {

@@ -1,5 +1,8 @@
 import type {
   CreateJobInput,
+  DailyCandidateSchedule,
+  DailyCandidateScheduleListEnvelope,
+  DailyCandidateScheduleRunListEnvelope,
   DailyCandidateListEnvelope,
   EventsEnvelope,
   Downloader,
@@ -8,6 +11,7 @@ import type {
   JobListEnvelope,
   JobStatus,
   JobSummaryEnvelope,
+  NotificationListEnvelope,
   JsonValue,
   PathMapping,
   RuleRevision,
@@ -66,6 +70,37 @@ export class ApiClient {
       headers: {"Idempotency-Key": crypto.randomUUID()},
       body: JSON.stringify({execution_mode: "step"}),
     });
+  }
+
+  async listDailyCandidateSchedules(): Promise<DailyCandidateScheduleListEnvelope> {
+    return this.request("/api/v2/schedules/daily-candidates?limit=100");
+  }
+
+  async createDailyCandidateSchedule(input: {
+    name: string; source: string; target: string; cronExpression: string; timezone: string;
+    targetCount?: number; scanLimit?: number;
+  }): Promise<{ok: true; status: "ready"; schedule_id: string; schedule: DailyCandidateSchedule}> {
+    return this.request("/api/v2/schedules/daily-candidates", {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name, cron_expression: input.cronExpression, timezone: input.timezone, enabled: true,
+        config: {source: input.source.toUpperCase(), target: input.target.toUpperCase(), target_count: input.targetCount ?? 10, scan_limit: input.scanLimit ?? 30, page: 1},
+      }),
+    });
+  }
+
+  async setDailyCandidateScheduleEnabled(scheduleID: string, enabled: boolean): Promise<{ok: true; status: "ready"; schedule_id: string; schedule: DailyCandidateSchedule}> {
+    return this.request(`/api/v2/schedules/daily-candidates/${encodeURIComponent(scheduleID)}`, {
+      method: "PATCH", body: JSON.stringify({enabled}),
+    });
+  }
+
+  async listDailyCandidateScheduleRuns(scheduleID: string): Promise<DailyCandidateScheduleRunListEnvelope> {
+    return this.request(`/api/v2/schedules/daily-candidates/${encodeURIComponent(scheduleID)}/runs?limit=25`);
+  }
+
+  async listNotifications(): Promise<NotificationListEnvelope> {
+    return this.request("/api/v2/notifications?limit=25");
   }
 
   async getSummary(jobID: string): Promise<JobSummaryEnvelope> {

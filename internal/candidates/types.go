@@ -22,6 +22,7 @@ const (
 
 type Item struct {
 	ID                 string          `json:"id"`
+	ScheduleID         string          `json:"schedule_id,omitempty"`
 	DiscoveryJobID     string          `json:"discovery_job_id,omitempty"`
 	SubmittedJobID     string          `json:"submitted_job_id,omitempty"`
 	SourceSite         string          `json:"source_site"`
@@ -39,6 +40,7 @@ type Item struct {
 }
 
 type UpsertInput struct {
+	ScheduleID         string
 	DiscoveryJobID     string
 	SourceSite         string
 	TargetSite         string

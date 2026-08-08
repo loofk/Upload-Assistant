@@ -1,6 +1,6 @@
 ---
 name: upload-assistant
-description: Operate the local Upload Assistant v2 HTTP service for Chinese PT retorrent jobs, rule review, duplicate checks, downloaders, image hosts, screenshots, evidence, and task recovery. Use when an agent must create, inspect, pause, resume, or audit a durable PT workflow without bypassing accept_rules, confirm_upload, site obligations, duplicate gates, or seeding requirements.
+description: Operate the local Upload Assistant v2 HTTP service for Chinese PT retorrent jobs, daily candidate recommendations and schedules, rule review, duplicate checks, integrations, evidence, notifications, and task recovery. Use when an agent must create, inspect, pause, resume, schedule, or audit a durable PT workflow without bypassing accept_rules, confirm_upload, site obligations, duplicate gates, or seeding requirements.
 ---
 
 # Upload Assistant
@@ -21,6 +21,7 @@ Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use envir
 
 - List jobs or read one job before deciding whether to create work.
 - Create a retorrent job only from an explicit source URL and target site request. Use a fresh idempotency key for a new intent.
+- Create or read daily candidate jobs when the operator wants recommendations. Treat schedules and in-app notifications as discovery only.
 - Read status and summary for normal progress. Read events and verified artifacts for an audit.
 - Resume only with the values named by `blockers`, `next_actions`, and `resume_state`.
 - Change rules, downloaders, image hosts, screenshot profiles, or site credentials only when the operator explicitly asks.
@@ -36,6 +37,15 @@ Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use envir
 
 When an operator wants stepwise control, use `execution_mode=step` or `stop_after_step`. A paused job is an expected control boundary, not a failure.
 
+## Run Daily Candidate Discovery
+
+1. Create a one-off `daily_candidates` job or configure a daily schedule with the source, target, daily cron expression, and IANA timezone requested by the operator.
+2. Read the schedule's run history before diagnosing a missed trigger or retry; use its durable status, job link, attempt count, and safe error field.
+3. Read the candidate job summary and persisted candidate list. Require rule snapshot, source downloadability, required listing fields, metadata, and a clear target duplicate check before recommending an item.
+4. Read in-app notifications as local delivery evidence only. A notification never means the user approved a candidate.
+5. Create a retorrent job from a selected candidate only when the operator requests it. The created job starts with no inferred rule acceptance and `confirm_upload=false`.
+6. Keep candidate submission, rule acceptance, and final live-upload confirmation as separate decisions.
+
 ## Enforce Safety Gates
 
 - Never bypass rule acceptance, manual obligations, duplicate checks, upload confirmation, or seeding requirements.
@@ -46,6 +56,7 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 - Do not reveal cookies, passkeys, announce URLs, API keys, signed URLs, raw torrent bytes, or decrypted credentials.
 - Cancellation does not delete downloaded data or audit artifacts. Do not claim otherwise.
 - Do not run live tracker, downloader, or image-host probes merely to test connectivity without operator authorization.
+- Never interpret a schedule firing, candidate rank, or notification as permission to submit a candidate or upload a torrent.
 
 ## Manage Rules and Configuration
 

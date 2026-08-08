@@ -27,6 +27,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
+	"github.com/loofk/upload-assistant/v2/internal/schedules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/server"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
@@ -138,6 +139,7 @@ func serve(args []string) error {
 		return fmt.Errorf("initialize artifact store: %w", err)
 	}
 	candidateStore := candidates.NewStore(pool)
+	scheduleStore := schedules.NewStore(pool)
 	sourceRegistry, err := buildSourceRegistry(integrationStore)
 	if err != nil {
 		return fmt.Errorf("initialize source adapters: %w", err)
@@ -192,6 +194,8 @@ func serve(args []string) error {
 		worker.WithDailyCandidates(ruleStore, sourceRegistry, targetDuplicateRegistry, candidateStore, artifactStore),
 	)
 	go jobRunner.Run(ctx)
+	dailyScheduler := schedules.NewRunner(scheduleStore, jobService, workerID+"-scheduler", logger)
+	go dailyScheduler.Run(ctx)
 
 	handler := server.New(server.Dependencies{
 		Database:     pool,
@@ -202,6 +206,7 @@ func serve(args []string) error {
 		Downloaders:  downloaderManager,
 		Artifacts:    artifactStore,
 		Candidates:   candidateStore,
+		Schedules:    scheduleStore,
 		DataDir:      cfg.DataDir,
 		Logger:       logger,
 		Build:        buildinfo.Current(),

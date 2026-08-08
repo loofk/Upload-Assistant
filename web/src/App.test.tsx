@@ -52,6 +52,8 @@ describe("App authentication boundary", () => {
 		  discovered_at: "2026-08-08T00:00:00Z", expires_at: "2026-08-10T00:00:00Z", updated_at: "2026-08-08T00:00:00Z",
 		  payload: {ready: true, source: {title: "Fixture Anime", free: true, size_bytes: 1024}, metadata: {imdb_id: "tt1234567"}, duplicate_check: {duplicate: false}, recommendation_reasons: ["target_duplicate_clear"], risks: [], blockers: []},
 		}]}
+		: path.startsWith("/api/v2/schedules/daily-candidates?") ? {ok: true, status: "ready", count: 0, schedules: [], blockers: [], next_actions: []}
+		: path.startsWith("/api/v2/notifications?") ? {ok: true, status: "ready", count: 0, notifications: [], blockers: [], next_actions: []}
 		: {};
 	  return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
 	});

@@ -42,6 +42,7 @@ describe("ApiClient safety defaults", () => {
 
 	await client.createDailyCandidateJob({source: "u2", target: "mteam", targetCount: 10, scanLimit: 30});
 	await client.submitDailyCandidate("55555555-5555-4555-8555-555555555555");
+	await client.createDailyCandidateSchedule({name: "morning", source: "u2", target: "mteam", cronExpression: "0 9 * * *", timezone: "Asia/Shanghai"});
 
 	const [scanPath, scanInit] = fetchMock.mock.calls[0] as [string, RequestInit];
 	expect(scanPath).toBe("/api/v2/candidates/daily");
@@ -52,5 +53,10 @@ describe("ApiClient safety defaults", () => {
 	expect(submitBody.execution_mode).toBe("step");
 	expect(submitBody.accept_rules).toBeUndefined();
 	expect(submitBody.confirm_upload).toBeUndefined();
+	const [schedulePath, scheduleInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+	expect(schedulePath).toBe("/api/v2/schedules/daily-candidates");
+	const scheduleBody = JSON.parse(String(scheduleInit.body));
+	expect(scheduleBody).toMatchObject({cron_expression: "0 9 * * *", timezone: "Asia/Shanghai", config: {source: "U2", target: "MTEAM", target_count: 10}});
+	expect(JSON.stringify(scheduleBody)).not.toContain("confirm_upload");
   });
 });

@@ -250,6 +250,7 @@ export interface DailyCandidatePayload {
 
 export interface DailyCandidate {
   id: string;
+  schedule_id?: string;
   discovery_job_id?: string;
   submitted_job_id?: string;
   source_site: string;
@@ -278,6 +279,87 @@ export interface DailyCandidateListEnvelope {
   count: number;
   ready_count: number;
   candidates: DailyCandidate[];
+  blockers: Blocker[];
+  next_actions: NextAction[];
+}
+
+export interface DailyCandidateScheduleConfig {
+  source: string;
+  target: string;
+  target_count: number;
+  scan_limit: number;
+  page: number;
+}
+
+export interface DailyCandidateSchedule {
+  id: string;
+  name: string;
+  kind: "daily_candidates";
+  cron_expression: string;
+  timezone: string;
+  enabled: boolean;
+  config: DailyCandidateScheduleConfig;
+  next_run_at?: string;
+  last_run_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DailyCandidateScheduleListEnvelope {
+  ok: true;
+  status: "ready";
+  count: number;
+  schedules: DailyCandidateSchedule[];
+  blockers: Blocker[];
+  next_actions: NextAction[];
+}
+
+export interface DailyCandidateScheduleRun {
+  id: string;
+  schedule_id: string;
+  schedule_name: string;
+  scheduled_for: string;
+  status: "queued" | "running" | "created" | "failed" | "cancelled";
+  job_id?: string;
+  attempts: number;
+  next_attempt_at: string;
+  lease_expires_at?: string;
+  last_error?: string;
+  cron_expression: string;
+  timezone: string;
+  config: DailyCandidateScheduleConfig;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DailyCandidateScheduleRunListEnvelope {
+  ok: true;
+  status: "ready";
+  schedule_id: string;
+  count: number;
+  runs: DailyCandidateScheduleRun[];
+  blockers: Blocker[];
+  next_actions: NextAction[];
+}
+
+export interface Notification {
+  id: string;
+  schedule_run_id?: string;
+  job_id?: string;
+  channel: "in_app";
+  status: string;
+  payload: Record<string, JsonValue>;
+  attempts: number;
+  scheduled_at: string;
+  sent_at?: string;
+  created_at: string;
+}
+
+export interface NotificationListEnvelope {
+  ok: true;
+  status: "ready";
+  count: number;
+  notifications: Notification[];
   blockers: Blocker[];
   next_actions: NextAction[];
 }

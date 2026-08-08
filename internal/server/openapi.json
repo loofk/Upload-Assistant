@@ -89,6 +89,43 @@
         "responses": {"202": {"description": "Unconfirmed retorrent workflow accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/schedules/daily-candidates": {
+      "get": {
+        "operationId": "listDailyCandidateSchedules",
+        "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}],
+        "responses": {"200": {"description": "Durable daily candidate schedules", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DailyCandidateScheduleListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+      },
+      "post": {
+        "operationId": "createDailyCandidateSchedule",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateDailyCandidateScheduleRequest"}}}},
+        "responses": {"201": {"description": "Schedule created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DailyCandidateScheduleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/schedules/daily-candidates/{schedule_id}": {
+      "patch": {
+        "operationId": "updateDailyCandidateSchedule",
+        "parameters": [{"name": "schedule_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UpdateDailyCandidateScheduleRequest"}}}},
+        "responses": {"200": {"description": "Schedule updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DailyCandidateScheduleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/schedules/daily-candidates/{schedule_id}/runs": {
+      "get": {
+        "operationId": "listDailyCandidateScheduleRuns",
+        "parameters": [
+          {"name": "schedule_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}}
+        ],
+        "responses": {"200": {"description": "Durable schedule run audit", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DailyCandidateScheduleRunListEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}}],
+        "responses": {"200": {"description": "Redacted in-app daily candidate notifications", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/jobs": {
       "get": {
         "operationId": "listJobs",
@@ -401,7 +438,7 @@
       "DailyCandidateItem": {
         "type": "object", "required": ["id", "source_site", "target_site", "source_torrent_id", "recommendation_date", "score", "payload", "status", "expires_at"],
         "properties": {
-          "id": {"type": "string", "format": "uuid"}, "discovery_job_id": {"type": "string", "format": "uuid"},
+          "id": {"type": "string", "format": "uuid"}, "schedule_id": {"type": "string", "format": "uuid"}, "discovery_job_id": {"type": "string", "format": "uuid"},
           "submitted_job_id": {"type": "string", "format": "uuid"}, "source_site": {"type": "string"}, "target_site": {"type": "string"},
           "source_torrent_id": {"type": "string"}, "recommendation_date": {"type": "string", "format": "date-time"},
           "rank": {"type": "integer", "minimum": 1}, "score": {"type": "number"}, "payload": {"type": "object"},
@@ -421,6 +458,105 @@
           "ok": {"type": "boolean"}, "status": {"type": "string"}, "date": {"type": "string", "format": "date"},
           "count": {"type": "integer"}, "ready_count": {"type": "integer"},
           "candidates": {"type": "array", "items": {"$ref": "#/components/schemas/DailyCandidateItem"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
+      "DailyCandidateScheduleConfig": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source", "target"],
+        "properties": {
+          "source": {"type": "string"}, "target": {"type": "string"},
+          "target_count": {"type": "integer", "minimum": 1, "maximum": 25, "default": 10},
+          "scan_limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 30},
+          "page": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1}
+        }
+      },
+      "DailyCandidateSchedule": {
+        "type": "object", "required": ["id", "name", "kind", "cron_expression", "timezone", "enabled", "config", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "name": {"type": "string"},
+          "kind": {"type": "string", "const": "daily_candidates"}, "cron_expression": {"type": "string"},
+          "timezone": {"type": "string"}, "enabled": {"type": "boolean"},
+          "config": {"$ref": "#/components/schemas/DailyCandidateScheduleConfig"},
+          "next_run_at": {"type": "string", "format": "date-time"}, "last_run_at": {"type": "string", "format": "date-time"},
+          "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "CreateDailyCandidateScheduleRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "cron_expression", "timezone", "config"],
+        "properties": {
+          "name": {"type": "string", "maxLength": 100},
+          "cron_expression": {"type": "string", "description": "Supported subset: minute hour * * *."},
+          "timezone": {"type": "string", "default": "Asia/Shanghai"}, "enabled": {"type": "boolean", "default": true},
+          "config": {"$ref": "#/components/schemas/DailyCandidateScheduleConfig"}
+        }
+      },
+      "UpdateDailyCandidateScheduleRequest": {
+        "type": "object", "additionalProperties": false, "minProperties": 1,
+        "properties": {
+          "cron_expression": {"type": "string", "description": "Supported subset: minute hour * * *."},
+          "timezone": {"type": "string"}, "enabled": {"type": "boolean"},
+          "config": {"$ref": "#/components/schemas/DailyCandidateScheduleConfig"}
+        }
+      },
+      "DailyCandidateScheduleListEnvelope": {
+        "type": "object", "required": ["ok", "status", "count", "schedules", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean"}, "status": {"type": "string"}, "count": {"type": "integer"},
+          "schedules": {"type": "array", "items": {"$ref": "#/components/schemas/DailyCandidateSchedule"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
+      "DailyCandidateScheduleEnvelope": {
+        "type": "object", "required": ["ok", "status", "schedule_id", "schedule", "blockers", "next_actions", "safety"],
+        "properties": {
+          "ok": {"type": "boolean"}, "status": {"type": "string"}, "schedule_id": {"type": "string", "format": "uuid"},
+          "schedule": {"$ref": "#/components/schemas/DailyCandidateSchedule"},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}},
+          "safety": {"type": "object"}
+        }
+      },
+      "DailyCandidateScheduleRun": {
+        "type": "object", "required": ["id", "schedule_id", "schedule_name", "scheduled_for", "status", "attempts", "next_attempt_at", "cron_expression", "timezone", "config", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "schedule_id": {"type": "string", "format": "uuid"},
+          "schedule_name": {"type": "string"}, "scheduled_for": {"type": "string", "format": "date-time"},
+          "status": {"type": "string", "enum": ["queued", "running", "created", "failed", "cancelled"]},
+          "job_id": {"type": "string", "format": "uuid"}, "attempts": {"type": "integer"},
+          "next_attempt_at": {"type": "string", "format": "date-time"}, "lease_expires_at": {"type": "string", "format": "date-time"},
+          "last_error": {"type": "string"}, "cron_expression": {"type": "string"}, "timezone": {"type": "string"},
+          "config": {"$ref": "#/components/schemas/DailyCandidateScheduleConfig"},
+          "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "DailyCandidateScheduleRunListEnvelope": {
+        "type": "object", "required": ["ok", "status", "schedule_id", "count", "runs", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean"}, "status": {"type": "string"}, "schedule_id": {"type": "string", "format": "uuid"},
+          "count": {"type": "integer"}, "runs": {"type": "array", "items": {"$ref": "#/components/schemas/DailyCandidateScheduleRun"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
+      "Notification": {
+        "type": "object", "required": ["id", "channel", "status", "payload", "attempts", "scheduled_at", "created_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "schedule_run_id": {"type": "string", "format": "uuid"},
+          "job_id": {"type": "string", "format": "uuid"}, "channel": {"type": "string", "const": "in_app"},
+          "status": {"type": "string"}, "payload": {"type": "object"}, "attempts": {"type": "integer"},
+          "last_error": {"type": "string"}, "scheduled_at": {"type": "string", "format": "date-time"},
+          "sent_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "NotificationListEnvelope": {
+        "type": "object", "required": ["ok", "status", "count", "notifications", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean"}, "status": {"type": "string"}, "count": {"type": "integer"},
+          "notifications": {"type": "array", "items": {"$ref": "#/components/schemas/Notification"}},
           "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
           "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
         }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/candidates"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
@@ -65,6 +66,7 @@ type candidateDependencies struct {
 }
 
 type dailyCandidateInput struct {
+	ScheduleID  string `json:"schedule_id,omitempty"`
 	Source      string `json:"source"`
 	Target      string `json:"target"`
 	TargetCount int    `json:"target_count"`
@@ -84,6 +86,11 @@ func candidateInput(body json.RawMessage) (dailyCandidateInput, error) {
 	input.Target = strings.ToUpper(strings.TrimSpace(input.Target))
 	if input.Source == "" || input.Target == "" || input.Source == input.Target {
 		return input, errors.New("different source and target site codes are required")
+	}
+	if input.ScheduleID != "" {
+		if _, err := uuid.Parse(input.ScheduleID); err != nil {
+			return input, errors.New("schedule_id must be a UUID")
+		}
 	}
 	if input.TargetCount == 0 {
 		input.TargetCount = 10
@@ -413,6 +420,7 @@ type candidateDigest struct {
 	SchemaVersion int               `json:"schema_version"`
 	Kind          string            `json:"kind"`
 	JobID         string            `json:"job_id"`
+	ScheduleID    string            `json:"schedule_id,omitempty"`
 	Date          string            `json:"date"`
 	Source        string            `json:"source"`
 	Target        string            `json:"target"`
@@ -454,7 +462,7 @@ func (executor candidateRankExecutor) Execute(ctx context.Context, execution Exe
 	now := candidateNow(executor.dependencies)
 	date := candidateDate(input.Date, now)
 	digest := candidateDigest{
-		SchemaVersion: 1, Kind: "upload-assistant.daily-candidates.v1", JobID: execution.Job.ID,
+		SchemaVersion: 1, Kind: "upload-assistant.daily-candidates.v1", JobID: execution.Job.ID, ScheduleID: input.ScheduleID,
 		Date: date.Format("2006-01-02"), Source: input.Source, Target: input.Target,
 		TargetCount: input.TargetCount, Items: make([]rankedCandidate, 0, len(batch.Evaluations)), GeneratedAt: now,
 	}
@@ -480,7 +488,7 @@ func (executor candidateRankExecutor) Execute(ctx context.Context, execution Exe
 		}
 		payloadBody, _ := json.Marshal(payload)
 		stored, err := executor.dependencies.repository.Upsert(ctx, candidates.UpsertInput{
-			DiscoveryJobID: execution.Job.ID, SourceSite: input.Source, TargetSite: input.Target,
+			ScheduleID: input.ScheduleID, DiscoveryJobID: execution.Job.ID, SourceSite: input.Source, TargetSite: input.Target,
 			SourceTorrentID: evaluation.Source.TorrentID, RecommendationDate: date, Rank: rank,
 			Score: evaluation.Score, Payload: payloadBody, Status: status, ExpiresAt: now.Add(48 * time.Hour),
 		})
@@ -540,7 +548,8 @@ func (executor candidateSummaryExecutor) Execute(ctx context.Context, execution 
 	summary := map[string]any{
 		"schema_version": 1, "kind": "upload-assistant.daily-candidate-summary.v1",
 		"ok": ranked.TargetMet, "status": status, "job_id": execution.Job.ID,
-		"date": ranked.Date, "source": input.Source, "target": input.Target,
+		"schedule_id": input.ScheduleID,
+		"date":        ranked.Date, "source": input.Source, "target": input.Target,
 		"target_count": ranked.TargetCount, "selected_count": ranked.SelectedCount,
 		"ready_count": ranked.ReadyCount, "target_met": ranked.TargetMet,
 		"blockers": blockers, "next_actions": nextActions, "digest_file": ranked.DigestArtifact,

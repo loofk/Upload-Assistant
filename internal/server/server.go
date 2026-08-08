@@ -27,6 +27,7 @@ type Dependencies struct {
 	Downloaders  DownloaderService
 	Artifacts    ArtifactContentReader
 	Candidates   CandidateService
+	Schedules    ScheduleService
 	DataDir      string
 	Logger       *slog.Logger
 	Build        buildinfo.Info
@@ -93,6 +94,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.Candidates != nil && deps.Jobs != nil {
 		registerCandidateRoutes(mux, deps.Candidates, deps.Jobs)
+	}
+	if deps.Schedules != nil {
+		registerScheduleRoutes(mux, deps.Schedules)
 	}
 	return requestLogger(deps.Logger, securityHeaders(authenticate(deps.Auth, mux)))
 }
