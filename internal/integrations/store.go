@@ -134,6 +134,53 @@ func (s *Store) DisableSiteCredential(ctx context.Context, siteCode, name string
 	return credential, nil
 }
 
+func (s *Store) GetRuntimeSite(ctx context.Context, siteCode string) (RuntimeSite, error) {
+	siteCode = strings.ToUpper(strings.TrimSpace(siteCode))
+	var runtime RuntimeSite
+	var enabled bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT code, name, adapter, enabled, config
+		FROM sites WHERE code = $1`, siteCode).Scan(
+		&runtime.Code, &runtime.Name, &runtime.Adapter, &enabled, &runtime.Config,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeSite{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeSite{}, fmt.Errorf("load runtime site: %w", err)
+	}
+	if !enabled {
+		return RuntimeSite{}, fmt.Errorf("%w: site is disabled", ErrValidation)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT sc.name, sc.secret_id::text
+		FROM site_credentials sc
+		JOIN sites s ON s.id = sc.site_id
+		WHERE s.code = $1 AND sc.enabled = true
+		ORDER BY sc.name`, siteCode)
+	if err != nil {
+		return RuntimeSite{}, fmt.Errorf("load runtime site credentials: %w", err)
+	}
+	defer rows.Close()
+	runtime.Credentials = map[string]string{}
+	for rows.Next() {
+		var name, secretID string
+		if err := rows.Scan(&name, &secretID); err != nil {
+			return RuntimeSite{}, fmt.Errorf("scan runtime site credential: %w", err)
+		}
+		plaintext, err := s.secrets.Get(ctx, secretID, "sites."+siteCode+"."+name)
+		if err != nil {
+			return RuntimeSite{}, fmt.Errorf("decrypt runtime site credential %s: %w", name, err)
+		}
+		runtime.Credentials[name] = string(plaintext)
+	}
+	if err := rows.Err(); err != nil {
+		return RuntimeSite{}, fmt.Errorf("iterate runtime site credentials: %w", err)
+	}
+	return runtime, nil
+}
+
 func (s *Store) UpsertDownloader(ctx context.Context, name string, input DownloaderInput, actor workflow.Actor) (Downloader, error) {
 	name = strings.TrimSpace(name)
 	input.Adapter = strings.ToLower(strings.TrimSpace(input.Adapter))

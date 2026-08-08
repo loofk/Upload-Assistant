@@ -73,6 +73,10 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if !foundCredential {
 		t.Fatal("site credential was not listed")
 	}
+	runtimeSite, err := store.GetRuntimeSite(ctx, "U2")
+	if err != nil || runtimeSite.Adapter != "nexusphp" || runtimeSite.Credentials["cookie-"+nameSuffix] != "uid=encrypted-cookie" {
+		t.Fatalf("GetRuntimeSite() runtime/error = %#v/%v", runtimeSite, err)
+	}
 
 	enabled := true
 	downloader, err := store.UpsertDownloader(ctx, "qbit-"+nameSuffix, DownloaderInput{
