@@ -9,7 +9,6 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
-	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -159,7 +158,7 @@ func writeDownloaderError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "downloader_not_ready", err.Error())
 	case errors.Is(err, downloaders.ErrAdapterUnavailable):
 		writeProblem(w, http.StatusConflict, "downloader_adapter_unavailable", err.Error())
-	case errors.As(err, new(*transmission.PartialAddError)):
+	case isPartialDownloaderAdd(err):
 		writeProblem(w, http.StatusConflict, "downloader_partial_add_requires_reconciliation", err.Error())
 	case errors.Is(err, qbittorrent.ErrUnauthorized):
 		writeProblem(w, http.StatusBadGateway, "downloader_authentication_failed", "the downloader rejected the configured credentials")
@@ -168,4 +167,9 @@ func writeDownloaderError(w http.ResponseWriter, err error) {
 	default:
 		writeProblem(w, http.StatusBadGateway, "downloader_request_failed", "the downloader request could not be completed")
 	}
+}
+
+func isPartialDownloaderAdd(err error) bool {
+	_, ok := downloaders.PartialAddHash(err)
+	return ok
 }

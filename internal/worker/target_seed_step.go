@@ -290,22 +290,22 @@ func targetSeedBlock(bindings targetSeedBindings, checks targetSeedChecks, artif
 	}
 	if !checks.DownloaderMatches || !checks.HashMatches || !checks.ContentPathMatches || !checks.FileManifestMatches {
 		return &BlockError{
-			Blockers:    []Blocker{{Code: "target_seed_content_mismatch", Message: "qBittorrent target torrent content/path evidence does not match the immutable upload payload", SiteCode: bindings.Target}},
+			Blockers:    []Blocker{{Code: "target_seed_content_mismatch", Message: "target torrent content/path evidence from the configured downloader does not match the immutable upload payload", SiteCode: bindings.Target}},
 			NextActions: []NextAction{{Action: "repair_target_cross_seed_path", Description: "Stop and repair the target torrent save path or payload before seeding.", Parameters: parameters}},
 			ResumeState: resume,
 		}
 	}
 	if !checks.CategoryMatches || !checks.TagsMatch || !checks.DownloadLimitSafe || !checks.UploadLimitSafe {
 		return &BlockError{
-			Blockers:    []Blocker{{Code: "target_seed_policy_mismatch", Message: "qBittorrent category, tags, or rate limits do not match the audited target injection policy", SiteCode: bindings.Target}},
+			Blockers:    []Blocker{{Code: "target_seed_policy_mismatch", Message: "downloader category, tags, or rate limits do not match the audited target injection policy", SiteCode: bindings.Target}},
 			NextActions: []NextAction{{Action: "repair_target_downloader_policy", Description: "Apply the receipt-bound category, tags, and strict rate limits, then resume verification.", Parameters: parameters}},
 			ResumeState: resume,
 		}
 	}
 	if !checks.Complete || !checks.SeedingState {
 		return &BlockError{
-			Blockers:    []Blocker{{Code: "target_seed_verification_pending", Message: "qBittorrent is still checking the payload or is not in a seeding-capable state", SiteCode: bindings.Target}},
-			NextActions: []NextAction{{Action: "resume_when_target_is_seeding", Description: "Keep the verified target torrent active, then resume this job after qBittorrent finishes checking.", Parameters: parameters}},
+			Blockers:    []Blocker{{Code: "target_seed_verification_pending", Message: "the configured downloader is still checking the payload or is not in a seeding-capable state", SiteCode: bindings.Target}},
+			NextActions: []NextAction{{Action: "resume_when_target_is_seeding", Description: "Keep the verified target torrent active, then resume this job after the downloader finishes checking.", Parameters: parameters}},
 			ResumeState: resume,
 		}
 	}

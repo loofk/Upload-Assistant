@@ -266,7 +266,7 @@ func targetTorrentDownloadBlock(err error, bindings targetTorrentDownloadBinding
 		description = "Review MTEAM download_hosts and the hashed token response; never follow an untrusted signed URL."
 	case "target_torrent_payload_mismatch", "target_torrent_download_invalid":
 		action = "reconcile_uploaded_torrent"
-		description = "Stop before qBittorrent injection and reconcile the target torrent with the immutable submitted payload."
+		description = "Stop before downloader injection and reconcile the target torrent with the immutable submitted payload."
 	case "target_torrent_download_adapter_unavailable", "site_adapter_mismatch":
 		action = "configure_target_adapter"
 		description = "Enable the reviewed target torrent download adapter before resuming."
@@ -286,7 +286,7 @@ func targetTorrentDownloadBlock(err error, bindings targetTorrentDownloadBinding
 func targetTorrentDownloadEvidenceBlock(code, message string, bindings targetTorrentDownloadBindings) *BlockError {
 	return &BlockError{
 		Blockers: []Blocker{{Code: code, Message: message, SiteCode: bindings.Target}},
-		NextActions: []NextAction{{Action: "reconcile_uploaded_torrent", Description: "Stop before qBittorrent injection and reconcile the target torrent evidence.", Parameters: map[string]any{
+		NextActions: []NextAction{{Action: "reconcile_uploaded_torrent", Description: "Stop before downloader injection and reconcile the target torrent evidence.", Parameters: map[string]any{
 			"site_code": bindings.Target, "torrent_id": bindings.TorrentID,
 		}}},
 		ResumeState: map[string]any{"target_torrent_download": map[string]any{

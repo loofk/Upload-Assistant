@@ -38,6 +38,8 @@ func (err *PartialAddError) Error() string {
 
 func (err *PartialAddError) Unwrap() error { return err.Err }
 
+func (err *PartialAddError) PartialHash() string { return err.Hash }
+
 type Config struct {
 	Endpoint    string
 	Timeout     time.Duration

@@ -45,8 +45,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	var secretIDs []string
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloader_path_mappings WHERE downloader_id IN (SELECT id FROM downloaders WHERE name = ANY($1))", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "deluge-" + nameSuffix})
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloaders WHERE name = ANY($1)", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "deluge-" + nameSuffix})
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloader_path_mappings WHERE downloader_id IN (SELECT id FROM downloaders WHERE name = ANY($1))", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "rtorrent-" + nameSuffix, "switch-" + nameSuffix, "deluge-" + nameSuffix})
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloaders WHERE name = ANY($1)", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "rtorrent-" + nameSuffix, "switch-" + nameSuffix, "deluge-" + nameSuffix})
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM image_hosts WHERE name = $1", "imgbb-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM screenshot_profiles WHERE name = $1", "default-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM site_credentials WHERE name = $1", "cookie-"+nameSuffix)
@@ -142,6 +142,31 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	}, actor)
 	if err != nil || !transmission.Enabled || !transmission.AdapterCapability.RuntimeSupported || transmission.AdapterCapability.Operations.SkipChecking {
 		t.Fatalf("Transmission downloader/error = %#v/%v", transmission, err)
+	}
+	rtorrent, err := store.UpsertDownloader(ctx, "rtorrent-"+nameSuffix, DownloaderInput{
+		Adapter: "rtorrent", Enabled: &enabled,
+		Config: EndpointConfig{Endpoint: "http://host.docker.internal/RPC2"},
+	}, actor)
+	if err != nil || !rtorrent.Enabled || !rtorrent.AdapterCapability.RuntimeSupported || rtorrent.AdapterCapability.Operations.SkipChecking || len(rtorrent.AdapterCapability.Constraints) == 0 {
+		t.Fatalf("rTorrent downloader/error = %#v/%v", rtorrent, err)
+	}
+	switchName := "switch-" + nameSuffix
+	if _, err := store.UpsertDownloader(ctx, switchName, DownloaderInput{
+		Adapter: "qbittorrent", Enabled: &enabled,
+		Config:      EndpointConfig{Endpoint: "http://host.docker.internal:8080"},
+		Credentials: map[string]string{"api_key": "must-not-cross-adapters"},
+	}, actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertDownloader(ctx, switchName, DownloaderInput{
+		Adapter: "rtorrent", Enabled: &enabled,
+		Config: EndpointConfig{Endpoint: "http://host.docker.internal/RPC2"},
+	}, actor); err != nil {
+		t.Fatal(err)
+	}
+	switchedRuntime, err := store.GetRuntimeDownloader(ctx, switchName)
+	if err != nil || len(switchedRuntime.Credentials) != 0 || len(switchedRuntime.CredentialFields) != 0 {
+		t.Fatalf("switched downloader retained incompatible credentials: fields=%#v error=%v", switchedRuntime.CredentialFields, err)
 	}
 	disabled := false
 	deluge, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{

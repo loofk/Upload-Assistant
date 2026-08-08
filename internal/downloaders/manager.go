@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/downloaders/rtorrent"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
@@ -127,7 +128,7 @@ func (manager *Manager) Files(ctx context.Context, name, hash string, actor work
 	completeFiles := 0
 	for _, file := range files {
 		if file.Size < 0 || totalSize > int64(^uint64(0)>>1)-file.Size {
-			return TorrentFilesEvidence{}, fmt.Errorf("qBittorrent file sizes are invalid")
+			return TorrentFilesEvidence{}, fmt.Errorf("downloader file sizes are invalid")
 		}
 		totalSize += file.Size
 		if file.Progress >= 0.999999 {
@@ -154,16 +155,16 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	if err != nil {
 		return AddEvidence{}, err
 	}
+	applyConfiguredDefaults(runtime.EndpointConfig.Options, &options)
 	result, err := client.Add(ctx, metainfo, options)
 	if err != nil {
-		var partial *transmission.PartialAddError
-		if errors.As(err, &partial) {
+		if partialHash, partial := PartialAddHash(err); partial {
 			auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 			defer cancel()
 			_ = manager.store.AuditDownloaderAction(auditCtx, name, "torrent.add_partial", map[string]any{
-				"observed_hash": partial.Hash, "v1_infohash": result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
+				"observed_hash": partialHash, "v1_infohash": result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
 				"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
-				"reconciliation_required": true, "error": safeError(partial.Err),
+				"reconciliation_required": true, "error": safeError(err),
 			}, actor)
 		}
 		return AddEvidence{}, err
@@ -188,6 +189,34 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 		return AddEvidence{}, err
 	}
 	return evidence, nil
+}
+
+func applyConfiguredDefaults(configured map[string]any, options *qbittorrent.AddOptions) {
+	if options.Category == "" {
+		if category, ok := configured["category"].(string); ok {
+			options.Category = strings.TrimSpace(category)
+		}
+	}
+	defaults := make([]string, 0, 2)
+	for _, key := range []string{"tag", "label"} {
+		if value, ok := configured[key].(string); ok && strings.TrimSpace(value) != "" {
+			defaults = append(defaults, strings.TrimSpace(value))
+		}
+	}
+	seen := make(map[string]struct{}, len(options.Tags)+len(defaults))
+	merged := make([]string, 0, len(options.Tags)+len(defaults))
+	for _, value := range append(append([]string(nil), options.Tags...), defaults...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		merged = append(merged, value)
+	}
+	options.Tags = merged
 }
 
 func (manager *Manager) SetLimits(ctx context.Context, name, hash string, downloadBytesPerSecond, uploadBytesPerSecond int64, actor workflow.Actor) (TorrentEvidence, error) {
@@ -247,6 +276,10 @@ func (manager *Manager) client(ctx context.Context, name string) (integrations.R
 		})
 	case "transmission":
 		client, err = transmission.New(transmission.Config{
+			Endpoint: runtime.EndpointConfig.Endpoint, Timeout: timeout, Credentials: runtime.Credentials,
+		})
+	case "rtorrent":
+		client, err = rtorrent.New(rtorrent.Config{
 			Endpoint: runtime.EndpointConfig.Endpoint, Timeout: timeout, Credentials: runtime.Credentials,
 		})
 	default:

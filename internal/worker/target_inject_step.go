@@ -96,7 +96,7 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 		return nil, targetDownloaderConfigurationBlock(err, bindings)
 	}
 	if boolValue(bindings.Control.SkipChecking) {
-		return nil, targetDownloaderConfigurationBlock(fmt.Errorf("target_downloader.skip_checking must be false so qBittorrent verifies the existing payload"), bindings)
+		return nil, targetDownloaderConfigurationBlock(fmt.Errorf("target_downloader.skip_checking must be false so the configured downloader verifies the existing payload"), bindings)
 	}
 	if boolValue(bindings.Control.Paused) {
 		return nil, targetDownloaderConfigurationBlock(fmt.Errorf("target_downloader.paused must be false so required seeding can start"), bindings)
@@ -252,7 +252,7 @@ func (executor targetInjectExecutor) inputs(snapshotBody json.RawMessage) (targe
 	}
 	if !strings.HasPrefix(content.RemoteRoot, "/") || path.Clean(content.RemoteRoot) != content.RemoteRoot ||
 		path.Base(content.RemoteRoot) != bindings.TorrentInspection.Name || path.Base(bindings.TorrentInspection.Name) != bindings.TorrentInspection.Name {
-		return targetInjectBindings{}, fmt.Errorf("source remote content root cannot be safely converted into a qBittorrent save path")
+		return targetInjectBindings{}, fmt.Errorf("source remote content root cannot be safely converted into a downloader save path")
 	}
 	bindings.SourceDownloader, bindings.RemoteContentRoot = content.DownloaderName, content.RemoteRoot
 	bindings.ContentFileCount, bindings.ContentSizeBytes = content.FileCount, content.TotalSize
@@ -317,14 +317,14 @@ func validateTargetInjectionEvidence(evidence downloaders.AddEvidence, bindings 
 	if evidence.DownloaderName != bindings.Control.Name || evidence.Adapter != "qbittorrent" || len(evidence.ConfigurationSHA256) != 64 ||
 		evidence.TorrentBytes != len(bindings.Torrent) || !strings.EqualFold(evidence.TorrentSHA256, bindings.TorrentArtifact.SHA256) ||
 		evidence.Result.Hashes != bindings.TorrentInspection.Hashes {
-		return fmt.Errorf("qBittorrent add evidence is incomplete or does not match the downloaded target torrent")
+		return fmt.Errorf("downloader add evidence is incomplete or does not match the downloaded target torrent")
 	}
 	if evidence.Observed != nil {
 		observed := evidence.Observed
 		if observed.DownloaderName != bindings.Control.Name || observed.Adapter != "qbittorrent" ||
 			observed.ConfigurationSHA256 != evidence.ConfigurationSHA256 || !hashMatches(observed.Torrent.Hash, bindings.TorrentInspection.Hashes) ||
 			(observed.Torrent.TotalSize > 0 && observed.Torrent.TotalSize != bindings.ContentSizeBytes) {
-			return fmt.Errorf("qBittorrent observed torrent does not match the target injection")
+			return fmt.Errorf("the configured downloader observed torrent does not match the target injection")
 		}
 	}
 	return nil
@@ -347,7 +347,7 @@ func targetDownloaderConfigurationBlock(err error, bindings targetInjectBindings
 func targetInjectionEvidenceBlock(err error, bindings targetInjectBindings) *BlockError {
 	return &BlockError{
 		Blockers: []Blocker{{Code: "target_injection_evidence_invalid", Message: err.Error(), SiteCode: bindings.Target}},
-		NextActions: []NextAction{{Action: "inspect_target_torrent_in_downloader", Description: "Inspect qBittorrent for the exact target infohash before deciding whether a retry is safe.", Parameters: map[string]any{
+		NextActions: []NextAction{{Action: "inspect_target_torrent_in_downloader", Description: "Inspect the configured downloader for the exact target infohash before deciding whether a retry is safe.", Parameters: map[string]any{
 			"downloader_name": bindings.Control.Name, "v1_infohash": bindings.TorrentInspection.Hashes.V1SHA1,
 		}}},
 		ResumeState: map[string]any{"target_inject": map[string]any{

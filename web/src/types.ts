@@ -163,6 +163,7 @@ export interface DownloaderAdapterCapability {
     tags: boolean;
 		skip_checking: boolean;
   };
+  constraints?: string[];
   unavailable_reason?: string;
 }
 

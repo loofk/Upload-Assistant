@@ -65,7 +65,7 @@ Rule changes follow an immutable review sequence: import Markdown as a draft, in
 
 Credentials are write-only inputs. Confirm successful storage from redacted API responses; never try to read secrets back. Keep downloader path mappings explicit and validate them before running jobs.
 
-Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported` plus every `operations` flag. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission reports `skip_checking=false`; do not request or simulate that behavior.
+Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported`, every `operations` flag, and every `constraints` entry. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission and rTorrent report `skip_checking=false`; do not request or simulate that behavior. For rTorrent, treat an ineffective named-throttle response as a blocker and never claim the requested limit was enforced.
 
 ## Migrate Legacy Configuration
 

@@ -60,6 +60,7 @@ type DownloaderAdapterCapability struct {
 	RuntimeSupported  bool                 `json:"runtime_supported"`
 	CredentialFields  []string             `json:"credential_fields"`
 	Operations        DownloaderOperations `json:"operations"`
+	Constraints       []string             `json:"constraints,omitempty"`
 	UnavailableReason string               `json:"unavailable_reason,omitempty"`
 }
 

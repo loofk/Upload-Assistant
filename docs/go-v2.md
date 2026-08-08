@@ -52,9 +52,10 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 ## 远程下载器
 
 - `GET /api/v2/downloader-adapters` 是运行时能力的权威目录。调用方应先检查 `runtime_supported` 和逐项 `operations`，不能只依据 adapter 名称推断能力。
-- qBittorrent 与 Transmission 已支持独立 endpoint、加密凭据、远程路径映射、探测、加种、状态和文件查询、单种限速与等待完成；每次动作都会记录脱敏审计证据。
+- qBittorrent、Transmission 与 rTorrent 已支持独立 endpoint、加密凭据、远程路径映射、探测、加种、状态和文件查询、单种限速与等待完成；每次动作都会记录脱敏审计证据。
 - Transmission 同时兼容 4.0 及以前的旧 RPC 和 4.1 起的 JSON-RPC 2.0，并按官方 `X-Transmission-Rpc-Version` 握手自动选择协议。Transmission 不支持 `skip_checking`，请求该选项会明确失败，绝不静默忽略。加种后的限速通过独立 `torrent-set` 应用；若加种成功但限速失败，会记录 `torrent.add_partial` 审计并要求按 hash 对账后重试。
-- rTorrent 与 Deluge 当前只允许通过配置 API 以 `enabled=false` 保存；旧配置迁移会明确 warning 后跳过。能力目录会返回不可用原因，Web 也不会允许探测或启用。原生 Go runtime 完成前不得报告为可执行。
+- rTorrent 通过原生 Go HTTP XML-RPC 运行时调用 `load.raw` 后，以 hash 逐项设置目录、`custom1` 标签、命名 throttle 并启动；不拼接命令字符串，也不伪造 fast-resume。它只接受含 v1 infohash 的种子，且不支持 `skip_checking`。分类和标签会稳定扁平化到一个 `custom1` 值。命名 throttle 必须读回非零且不超过请求值；若全局 throttle 令其失效，步骤会以 blocker 停下。做种时长按当前连续活跃窗口保守计算，可能少算历史会话，但不会把暂停时间冒充做种时间。
+- Deluge 当前只允许通过配置 API 以 `enabled=false` 保存；旧配置迁移会明确 warning 后跳过。能力目录会返回不可用原因，Web 也不会允许探测或启用。原生 Go runtime 完成前不得报告为可执行。
 
 ## 旧配置安全迁移
 

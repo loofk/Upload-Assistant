@@ -66,7 +66,7 @@ func (executor contentResolveExecutor) Execute(ctx context.Context, execution Ex
 		return nil, downloaderBlock(err, downloaderName, "resolve_downloaded_content", map[string]any{"torrent_hash": torrentHash})
 	}
 	if evidence.FileCount == 0 || evidence.FileCount > maxContentFiles {
-		return nil, contentVerificationBlock("content_file_count_invalid", "qBittorrent returned an invalid or unsupported file count", evidence, nil)
+		return nil, contentVerificationBlock("content_file_count_invalid", "the configured downloader returned an invalid or unsupported file count", evidence, nil)
 	}
 	localRoot := strings.TrimSpace(evidence.Torrent.LocalContentPath)
 	if localRoot == "" {
@@ -132,12 +132,12 @@ func (executor contentResolveExecutor) Execute(ctx context.Context, execution Ex
 		if len(problems) == 0 {
 			problems = append(problems, fmt.Sprintf("resolved %d/%d files and %d/%d bytes", len(resolvedFiles), evidence.FileCount, actualTotal, evidence.TotalSize))
 		}
-		return nil, contentVerificationBlock("content_verification_failed", "downloaded content does not match qBittorrent file evidence", evidence, problems)
+		return nil, contentVerificationBlock("content_verification_failed", "downloaded content does not match downloader file evidence", evidence, problems)
 	}
 	if evidence.Torrent.Torrent.TotalSize > 0 && evidence.TotalSize != evidence.Torrent.Torrent.TotalSize {
 		return nil, contentVerificationBlock(
 			"content_size_mismatch",
-			fmt.Sprintf("qBittorrent file total %d does not match torrent total %d", evidence.TotalSize, evidence.Torrent.Torrent.TotalSize),
+			fmt.Sprintf("downloader file total %d does not match torrent total %d", evidence.TotalSize, evidence.Torrent.Torrent.TotalSize),
 			evidence, nil,
 		)
 	}

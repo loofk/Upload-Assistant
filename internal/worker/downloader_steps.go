@@ -15,7 +15,6 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
-	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
@@ -181,13 +180,13 @@ func (executor downloaderWaitExecutor) Execute(ctx context.Context, execution Ex
 	complete := torrent.Progress >= 0.999999 || (torrent.TotalSize > 0 && torrent.AmountLeft == 0)
 	if !complete {
 		action := "resume_job_when_download_progresses"
-		description := "Resume this job later to re-inspect qBittorrent without repeating completed prior steps."
+		description := "Resume this job later to re-inspect the configured downloader without repeating completed prior steps."
 		if strings.Contains(strings.ToLower(torrent.State), "paused") || strings.Contains(strings.ToLower(torrent.State), "stopped") {
 			action = "resume_torrent_in_downloader"
-			description = "Resume the torrent in qBittorrent, then resume this job."
+			description = "Resume the torrent in the configured downloader, then resume this job."
 		}
 		return nil, &BlockError{
-			Blockers: []Blocker{{Code: "source_download_incomplete", Message: "qBittorrent has not completed the source download"}},
+			Blockers: []Blocker{{Code: "source_download_incomplete", Message: "the configured downloader has not completed the source download"}},
 			NextActions: []NextAction{{Action: action, Description: description, Parameters: map[string]any{
 				"downloader_name": added.DownloaderName, "torrent_hash": torrent.Hash,
 			}}},
@@ -340,7 +339,7 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	code := "downloader_request_failed"
 	action := "retry_step"
 	description := "Verify downloader availability, then resume this step."
-	var partialAdd *transmission.PartialAddError
+	partialHash, partialAdd := downloaders.PartialAddHash(err)
 	switch {
 	case errors.Is(err, integrations.ErrNotFound):
 		code, action = "downloader_configuration_required", "configure_downloader"
@@ -351,12 +350,12 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	case errors.Is(err, downloaders.ErrAdapterUnavailable):
 		code, action = "downloader_adapter_unavailable", "install_downloader_adapter"
 		description = "Use a supported downloader adapter or implement the configured adapter."
-	case errors.As(err, &partialAdd):
+	case partialAdd:
 		code, action = "downloader_partial_add_requires_reconciliation", "inspect_torrent_before_retry"
 		description = "The torrent was added, but applying mandatory settings failed. Inspect this exact hash before resuming; a duplicate add is idempotent."
 	case errors.Is(err, qbittorrent.ErrUnauthorized):
 		code, action = "downloader_authentication_failed", "configure_downloader_credentials"
-		description = "Refresh encrypted qBittorrent credentials before resuming."
+		description = "Refresh the encrypted downloader credentials before resuming."
 	case errors.Is(err, qbittorrent.ErrNotFound):
 		code, action = "downloader_torrent_not_observed", "retry_step"
 		description = "Wait for the configured downloader to observe the torrent, then resume this step."
@@ -365,8 +364,8 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	for key, value := range evidence {
 		parameters[key] = value
 	}
-	if partialAdd != nil {
-		parameters["observed_hash"] = partialAdd.Hash
+	if partialAdd {
+		parameters["observed_hash"] = partialHash
 	}
 	return &BlockError{
 		Blockers:    []Blocker{{Code: code, Message: err.Error()}},

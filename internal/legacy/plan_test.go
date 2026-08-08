@@ -134,6 +134,79 @@ func TestInspectMigratesTransmissionWithoutExposingCredentials(t *testing.T) {
 	}
 }
 
+func TestInspectMigratesRTorrentURLCredentialsWithoutExposingThem(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "DEFAULT": {"default_torrent_client": "rtorrent"},
+  "TORRENT_CLIENTS": {"rtorrent": {
+    "torrent_client": "rtorrent",
+    "rtorrent_url": "https://operator:private-password@seedbox.example:443/operator/rutorrent/plugins/httprpc/action.php",
+    "rtorrent_label": "retorrent", "torrent_storage_dir": "/srv/rtorrent/session",
+    "local_path": ["/downloads"], "remote_path": ["/srv/downloads"]
+  }}
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.downloaders) != 1 {
+		t.Fatalf("downloaders = %#v", plan.downloaders)
+	}
+	operation := plan.downloaders[0]
+	if operation.input.Adapter != "rtorrent" || operation.input.Enabled == nil || !*operation.input.Enabled ||
+		operation.input.Config.Endpoint != "https://seedbox.example:443/operator/rutorrent/plugins/httprpc/action.php" ||
+		operation.input.Credentials["username"] != "operator" || operation.input.Credentials["password"] != "private-password" ||
+		operation.input.Config.Options["label"] != "retorrent" || len(operation.input.PathMappings) != 1 {
+		t.Fatalf("rTorrent operation = %#v", operation)
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(issue Issue) bool { return issue.Code == "legacy_rtorrent_session_path_not_imported" }) {
+		t.Fatalf("warnings = %#v", plan.Warnings)
+	}
+	serialized, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(serialized), "private-password") || strings.Contains(string(serialized), "operator:private") || !strings.Contains(string(serialized), `"adapter":"rtorrent"`) {
+		t.Fatalf("redacted rTorrent preview = %s", serialized)
+	}
+}
+
+func TestInspectDisablesRTorrentWithIncompleteURLCredentials(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "DEFAULT": {"default_torrent_client": "rtorrent"},
+  "TORRENT_CLIENTS": {"rtorrent": {
+    "torrent_client": "rtorrent", "rtorrent_url": "http://operator@seedbox.example/RPC2"
+  }}
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.downloaders) != 1 || plan.downloaders[0].input.Enabled == nil || *plan.downloaders[0].input.Enabled || len(plan.downloaders[0].input.Credentials) != 0 {
+		t.Fatalf("incomplete rTorrent migration = %#v", plan.downloaders)
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(issue Issue) bool { return issue.Code == "legacy_rtorrent_credentials_incomplete" }) {
+		t.Fatalf("warnings = %#v", plan.Warnings)
+	}
+}
+
+func TestInspectRejectsEncodedRTorrentPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "TORRENT_CLIENTS": {"rtorrent": {
+    "torrent_client": "rtorrent", "rtorrent_url": "https://seedbox.example/%2e%2e/RPC2"
+  }}
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.downloaders) != 0 || !slices.ContainsFunc(plan.Warnings, func(issue Issue) bool { return issue.Code == "legacy_rtorrent_endpoint_invalid" }) {
+		t.Fatalf("encoded traversal migration = downloaders %#v warnings %#v", plan.downloaders, plan.Warnings)
+	}
+}
+
 func TestInspectRejectsSymlinkAndExecutableConfig(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(t.TempDir(), "config.py")

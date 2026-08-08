@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -122,6 +124,35 @@ func TestManagerDispatchesTransmissionRuntime(t *testing.T) {
 	}
 }
 
+func TestManagerDispatchesRTorrentRuntime(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		value := "0.15.3"
+		if strings.Contains(string(body), "system.library_version") {
+			value = "0.15.2"
+		}
+		if strings.Contains(string(body), "system.methodExist") {
+			_, _ = io.WriteString(w, `<?xml version="1.0"?><methodResponse><params><param><value><boolean>1</boolean></value></param></params></methodResponse>`)
+			return
+		}
+		_, _ = io.WriteString(w, `<?xml version="1.0"?><methodResponse><params><param><value><string>`+value+`</string></value></param></params></methodResponse>`)
+	}))
+	t.Cleanup(server.Close)
+	store := &fakeConfigurationStore{runtime: integrations.RuntimeDownloader{
+		Downloader:     integrations.Downloader{Name: "rtorrent", Adapter: "rtorrent", Enabled: true},
+		EndpointConfig: integrations.EndpointConfig{Endpoint: server.URL, TimeoutSeconds: 5},
+		Credentials:    map[string]string{},
+	}}
+	probe, err := NewManager(store).Probe(context.Background(), "rtorrent", workflow.Actor{Type: "test", ID: "manager"})
+	if err != nil || probe.ApplicationVersion != "0.15.3" || probe.WebAPIVersion != "XML-RPC (libtorrent 0.15.2)" || store.healthStatus != "ready" {
+		t.Fatalf("Probe() result/health/error = %#v/%s/%v", probe, store.healthStatus, err)
+	}
+}
+
 func TestMapPathUsesPathBoundary(t *testing.T) {
 	mapping := integrations.PathMapping{RemotePath: "/remote/downloads", LocalPath: "/downloads"}
 	if mapped, ok := mapPath("/remote/downloads/release/file.mkv", mapping); !ok || mapped != "/downloads/release/file.mkv" {
@@ -129,5 +160,18 @@ func TestMapPathUsesPathBoundary(t *testing.T) {
 	}
 	if _, ok := mapPath("/remote/downloads-evil/file.mkv", mapping); ok {
 		t.Fatal("mapPath() accepted a prefix without path boundary")
+	}
+}
+
+func TestApplyConfiguredDefaultsIsStableAndDoesNotOverrideRequest(t *testing.T) {
+	options := qbittorrent.AddOptions{Category: "job", Tags: []string{"task", "task"}}
+	applyConfiguredDefaults(map[string]any{"category": "configured", "tag": "task", "label": "retorrent"}, &options)
+	if options.Category != "job" || strings.Join(options.Tags, ",") != "task,retorrent" {
+		t.Fatalf("options = %#v", options)
+	}
+	empty := qbittorrent.AddOptions{}
+	applyConfiguredDefaults(map[string]any{"category": "legacy", "label": "retorrent"}, &empty)
+	if empty.Category != "legacy" || strings.Join(empty.Tags, ",") != "retorrent" {
+		t.Fatalf("empty options = %#v", empty)
 	}
 }

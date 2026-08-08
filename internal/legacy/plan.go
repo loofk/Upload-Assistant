@@ -388,6 +388,10 @@ func (plan *Plan) buildDownloaders(defaults, clients map[string]any) {
 			plan.buildTransmissionDownloader(defaultName, name, section)
 			continue
 		}
+		if clientType == "rtorrent" {
+			plan.buildRTorrentDownloader(defaultName, name, section)
+			continue
+		}
 		if clientType != "qbit" && clientType != "qbittorrent" {
 			if clientType != "" {
 				plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_downloader_adapter_deferred", Resource: name, Message: "当前 Go 运行时尚未执行该下载器；配置需在对应 adapter 完成后手工迁移。"})
@@ -437,6 +441,74 @@ func (plan *Plan) buildDownloaders(defaults, clients map[string]any) {
 			plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_speed_limits_require_rule_review", Resource: name, Message: "旧下载器限速不会覆盖已审批站点规则，需在规则 Markdown 中人工复核。"})
 		}
 	}
+}
+
+func (plan *Plan) buildRTorrentDownloader(defaultName, name string, section map[string]any) {
+	endpoint, credentials, credentialsComplete, loopback, err := legacyRTorrentEndpoint(section)
+	if err != nil {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_rtorrent_endpoint_invalid", Resource: name, Message: "rTorrent XML-RPC 地址无法安全转换，已跳过。"})
+		return
+	}
+	if !credentialsComplete {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_rtorrent_credentials_incomplete", Resource: name, Message: "rTorrent URL 中的用户名和密码不完整；凭据不会迁移，配置会保持禁用。"})
+	}
+	enabled := (defaultName == "" || name == defaultName) && !loopback && credentialsComplete
+	if loopback {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "container_loopback_requires_review", Resource: name, Message: "旧地址指向 127.0.0.1/localhost，在容器中不是盒子宿主机；配置会保持禁用。"})
+	}
+	mappings, mappingWarnings := legacyPathMappings(section)
+	plan.Warnings = append(plan.Warnings, mappingWarnings...)
+	options := map[string]any{}
+	if label := usefulString(section["rtorrent_label"]); label != "" {
+		options["label"] = label
+	}
+	if usefulString(section["torrent_storage_dir"]) != "" {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_rtorrent_session_path_not_imported", Resource: name, Message: "旧 rTorrent session 目录不会迁移；新运行时只通过 XML-RPC 读取可验证状态。"})
+	}
+	plan.downloaders = append(plan.downloaders, downloaderOperation{name: name, input: integrations.DownloaderInput{
+		Adapter: "rtorrent", Enabled: boolPointer(enabled),
+		Config:      integrations.EndpointConfig{Endpoint: endpoint, TimeoutSeconds: 30, Options: options},
+		Credentials: credentials, PathMappings: mappings,
+	}})
+	plan.Resources = append(plan.Resources, ResourcePreview{
+		Kind: "downloader", Name: name, Adapter: "rtorrent", Enabled: enabled,
+		CredentialFields: sortedKeys(credentials),
+		Configuration:    map[string]any{"endpoint": endpoint, "path_mapping_count": len(mappings), "options": options},
+	})
+}
+
+func legacyRTorrentEndpoint(section map[string]any) (string, map[string]string, bool, bool, error) {
+	raw := usefulString(section["rtorrent_url"])
+	if raw == "" {
+		return "", nil, false, false, errors.New("rtorrent_url is empty")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", nil, false, false, errors.New("rtorrent_url is unsafe")
+	}
+	credentials := map[string]string{}
+	credentialsComplete := true
+	if parsed.User != nil {
+		username := strings.TrimSpace(parsed.User.Username())
+		password, hasPassword := parsed.User.Password()
+		if username != "" && hasPassword && password != "" {
+			credentials["username"], credentials["password"] = username, password
+		} else {
+			credentialsComplete = false
+		}
+		parsed.User = nil
+	}
+	for _, segment := range strings.Split(strings.Trim(parsed.Path, "/"), "/") {
+		if segment == "." || segment == ".." || strings.ContainsAny(segment, "\x00\r\n") || secretPathSegment.MatchString(segment) {
+			return "", nil, false, false, errors.New("rtorrent_url path is unsafe")
+		}
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	loopback := hostname == "localhost"
+	if address := net.ParseIP(hostname); address != nil && address.IsLoopback() {
+		loopback = true
+	}
+	return parsed.String(), credentials, credentialsComplete, loopback, nil
 }
 
 func (plan *Plan) buildTransmissionDownloader(defaultName, name string, section map[string]any) {

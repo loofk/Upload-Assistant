@@ -224,6 +224,9 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	if enabled && !capability.RuntimeSupported {
 		return Downloader{}, fmt.Errorf("%w: downloader adapter %q cannot be enabled: %s", ErrValidation, input.Adapter, capability.UnavailableReason)
 	}
+	if err := validateDownloaderCredentialContract(capability, input.Credentials); err != nil {
+		return Downloader{}, err
+	}
 	config, err := validateEndpointConfig(input.Config)
 	if err != nil {
 		return Downloader{}, err
@@ -258,7 +261,11 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (name) DO UPDATE SET
 			adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled, config = EXCLUDED.config,
-			secret_id = COALESCE(EXCLUDED.secret_id, downloaders.secret_id), updated_at = now()
+			secret_id = CASE
+				WHEN downloaders.adapter IS DISTINCT FROM EXCLUDED.adapter THEN EXCLUDED.secret_id
+				ELSE COALESCE(EXCLUDED.secret_id, downloaders.secret_id)
+			END,
+			updated_at = now()
 		RETURNING id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
 		          health_status, last_health_check_at, created_at, updated_at`,
 		name, input.Adapter, enabled, config, newSecretID,
