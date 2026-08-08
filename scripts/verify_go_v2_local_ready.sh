@@ -85,9 +85,7 @@ readiness_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url
 cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact audit list --limit 2)"
 adapters_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact adapters --kind site)"
 readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default --tmdb-provider tmdb-main --ptgen-provider ptgen-main)"
-rule_fixture_container="/data/tmp/go-v2-complete-rule.md"
-compose cp "$root_dir/scripts/fixtures/go-v2-complete-rule.md" "upload-assistant:$rule_fixture_container" >/dev/null
-rule_import_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules import --file "$rule_fixture_container")"
+rule_import_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules import --file - <"$root_dir/scripts/fixtures/go-v2-complete-rule.md")"
 rule_revision_id="$(jq -er '.rule_revision_id' <<<"$rule_import_cli_json")"
 rule_fingerprint="$(jq -er '.fingerprint' <<<"$rule_import_cli_json")"
 rule_list_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact rules list TTG)"

@@ -607,7 +607,7 @@ func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, erro
 		if err := parseFlags(flags, args[1:]); err != nil {
 			return nil, err
 		}
-		markdown, err := readRuleMarkdown(*filename)
+		markdown, err := readRuleMarkdown(*filename, r.streams.In)
 		if err != nil {
 			return nil, err
 		}
@@ -660,10 +660,16 @@ func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, erro
 	}
 }
 
-func readRuleMarkdown(filename string) ([]byte, error) {
+func readRuleMarkdown(filename string, input io.Reader) ([]byte, error) {
 	filename = strings.TrimSpace(filename)
 	if filename == "" {
 		return nil, errors.New("rules import requires --file")
+	}
+	if filename == "-" {
+		if input == nil {
+			return nil, errors.New("rule Markdown stdin is unavailable")
+		}
+		return readBoundedRuleMarkdown(input, "stdin")
 	}
 	file, err := os.Open(filename)
 	if err != nil {
@@ -680,9 +686,13 @@ func readRuleMarkdown(filename string) ([]byte, error) {
 	if info.Size() > rules.MaxMarkdownBytes {
 		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", rules.MaxMarkdownBytes)
 	}
-	body, err := io.ReadAll(io.LimitReader(file, rules.MaxMarkdownBytes+1))
+	return readBoundedRuleMarkdown(file, "file")
+}
+
+func readBoundedRuleMarkdown(input io.Reader, source string) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(input, rules.MaxMarkdownBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read rule Markdown: %w", err)
+		return nil, fmt.Errorf("read rule Markdown from %s: %w", source, err)
 	}
 	if len(body) > rules.MaxMarkdownBytes {
 		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", rules.MaxMarkdownBytes)
@@ -1098,7 +1108,7 @@ Usage:
   upload-assistant cli [global options] sites
   upload-assistant cli [global options] rules list|active SITE
   upload-assistant cli [global options] rules get REVISION_ID
-  upload-assistant cli [global options] rules import --file MARKDOWN_FILE
+  upload-assistant cli [global options] rules import --file MARKDOWN_FILE|-
   upload-assistant cli [global options] rules approve REVISION_ID --fingerprint SHA256 [--comment TEXT] --confirm
   upload-assistant cli [global options] rules activate REVISION_ID --confirm
   upload-assistant cli [global options] integrations list COLLECTION

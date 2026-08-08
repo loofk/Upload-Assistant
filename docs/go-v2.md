@@ -37,6 +37,8 @@ upload-assistant cli jobs list --limit 20
 upload-assistant cli jobs summary <job-id>
 upload-assistant cli candidates list --source U2 --target MTEAM
 upload-assistant cli rules import --file data/site-rules/U2.md
+# 或将宿主机文件安全地送入 Compose 容器 stdin
+docker compose exec -T upload-assistant upload-assistant cli rules import --file - < data/site-rules/U2.md
 upload-assistant cli rules list U2
 upload-assistant cli rules approve <revision-id> --fingerprint <sha256> --comment '已人工核对' --confirm
 upload-assistant cli rules activate <revision-id> --confirm

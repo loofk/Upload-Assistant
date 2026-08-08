@@ -283,6 +283,26 @@ func TestRulesImportReadsLocalMarkdownAndCreatesDraft(t *testing.T) {
 	}
 }
 
+func TestRulesImportAcceptsBoundedStdin(t *testing.T) {
+	ruleMarkdown := "---\nschema_version: 1\n---\n\n# 原始规则\nstdin fixture\n"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Markdown string `json:"markdown"`
+		}
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v2/site-rules/import" || json.NewDecoder(request.Body).Decode(&payload) != nil || payload.Markdown != ruleMarkdown {
+			t.Fatalf("request = %s %s markdown=%q", request.Method, request.URL.Path, payload.Markdown)
+		}
+		response.WriteHeader(http.StatusCreated)
+		_, _ = response.Write([]byte(`{"ok":true,"status":"draft"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "import", "--file", "-"}, testStreams(&output, strings.NewReader(ruleMarkdown)))
+	if err != nil || !strings.Contains(output.String(), `"status": "draft"`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
 	revisionID := "11111111-1111-4111-8111-111111111111"
 	fingerprint := strings.Repeat("a", 64)
