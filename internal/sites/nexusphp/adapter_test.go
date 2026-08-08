@@ -76,7 +76,7 @@ func TestAdapterDownloadsAndHashesTorrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
-	if result.Filename != "source-7.torrent" || result.SizeBytes != int64(len(metainfo)) ||
+	if result.Filename != "U2-7.torrent" || result.SizeBytes != int64(len(metainfo)) ||
 		result.SHA256 == "" || result.Hashes.V1SHA1 == "" || string(result.Bytes) != string(metainfo) {
 		t.Fatalf("Download() = %#v", result)
 	}

@@ -43,8 +43,11 @@ func TestLivenessDoesNotDependOnDatabase(t *testing.T) {
 
 func TestOpenAPIAndToolContracts(t *testing.T) {
 	var document struct {
-		OpenAPI string                    `json:"openapi"`
-		Paths   map[string]map[string]any `json:"paths"`
+		OpenAPI    string                    `json:"openapi"`
+		Paths      map[string]map[string]any `json:"paths"`
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
 	}
 	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
 		t.Fatalf("embedded OpenAPI is invalid JSON: %v", err)
@@ -61,6 +64,22 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	for _, path := range requiredPaths {
 		if _, exists := document.Paths[path]; !exists {
 			t.Errorf("OpenAPI path %s is missing", path)
+		}
+	}
+	for _, schema := range []string{"RetorrentSummaryArtifact", "RetorrentSummary", "JobSummaryValue"} {
+		if len(document.Components.Schemas[schema]) == 0 {
+			t.Errorf("OpenAPI schema %s is missing", schema)
+		}
+	}
+	var summarySchema struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(document.Components.Schemas["RetorrentSummary"], &summarySchema); err != nil {
+		t.Fatalf("decode RetorrentSummary schema: %v", err)
+	}
+	for _, field := range []string{"source", "target", "seeding", "audit", "summary_file"} {
+		if !containsString(summarySchema.Required, field) {
+			t.Errorf("RetorrentSummary required field %s is missing", field)
 		}
 	}
 
@@ -91,6 +110,15 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.oai.openapi+json;version=3.1" {
 		t.Fatalf("OpenAPI HTTP response = %d/%s", response.Code, response.Header().Get("Content-Type"))
 	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestProtectedPathsRequireBearerToken(t *testing.T) {

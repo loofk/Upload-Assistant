@@ -320,24 +320,59 @@
         "additionalProperties": false,
         "properties": {"resume_state": {"type": "object", "additionalProperties": true, "default": {}}}
       },
+      "RetorrentSummaryArtifact": {
+        "type": "object", "additionalProperties": false,
+        "required": ["artifact_id", "kind", "storage_path", "size_bytes", "sha256"],
+        "properties": {
+          "artifact_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"},
+          "storage_path": {"type": "string"}, "mime_type": {"type": "string"},
+          "size_bytes": {"type": "integer", "minimum": 0}, "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}
+        }
+      },
+      "RetorrentSummary": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "kind", "ok", "status", "job_id", "generated_at", "source", "content", "materials", "target", "seeding", "audit", "blockers", "next_actions", "resume", "summary_file"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "kind": {"type": "string", "const": "upload-assistant.retorrent-summary.v1"},
+          "ok": {"type": "boolean", "const": true}, "status": {"type": "string", "const": "complete"},
+          "job_id": {"type": "string", "format": "uuid"}, "generated_at": {"type": "string", "format": "date-time"},
+          "source": {"type": "object", "required": ["site_code", "torrent_id", "torrent", "rules", "downloader"], "additionalProperties": true},
+          "content": {"type": "object", "required": ["file_count", "total_size_bytes", "local_root", "remote_root", "manifest"], "additionalProperties": true},
+          "materials": {"type": "object", "required": ["metadata", "media_info", "screenshots", "image_uploads"], "additionalProperties": true},
+          "target": {"type": "object", "required": ["site_code", "torrent_id", "details_url", "rules", "duplicate_check", "package", "submitted_torrent", "upload", "downloaded_torrent"], "additionalProperties": true},
+          "seeding": {"type": "object", "required": ["downloader_name", "downloader_configuration_sha256", "torrent_hash", "expected_remote_content_path", "category", "tags", "requirements", "checks", "observation_artifact_id", "observation_sha256"], "additionalProperties": true},
+          "audit": {"type": "object", "required": ["artifact_count", "artifacts", "required_gates"], "properties": {"artifact_count": {"type": "integer", "minimum": 1}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/RetorrentSummaryArtifact"}}, "required_gates": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false},
+          "blockers": {"type": "array", "maxItems": 0, "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}},
+          "resume": {"type": "object", "required": ["resumable", "reason"], "properties": {"resumable": {"type": "boolean", "const": false}, "reason": {"type": "string", "const": "workflow_complete"}}, "additionalProperties": false},
+          "summary_file": {"$ref": "#/components/schemas/RetorrentSummaryArtifact"}
+        }
+      },
+      "JobSummaryValue": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/RetorrentSummary"},
+          {"type": "object", "maxProperties": 0}
+        ]
+      },
       "Job": {
         "type": "object",
         "required": ["id", "kind", "status", "execution_mode", "input", "blockers", "next_actions", "resume_state", "summary", "created_at", "updated_at"],
         "properties": {
           "id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "execution_mode": {"type": "string", "enum": ["auto", "step"]}, "current_step": {"type": "string"},
-          "input": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"type": "object"},
+          "input": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"},
           "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}
         }
       },
       "JobEnvelope": {
         "type": "object",
         "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "job"],
-        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"type": "object"}, "job": {"$ref": "#/components/schemas/Job"}}
+        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "job": {"$ref": "#/components/schemas/Job"}}
       },
       "JobSummaryEnvelope": {
         "type": "object",
         "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
-        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"type": "object"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+        "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
       },
       "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object"}, "output_summary": {"type": "object"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
       "Event": {"type": "object", "required": ["id", "job_id", "sequence", "type", "actor_type", "payload", "hash", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "sequence": {"type": "integer"}, "type": {"type": "string"}, "actor_type": {"type": "string"}, "actor_id": {"type": "string"}, "payload": {"type": "object"}, "previous_hash": {"type": "string"}, "hash": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}},

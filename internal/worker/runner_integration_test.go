@@ -190,6 +190,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithTargetTorrentDownloads(targetTorrentDownloader, artifactStore),
 		WithTargetInjection(downloader, artifactStore),
 		WithTargetSeedVerification(downloader, artifactStore),
+		WithSummary(artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -401,6 +402,27 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 16 || storedArtifacts[15].Kind != "target_seed_observation" {
 		t.Fatalf("target-seed artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("summary RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobComplete || job.CurrentStep != "" || job.FinishedAt == nil {
+		t.Fatalf("completed job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 17 || storedArtifacts[16].Kind != "job_summary" {
+		t.Fatalf("summary artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	var finalSummary struct {
+		OK          bool            `json:"ok"`
+		Status      string          `json:"status"`
+		JobID       string          `json:"job_id"`
+		SummaryFile summaryArtifact `json:"summary_file"`
+	}
+	if err := json.Unmarshal(job.Summary, &finalSummary); err != nil || !finalSummary.OK || finalSummary.Status != "complete" ||
+		finalSummary.JobID != job.ID || finalSummary.SummaryFile.ArtifactID != storedArtifacts[16].ID || finalSummary.SummaryFile.SHA256 != storedArtifacts[16].SHA256 {
+		t.Fatalf("final job summary/error = %s/%v", job.Summary, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

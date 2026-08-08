@@ -54,7 +54,7 @@ func toolDefinitions() []toolDefinition {
 	jobID := object(map[string]any{"job_id": stringProperty("UUID of the durable job.")}, "job_id")
 	return []toolDefinition{
 		{
-			Name: "create_retorrent_job", Description: "Create an auditable retorrent workflow and return job_id immediately. Source inspection, rule acceptance, torrent retrieval, and downloader steps persist separate evidence; live upload still requires an explicit confirmation gate.",
+			Name: "create_retorrent_job", Description: "Create an auditable retorrent workflow and return job_id immediately. Every source, rule, duplicate, material, upload, target-torrent, qBittorrent injection, seeding, and summary boundary persists separate evidence; live upload requires explicit accept_rules and confirm_upload gates.",
 			Method: "POST", Path: "/api/v2/jobs", RequiredScopes: []string{"jobs:write"}, SafetyLevel: "controlled_write",
 			InputSchema: object(map[string]any{
 				"idempotency_key": stringProperty("Required Idempotency-Key HTTP header value."),
@@ -65,7 +65,7 @@ func toolDefinitions() []toolDefinition {
 			}, "idempotency_key", "input"),
 		},
 		{Name: "get_job_status", Description: "Read status, blockers, next_actions, and resume_state.", Method: "GET", Path: "/api/v2/jobs/{job_id}", RequiredScopes: []string{"jobs:read"}, SafetyLevel: "read_only", InputSchema: jobID},
-		{Name: "get_job_summary", Description: "Read the durable summary with step and artifact evidence.", Method: "GET", Path: "/api/v2/jobs/{job_id}/summary", RequiredScopes: []string{"jobs:read"}, SafetyLevel: "read_only", InputSchema: jobID},
+		{Name: "get_job_summary", Description: "Read status/blockers/resume data and, after completion, the stable retorrent summary with source/target hashes, rule fingerprints, duplicate gates, qBittorrent seeding checks, and summary_file evidence.", Method: "GET", Path: "/api/v2/jobs/{job_id}/summary", RequiredScopes: []string{"jobs:read"}, SafetyLevel: "read_only", InputSchema: jobID},
 		{Name: "get_job_events", Description: "Read the append-only hash-chained job event audit stream.", Method: "GET", Path: "/api/v2/jobs/{job_id}/events", RequiredScopes: []string{"jobs:read"}, SafetyLevel: "read_only", InputSchema: object(map[string]any{"job_id": stringProperty("Job UUID."), "after": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}}, "job_id")},
 		{Name: "resume_job", Description: "Resume a paused, blocked, or failed job with explicit recovery values.", Method: "POST", Path: "/api/v2/jobs/{job_id}/resume", RequiredScopes: []string{"jobs:write"}, SafetyLevel: "controlled_write", InputSchema: object(map[string]any{"job_id": stringProperty("Job UUID."), "resume_state": map[string]any{"type": "object", "additionalProperties": true}}, "job_id", "resume_state")},
 		{Name: "pause_job", Description: "Pause a runnable job at its durable current step.", Method: "POST", Path: "/api/v2/jobs/{job_id}/pause", RequiredScopes: []string{"jobs:write"}, SafetyLevel: "controlled_write", InputSchema: jobID},

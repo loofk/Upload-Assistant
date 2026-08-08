@@ -149,10 +149,9 @@ func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceRefe
 		return sites.DownloadedTorrent{}, sites.NewAdapterError("source_torrent_invalid", "source site returned invalid torrent metainfo", false, err)
 	}
 	digest := sha256.Sum256(body)
-	filename := responseFilename(response.Header.Get("Content-Disposition"))
-	if filename == "" {
-		filename = adapter.profile.SiteCode + "-" + reference.TorrentID + ".torrent"
-	}
+	// A tracker-controlled Content-Disposition filename is not evidence and can
+	// contain account-specific material. Persist a deterministic local name.
+	filename := adapter.profile.SiteCode + "-" + reference.TorrentID + ".torrent"
 	return sites.DownloadedTorrent{
 		Bytes: body, Filename: filename, ContentType: "application/x-bittorrent",
 		SizeBytes: int64(len(body)), SHA256: hex.EncodeToString(digest[:]), Hashes: hashes,

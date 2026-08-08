@@ -178,6 +178,7 @@ func serve(args []string) error {
 		worker.WithTargetTorrentDownloads(targetTorrentDownloadRegistry, artifactStore),
 		worker.WithTargetInjection(downloaderManager, artifactStore),
 		worker.WithTargetSeedVerification(downloaderManager, artifactStore),
+		worker.WithSummary(artifactStore),
 	)
 	go jobRunner.Run(ctx)
 
