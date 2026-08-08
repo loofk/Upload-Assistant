@@ -180,3 +180,104 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 		t.Fatalf("VerifyEventChain() error = %v", err)
 	}
 }
+
+func TestStorePausesRunningAttemptAndRecoversExpiredLease(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(pool)
+	definition := RetorrentDefinition()
+	workflowID, err := store.EnsureDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(ctx, workflowID, definition, CreateJobInput{
+		Kind: "retorrent", ExecutionMode: ExecutionAuto,
+		Input:          json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=1","target":"MTEAM"}`),
+		IdempotencyKey: "pause-recovery-" + uuid.NewString(), Owner: "integration-test",
+		Actor: Actor{Type: "test", ID: "pause-recovery"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM jobs WHERE id = $1", job.ID) })
+
+	actor := Actor{Type: "worker", ID: "worker-one"}
+	if _, err := store.ClaimNextJob(ctx, actor.ID, time.Minute, actor); err != nil {
+		t.Fatal(err)
+	}
+	_, firstAttempt, err := store.StartCurrentStep(ctx, job.ID, actor.ID, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = store.PauseJob(ctx, job.ID, Actor{Type: "test", ID: "pause-recovery"})
+	if err != nil || job.Status != JobPaused {
+		t.Fatalf("PauseJob() status/error = %s/%v", job.Status, err)
+	}
+	var stepStatus, attemptStatus StepStatus
+	if err := pool.QueryRow(ctx, `
+		SELECT js.status, sa.status FROM job_steps js JOIN step_attempts sa ON sa.job_step_id = js.id
+		WHERE sa.id = $1`, firstAttempt.ID).Scan(&stepStatus, &attemptStatus); err != nil {
+		t.Fatal(err)
+	}
+	if stepStatus != StepPaused || attemptStatus != StepPaused {
+		t.Fatalf("paused step/attempt = %s/%s", stepStatus, attemptStatus)
+	}
+
+	if _, err := store.ResumeJob(ctx, job.ID, json.RawMessage(`{}`), Actor{Type: "test", ID: "pause-recovery"}); err != nil {
+		t.Fatal(err)
+	}
+	actor = Actor{Type: "worker", ID: "worker-two"}
+	if _, err := store.ClaimNextJob(ctx, actor.ID, time.Minute, actor); err != nil {
+		t.Fatal(err)
+	}
+	_, secondAttempt, err := store.StartCurrentStep(ctx, job.ID, actor.ID, actor)
+	if err != nil || secondAttempt.Number != 2 {
+		t.Fatalf("second attempt/error = %d/%v", secondAttempt.Number, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	recoveryActor := Actor{Type: "worker", ID: "worker-three"}
+	recovered, err := store.ClaimNextJob(ctx, recoveryActor.ID, time.Minute, recoveryActor)
+	if err != nil || recovered.ID != job.ID {
+		t.Fatalf("recovered job/error = %s/%v", recovered.ID, err)
+	}
+	var errorCode string
+	if err := pool.QueryRow(ctx, "SELECT status, COALESCE(error_code, '') FROM step_attempts WHERE id = $1", secondAttempt.ID).Scan(&attemptStatus, &errorCode); err != nil {
+		t.Fatal(err)
+	}
+	if attemptStatus != StepFailed || errorCode != "worker_lease_expired" {
+		t.Fatalf("expired attempt status/code = %s/%s", attemptStatus, errorCode)
+	}
+	_, thirdAttempt, err := store.StartCurrentStep(ctx, job.ID, recoveryActor.ID, recoveryActor)
+	if err != nil || thirdAttempt.Number != 3 {
+		t.Fatalf("third attempt/error = %d/%v", thirdAttempt.Number, err)
+	}
+	if _, err := store.CancelJob(ctx, job.ID, Actor{Type: "test", ID: "pause-recovery"}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListEvents(ctx, job.ID, 0, 200)
+	if err != nil || VerifyEventChain(events) != nil {
+		t.Fatalf("event chain/error = %d/%v", len(events), err)
+	}
+	seenPaused, seenRecovered := false, false
+	for _, event := range events {
+		seenPaused = seenPaused || event.Type == "step.paused"
+		seenRecovered = seenRecovered || event.Type == "step.lease_recovered"
+	}
+	if !seenPaused || !seenRecovered {
+		t.Fatalf("pause/recovery events = %t/%t", seenPaused, seenRecovered)
+	}
+}

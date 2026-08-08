@@ -332,21 +332,53 @@ func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Durat
 		return Job{}, fmt.Errorf("begin claim transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var id string
+	var id, previousLeaseOwner string
 	var previousStatus JobStatus
 	err = tx.QueryRow(ctx, `
-		SELECT id::text, status
+		SELECT id::text, status, COALESCE(lease_owner, '')
 		FROM jobs
 		WHERE status = 'queued'
 		   OR (status = 'running' AND lease_expires_at < now())
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
-		LIMIT 1`).Scan(&id, &previousStatus)
+		LIMIT 1`).Scan(&id, &previousStatus, &previousLeaseOwner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
 	if err != nil {
 		return Job{}, fmt.Errorf("select claimable job: %w", err)
+	}
+	if previousStatus == JobRunning {
+		var stepID, stepKey, attemptID string
+		recoveryErr := tx.QueryRow(ctx, `
+			SELECT js.id::text, js.step_key, sa.id::text
+			FROM job_steps js
+			JOIN step_attempts sa ON sa.job_step_id = js.id AND sa.status = 'running'
+			WHERE js.job_id = $1 AND js.status = 'running'
+			ORDER BY sa.started_at DESC LIMIT 1
+			FOR UPDATE OF js, sa`, id).Scan(&stepID, &stepKey, &attemptID)
+		if recoveryErr != nil && !errors.Is(recoveryErr, pgx.ErrNoRows) {
+			return Job{}, fmt.Errorf("lock expired step attempt: %w", recoveryErr)
+		}
+		if recoveryErr == nil {
+			if _, err := tx.Exec(ctx, `
+				UPDATE step_attempts
+				SET status = 'failed', error_code = 'worker_lease_expired',
+				    error_message = 'worker lease expired before the attempt completed', finished_at = now()
+				WHERE id = $1`, attemptID); err != nil {
+				return Job{}, fmt.Errorf("close expired step attempt: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE job_steps SET status = 'ready', started_at = NULL, finished_at = NULL, updated_at = now()
+				WHERE id = $1`, stepID); err != nil {
+				return Job{}, fmt.Errorf("make expired step retryable: %w", err)
+			}
+			if _, err := appendEvent(ctx, tx, id, stepID, attemptID, "step.lease_recovered", actor, map[string]any{
+				"step_key": stepKey, "previous_lease_owner": previousLeaseOwner,
+			}); err != nil {
+				return Job{}, err
+			}
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE jobs
@@ -698,13 +730,52 @@ func (s *Store) transitionJob(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var current JobStatus
-	if err := tx.QueryRow(ctx, "SELECT status FROM jobs WHERE id = $1 FOR UPDATE", jobID).Scan(&current); errors.Is(err, pgx.ErrNoRows) {
+	var currentStepKey string
+	if err := tx.QueryRow(ctx, "SELECT status, COALESCE(current_step_key, '') FROM jobs WHERE id = $1 FOR UPDATE", jobID).Scan(&current, &currentStepKey); errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	} else if err != nil {
 		return Job{}, fmt.Errorf("lock job: %w", err)
 	}
 	if !containsStatus(allowed, current) {
 		return Job{}, fmt.Errorf("%w: cannot transition job from %s to %s", ErrConflict, current, target)
+	}
+	var interruptedStepID, interruptedAttemptID string
+	if current == JobRunning && (target == JobPaused || target == JobCancelled) {
+		interruptErr := tx.QueryRow(ctx, `
+			SELECT js.id::text, sa.id::text
+			FROM job_steps js
+			JOIN step_attempts sa ON sa.job_step_id = js.id AND sa.status = 'running'
+			WHERE js.job_id = $1 AND js.step_key = $2 AND js.status = 'running'
+			ORDER BY sa.started_at DESC LIMIT 1
+			FOR UPDATE OF js, sa`, jobID, currentStepKey).Scan(&interruptedStepID, &interruptedAttemptID)
+		if interruptErr != nil && !errors.Is(interruptErr, pgx.ErrNoRows) {
+			return Job{}, fmt.Errorf("lock interrupted step attempt: %w", interruptErr)
+		}
+		if interruptErr == nil {
+			attemptStatus := StepPaused
+			stepStatus := StepPaused
+			stepEvent := "step.paused"
+			if target == JobCancelled {
+				attemptStatus = StepCancelled
+				stepStatus = StepCancelled
+				stepEvent = "step.cancelled"
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE step_attempts SET status = $2, finished_at = now() WHERE id = $1`,
+				interruptedAttemptID, attemptStatus); err != nil {
+				return Job{}, fmt.Errorf("close interrupted step attempt: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE job_steps SET status = $2, finished_at = now(), updated_at = now() WHERE id = $1`,
+				interruptedStepID, stepStatus); err != nil {
+				return Job{}, fmt.Errorf("stop interrupted job step: %w", err)
+			}
+			if _, err := appendEvent(ctx, tx, jobID, interruptedStepID, interruptedAttemptID, stepEvent, actor, map[string]any{
+				"step_key": currentStepKey, "from": StepRunning, "to": stepStatus,
+			}); err != nil {
+				return Job{}, err
+			}
+		}
 	}
 	finished := target == JobCancelled
 	if resumeState != nil {
@@ -718,6 +789,7 @@ func (s *Store) transitionJob(
 		_, err = tx.Exec(ctx, `
 			UPDATE jobs
 			SET status = $2, lease_owner = NULL, lease_expires_at = NULL,
+			    heartbeat_at = NULL,
 			    finished_at = CASE WHEN $3 THEN now() ELSE finished_at END, updated_at = now()
 			WHERE id = $1`, jobID, target, finished)
 	}

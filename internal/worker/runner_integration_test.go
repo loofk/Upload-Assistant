@@ -1,0 +1,153 @@
+package worker
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/loofk/upload-assistant/v2/internal/artifacts"
+	"github.com/loofk/upload-assistant/v2/internal/database"
+	"github.com/loofk/upload-assistant/v2/internal/downloaders"
+	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/sites"
+	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
+	"github.com/loofk/upload-assistant/v2/internal/workflow"
+)
+
+func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := workflow.NewStore(pool)
+	definition := workflow.RetorrentDefinition()
+	workflowID, err := store.EnsureDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := workflow.NewService(store, definition, workflowID)
+
+	metainfo := []byte("d8:announce14:https://t.test4:infod4:name7:fixtureee")
+	hashes, err := torrentmeta.Hashes(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := testRuleRevision(t, "source", true)
+	input := mustJSON(map[string]any{
+		"source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM",
+		"accept_rules": map[string]any{"U2": map[string]any{
+			"accepted": true, "fingerprint": rule.Fingerprint,
+			"obligations": map[string]any{"repost-permission": map[string]any{
+				"confirmed": true, "evidence": "Fixture confirms source-side permission was reviewed.",
+			}},
+		}},
+		"downloader": map[string]any{"name": "fixture-box", "save_path": "/remote/downloads"},
+	})
+	job, err := service.CreateJob(ctx, workflow.CreateJobInput{
+		Kind: "retorrent", ExecutionMode: workflow.ExecutionAuto, Input: input,
+		IdempotencyKey: "worker-fixture-" + uuid.NewString(), Owner: "integration-test",
+		Actor: workflow.Actor{Type: "test", ID: "worker-integration"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM jobs WHERE id = $1", job.ID) })
+
+	artifactStore, err := artifacts.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := fakeSourceProvider{
+		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", RetrievedAt: time.Now().UTC()},
+		download: sites.DownloadedTorrent{
+			Bytes: metainfo, Filename: "U2-60635.torrent", ContentType: "application/x-bittorrent",
+			SizeBytes: int64(len(metainfo)), SHA256: sha256String(metainfo), Hashes: hashes,
+		},
+	}
+	downloader := &fakeDownloaderProvider{
+		addResult: downloaders.AddEvidence{
+			DownloaderName: "fixture-box", Adapter: "qbittorrent",
+			Result: qbittorrent.AddResult{Hashes: hashes},
+		},
+		inspection: downloaders.TorrentEvidence{
+			DownloaderName: "fixture-box", Adapter: "qbittorrent",
+			Torrent: qbittorrent.Torrent{
+				Hash: hashes.V1SHA1, State: "downloading", Progress: 0.5,
+				TotalSize: 100, Completed: 50, AmountLeft: 50,
+			},
+		},
+	}
+	runner := New(
+		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithRuleProvider(fakeRuleProvider{revision: rule}),
+		WithSourceAdapters(source, artifactStore),
+		WithDownloader(downloader, artifactStore),
+	)
+	for iteration := 0; iteration < 6; iteration++ {
+		if err := runner.RunOnce(ctx); err != nil {
+			t.Fatalf("RunOnce(%d) error = %v", iteration+1, err)
+		}
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != workflow.JobBlocked || job.CurrentStep != "downloader_wait" {
+		t.Fatalf("job status/current = %s/%s", job.Status, job.CurrentStep)
+	}
+	var blockers []Blocker
+	if err := json.Unmarshal(job.Blockers, &blockers); err != nil || len(blockers) != 1 || blockers[0].Code != "source_download_incomplete" {
+		t.Fatalf("job blockers/error = %#v/%v", blockers, err)
+	}
+	storedArtifacts, err := service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 1 || storedArtifacts[0].SHA256 != sha256String(metainfo) {
+		t.Fatalf("artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	steps, err := service.ListSteps(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, key := range []string{"source_parse", "source_inspect", "source_rules", "source_torrent", "downloader_add"} {
+		if steps[index].Key != key || steps[index].Status != workflow.StepComplete {
+			t.Fatalf("step %d = %s/%s", index, steps[index].Key, steps[index].Status)
+		}
+	}
+	downloader.inspection.Torrent.State = "uploading"
+	downloader.inspection.Torrent.Progress = 1
+	downloader.inspection.Torrent.Completed = 100
+	downloader.inspection.Torrent.AmountLeft = 0
+	job, err = service.ResumeJob(ctx, job.ID, json.RawMessage(`{}`), workflow.Actor{Type: "test", ID: "worker-integration"})
+	if err != nil || job.Status != workflow.JobQueued {
+		t.Fatalf("ResumeJob() job/error = %s/%v", job.Status, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("resumed RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "content_resolve" {
+		t.Fatalf("resumed job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	steps, err = service.ListSteps(ctx, job.ID)
+	if err != nil || steps[5].Status != workflow.StepComplete {
+		t.Fatalf("resumed downloader_wait status/error = %s/%v", steps[5].Status, err)
+	}
+	events, err := service.ListEvents(ctx, job.ID, 0, 200)
+	if err != nil || workflow.VerifyEventChain(events) != nil {
+		t.Fatalf("event chain/error = %d/%v", len(events), err)
+	}
+}

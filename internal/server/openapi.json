@@ -255,9 +255,26 @@
         "properties": {
           "source_url": {"type": "string", "format": "uri"},
           "target": {"type": "string", "description": "Uppercase target tracker code."},
-          "accept_rules": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/RuleAcceptance"}}
+          "accept_rules": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/RuleAcceptance"}},
+          "downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
+          "confirm_upload": {"type": "boolean", "default": false, "description": "A later live target upload gate requires an explicit true value; it is never inferred."}
         },
         "additionalProperties": true
+      },
+      "RetorrentDownloader": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "default": "default", "description": "Configured remote downloader name."},
+          "save_path": {"type": "string", "default": "/downloads", "description": "Normalized absolute path as seen by the remote downloader."},
+          "category": {"type": "string", "default": "retorrent"},
+          "tags": {"type": "array", "maxItems": 32, "items": {"type": "string"}},
+          "skip_checking": {"type": "boolean", "default": false},
+          "paused": {"type": "boolean", "default": false},
+          "download_limit_bytes_per_second": {"type": "integer", "minimum": 0, "default": 0},
+          "upload_limit_bytes_per_second": {"type": "integer", "minimum": 0, "default": 0}
+        },
+        "description": "Source-download settings. An active rule revision can impose a stricter rate cap, which always wins. These fields can also be supplied in resume_state after a configuration block."
       },
       "CreateJobRequest": {
         "type": "object",

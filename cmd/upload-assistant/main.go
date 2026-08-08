@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
@@ -24,6 +25,8 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/server"
+	"github.com/loofk/upload-assistant/v2/internal/sites"
+	"github.com/loofk/upload-assistant/v2/internal/sites/nexusphp"
 	"github.com/loofk/upload-assistant/v2/internal/worker"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 	"golang.org/x/term"
@@ -114,9 +117,22 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
 	}
+	artifactStore, err := artifacts.NewLocalStore(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("initialize artifact store: %w", err)
+	}
+	sourceRegistry, err := buildSourceRegistry(integrationStore)
+	if err != nil {
+		return fmt.Errorf("initialize source adapters: %w", err)
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
-	jobRunner := worker.New(jobService, workerID, logger, worker.WithRuleProvider(ruleStore))
+	jobRunner := worker.New(
+		jobService, workerID, logger,
+		worker.WithRuleProvider(ruleStore),
+		worker.WithSourceAdapters(sourceRegistry, artifactStore),
+		worker.WithDownloader(downloaderManager, artifactStore),
+	)
 	go jobRunner.Run(ctx)
 
 	handler := server.New(server.Dependencies{
@@ -161,6 +177,18 @@ func serve(args []string) error {
 		return fmt.Errorf("shutdown HTTP server: %w", err)
 	}
 	return nil
+}
+
+func buildSourceRegistry(provider nexusphp.RuntimeSiteProvider) (*sites.Registry, error) {
+	adapters := make([]sites.SourceAdapter, 0, len(nexusphp.ProductionProfiles))
+	for _, profile := range nexusphp.ProductionProfiles {
+		adapter, err := nexusphp.New(profile, provider, nil)
+		if err != nil {
+			return nil, err
+		}
+		adapters = append(adapters, adapter)
+	}
+	return sites.NewRegistry(adapters...)
 }
 
 func migrate(args []string) error {

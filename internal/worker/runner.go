@@ -19,12 +19,14 @@ type Runtime interface {
 	CompleteStep(context.Context, string, string, string, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	BlockStep(context.Context, string, string, string, json.RawMessage, json.RawMessage, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	FailStep(context.Context, string, string, string, json.RawMessage, json.RawMessage, workflow.Actor) (workflow.Job, error)
+	RegisterArtifact(context.Context, workflow.RegisterArtifactInput) (workflow.Artifact, error)
 }
 
 type Execution struct {
 	Job     workflow.Job
 	Step    workflow.Step
 	Attempt workflow.Attempt
+	Actor   workflow.Actor
 }
 
 type Executor interface {
@@ -137,7 +139,7 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	defer cancel()
 	heartbeatDone := make(chan struct{})
 	go r.heartbeat(executionCtx, cancel, job.ID, heartbeatDone)
-	output, executeErr := executor.Execute(executionCtx, Execution{Job: job, Step: step, Attempt: attempt})
+	output, executeErr := executor.Execute(executionCtx, Execution{Job: job, Step: step, Attempt: attempt, Actor: actor})
 	cancel()
 	<-heartbeatDone
 	if executeErr == nil {

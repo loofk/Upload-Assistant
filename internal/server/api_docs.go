@@ -54,7 +54,7 @@ func toolDefinitions() []toolDefinition {
 	jobID := object(map[string]any{"job_id": stringProperty("UUID of the durable job.")}, "job_id")
 	return []toolDefinition{
 		{
-			Name: "create_retorrent_job", Description: "Create an auditable retorrent workflow and return job_id immediately.",
+			Name: "create_retorrent_job", Description: "Create an auditable retorrent workflow and return job_id immediately. Source inspection, rule acceptance, torrent retrieval, and downloader steps persist separate evidence; live upload still requires an explicit confirmation gate.",
 			Method: "POST", Path: "/api/v2/jobs", RequiredScopes: []string{"jobs:write"}, SafetyLevel: "controlled_write",
 			InputSchema: object(map[string]any{
 				"idempotency_key": stringProperty("Required Idempotency-Key HTTP header value."),

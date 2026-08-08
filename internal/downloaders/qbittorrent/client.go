@@ -265,10 +265,15 @@ func (client *Client) SetLimits(ctx context.Context, hash string, downloadBytesP
 	if err := client.Authenticate(ctx); err != nil {
 		return err
 	}
-	for endpoint, limit := range map[string]int64{
-		"/api/v2/torrents/setDownloadLimit": downloadBytesPerSecond,
-		"/api/v2/torrents/setUploadLimit":   uploadBytesPerSecond,
-	} {
+	operations := []struct {
+		endpoint string
+		limit    int64
+	}{
+		{endpoint: "/api/v2/torrents/setDownloadLimit", limit: downloadBytesPerSecond},
+		{endpoint: "/api/v2/torrents/setUploadLimit", limit: uploadBytesPerSecond},
+	}
+	for _, operation := range operations {
+		endpoint, limit := operation.endpoint, operation.limit
 		values := url.Values{"hashes": {strings.ToLower(hash)}, "limit": {strconv.FormatInt(limit, 10)}}
 		if _, err := client.request(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", true); err != nil {
 			return err
