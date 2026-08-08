@@ -172,6 +172,13 @@ func TestRuleTextSHA256MismatchIsRejected(t *testing.T) {
 	}
 }
 
+func TestRuleMarkdownSizeLimitIsEnforced(t *testing.T) {
+	raw := make([]byte, MaxMarkdownBytes+1)
+	if _, err := ParseMarkdown(raw); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("ParseMarkdown() size error = %v", err)
+	}
+}
+
 func TestNegativeSeedingRequirementIsRejectedInDocumentAndPolicy(t *testing.T) {
 	raw := strings.Replace(testRuleMarkdown(false), "minimum_time_hours: 72", "minimum_time_hours: -1", 1)
 	if _, err := ParseMarkdown([]byte(raw)); err == nil {

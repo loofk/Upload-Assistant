@@ -47,7 +47,7 @@ upload-assistant cli rules activate <revision-id> --confirm
 ```
 
 CLI 的审批和激活必须显式传入 `--confirm`；它不能绕过服务端的完整性、状态或 fingerprint
-检查。也可直接调用 Go v2 API：
+检查。单份 Markdown 的 decoded UTF-8 上限为 8 MiB。也可直接调用 Go v2 API：
 
 ```http
 POST /api/v2/site-rules/import

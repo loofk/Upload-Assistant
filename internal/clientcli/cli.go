@@ -20,11 +20,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/loofk/upload-assistant/v2/internal/apiclient"
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 )
 
 var ErrReported = errors.New("CLI error was reported as JSON")
-
-const maxRuleMarkdownBytes = 8 << 20
 
 type Streams struct {
 	In         io.Reader
@@ -678,15 +677,15 @@ func readRuleMarkdown(filename string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("rule Markdown must be a regular file")
 	}
-	if info.Size() > maxRuleMarkdownBytes {
-		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", maxRuleMarkdownBytes)
+	if info.Size() > rules.MaxMarkdownBytes {
+		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", rules.MaxMarkdownBytes)
 	}
-	body, err := io.ReadAll(io.LimitReader(file, maxRuleMarkdownBytes+1))
+	body, err := io.ReadAll(io.LimitReader(file, rules.MaxMarkdownBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read rule Markdown: %w", err)
 	}
-	if len(body) > maxRuleMarkdownBytes {
-		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", maxRuleMarkdownBytes)
+	if len(body) > rules.MaxMarkdownBytes {
+		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", rules.MaxMarkdownBytes)
 	}
 	if strings.TrimSpace(string(body)) == "" {
 		return nil, errors.New("rule Markdown is empty")

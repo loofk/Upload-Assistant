@@ -16,7 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Kind = "upload-assistant.site-rule.v1"
+const (
+	Kind             = "upload-assistant.site-rule.v1"
+	MaxMarkdownBytes = 8 << 20
+)
 
 var siteCodePattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,31}$`)
 
@@ -110,6 +113,9 @@ type Policy struct {
 }
 
 func ParseMarkdown(raw []byte) (Document, error) {
+	if len(raw) > MaxMarkdownBytes {
+		return Document{}, fmt.Errorf("rule Markdown exceeds %d bytes", MaxMarkdownBytes)
+	}
 	normalized := bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	frontMatter, body, format, err := splitFrontMatter(normalized)
 	if err != nil {

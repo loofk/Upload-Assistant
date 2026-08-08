@@ -94,7 +94,10 @@ func (a rulesAPI) importRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request importRuleRequest
-	if err := decodeJSON(w, r, &request); err != nil {
+	// A JSON string can almost double normal Markdown through escaped newlines,
+	// quotes, and backslashes. ParseMarkdown applies the authoritative decoded
+	// 8 MiB limit after this bounded transport envelope is decoded.
+	if err := decodeJSONLimit(w, r, &request, 2*rules.MaxMarkdownBytes+(1<<20)); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
