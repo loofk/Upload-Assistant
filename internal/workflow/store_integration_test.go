@@ -273,6 +273,52 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	}
 }
 
+func TestReplayRejectsCompletedTargetUpload(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(pool)
+	definition := RetorrentDefinition()
+	workflowID, err := store.EnsureDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(ctx, workflowID, definition, CreateJobInput{
+		Kind: "retorrent", ExecutionMode: ExecutionStep,
+		Input:          json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=2","target":"MTEAM"}`),
+		IdempotencyKey: "completed-upload-replay-" + uuid.NewString(), Owner: "integration-test",
+		Actor: Actor{Type: "test", ID: "completed-upload-replay"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM jobs WHERE id = $1", job.ID) })
+	if _, err := pool.Exec(ctx, "UPDATE job_steps SET status = 'complete' WHERE job_id = $1 AND step_key = 'target_upload'", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE jobs SET status = 'failed', blockers = '[{"code":"target_torrent_download_failed"}]' WHERE id = $1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ReplayJob(ctx, job.ID, workflowID, definition, ReplayJobInput{
+		ExecutionMode: ExecutionStep, IdempotencyKey: "reject-completed-upload-" + uuid.NewString(),
+		Owner: "integration-test", Actor: Actor{Type: "test", ID: "completed-upload-replay"},
+	})
+	if !errors.Is(err, ErrReplayUnsafe) || !strings.Contains(err.Error(), "completed target upload") {
+		t.Fatalf("completed target upload replay error = %v", err)
+	}
+}
+
 func TestStorePausesRunningAttemptAndRecoversExpiredLease(t *testing.T) {
 	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -407,6 +453,13 @@ func TestResumeReconciliationRequiresAttemptBoundEvidence(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	attemptID := "55555555-5555-4555-8555-555555555555"
 	blockers := json.RawMessage(`[{"code":"target_upload_outcome_unknown"}]`)
+	templated, err := addReconciliationTemplate(
+		blockers, json.RawMessage(`[{"action":"reconcile_target_upload"}]`),
+		json.RawMessage(`{"target_upload":{"submitted_torrent_sha256":"`+strings.Repeat("c", 64)+`"}}`), attemptID,
+	)
+	if err != nil || !bytes.Contains(templated, []byte(`"required_submitted_torrent_sha256":"`+strings.Repeat("c", 64)+`"`)) {
+		t.Fatalf("target reconciliation template/error = %s/%v", templated, err)
+	}
 	current := json.RawMessage(`{"reconciliation":{"blocker_code":"target_upload_outcome_unknown","attempt_id":"` + attemptID + `","decision":"unreconciled","confirmed":false}}`)
 	if _, err := validateResumeReconciliation(blockers, current, json.RawMessage(`{}`), attemptID, now); !errors.Is(err, ErrReconciliation) {
 		t.Fatalf("missing reconciliation error = %v", err)
@@ -415,6 +468,32 @@ func TestResumeReconciliationRequiresAttemptBoundEvidence(t *testing.T) {
 	audit, err := validateResumeReconciliation(blockers, current, valid, attemptID, now)
 	if err != nil || audit["decision"] != "verified_not_applied" || len(audit["reconciliation_sha256"].(string)) != 64 {
 		t.Fatalf("valid reconciliation audit/error = %#v/%v", audit, err)
+	}
+	submittedSHA := strings.Repeat("c", 64)
+	uploadedCurrent := json.RawMessage(`{"reconciliation":{"blocker_code":"target_upload_outcome_unknown","attempt_id":"` + attemptID + `","required_submitted_torrent_sha256":"` + submittedSHA + `"}}`)
+	uploaded := json.RawMessage(`{"reconciliation":{"blocker_code":"target_upload_outcome_unknown","attempt_id":"` + attemptID + `","decision":"verified_uploaded","confirmed":true,"evidence_sha256":"` + strings.Repeat("d", 64) + `","observed_at":"2026-08-08T11:59:00Z","observed_torrent_id":"98765","submitted_torrent_sha256":"` + submittedSHA + `"}}`)
+	uploadedAudit, err := validateResumeReconciliation(blockers, uploadedCurrent, uploaded, attemptID, now)
+	if err != nil || uploadedAudit["decision"] != "verified_uploaded" || uploadedAudit["observed_torrent_id"] != "98765" {
+		t.Fatalf("verified uploaded audit/error = %#v/%v", uploadedAudit, err)
+	}
+	if !activeVerifiedUploadRecovery(uploaded) {
+		t.Fatal("verified_uploaded resume state must remain replay-protected")
+	}
+	if _, err := validateResumeReconciliation(
+		json.RawMessage(`[{"code":"target_reconciliation_candidate_not_found"}]`), uploaded, json.RawMessage(`{}`), attemptID, now,
+	); err != nil {
+		t.Fatalf("unchanged active recovery resume error = %v", err)
+	}
+	downgraded := bytes.Replace(uploaded, []byte(`"verified_uploaded"`), []byte(`"verified_not_applied"`), 1)
+	if _, err := validateResumeReconciliation(
+		json.RawMessage(`[{"code":"target_reconciliation_candidate_not_found"}]`), uploaded,
+		downgraded, attemptID, now,
+	); !errors.Is(err, ErrReconciliation) {
+		t.Fatalf("downgraded active recovery error = %v", err)
+	}
+	wrongUpload := bytes.Replace(uploaded, []byte(submittedSHA), []byte(strings.Repeat("e", 64)), 1)
+	if _, err := validateResumeReconciliation(blockers, uploadedCurrent, wrongUpload, attemptID, now); !errors.Is(err, ErrReconciliation) {
+		t.Fatalf("wrong submitted torrent reconciliation error = %v", err)
 	}
 	downloaderBlockers := json.RawMessage(`[{"code":"downloader_partial_add_requires_reconciliation"}]`)
 	downloaderCurrent := json.RawMessage(`{"reconciliation":{"blocker_code":"downloader_partial_add_requires_reconciliation","attempt_id":"` + attemptID + `","required_observed_hash":"0123456789abcdef0123456789abcdef01234567"}}`)

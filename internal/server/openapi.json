@@ -279,7 +279,7 @@
     "/api/v2/jobs/{job_id}/replay": {
       "post": {
         "operationId": "replayJob",
-        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs and reconciliation-required or unknown external outcomes are rejected.",
+        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs, reconciliation-required or unknown external outcomes, active recovery, and jobs with a completed target upload are rejected.",
         "parameters": [{"$ref": "#/components/parameters/JobID"}, {"$ref": "#/components/parameters/IdempotencyKey"}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReplayJobRequest"}}}},
         "responses": {
@@ -812,12 +812,19 @@
 		"properties": {
 		  "blocker_code": {"type": "string", "enum": ["target_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"]},
 		  "attempt_id": {"type": "string", "format": "uuid", "description": "Exact latest blocked/failed attempt returned by the attempts API."},
-		  "decision": {"type": "string", "enum": ["verified_not_applied", "verified_remote_state"]},
+		  "decision": {"type": "string", "enum": ["verified_not_applied", "verified_uploaded", "verified_remote_state"]},
 		  "confirmed": {"type": "boolean", "const": true},
 		  "evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of the operator-reviewed external reconciliation evidence; raw evidence and credentials are not copied into the job event."},
 		  "observed_at": {"type": "string", "format": "date-time"},
-		  "observed_hash": {"type": "string", "description": "Required for a downloader partial add and must match the exact hash in the persisted reconciliation template."}
-		}
+		  "observed_hash": {"type": "string", "description": "Required for a downloader partial add and must match the exact hash in the persisted reconciliation template."},
+		  "observed_torrent_id": {"type": "string", "pattern": "^[0-9]{1,20}$", "description": "Required for verified_uploaded; the worker performs a fresh read-only target search and must observe this exact torrent id."},
+		  "submitted_torrent_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Required for verified_uploaded and must equal the immutable submitted target torrent SHA-256 in the persisted reconciliation template."}
+		},
+		"oneOf": [
+		  {"properties": {"blocker_code": {"const": "target_upload_outcome_unknown"}, "decision": {"const": "verified_not_applied"}}},
+		  {"required": ["observed_torrent_id", "submitted_torrent_sha256"], "properties": {"blocker_code": {"const": "target_upload_outcome_unknown"}, "decision": {"const": "verified_uploaded"}}},
+		  {"required": ["observed_hash"], "properties": {"blocker_code": {"const": "downloader_partial_add_requires_reconciliation"}, "decision": {"const": "verified_remote_state"}}}
+		]
 	  },
       "ReplayJobRequest": {
         "type": "object", "additionalProperties": false,

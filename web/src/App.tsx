@@ -377,7 +377,7 @@ function JobDetail({
       {canResume && <section className="resume-panel">
         <div className="section-title"><div><p className="eyebrow">RECOVERY INPUT</p><h2>恢复参数</h2></div><span>提交后会写入审计事件</span></div>
         <textarea aria-label="resume_state JSON" spellCheck={false} value={resumeText} onChange={(event) => setResumeText(event.target.value)} />
-		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>目标站未知结果仅接受 verified_not_applied，恢复后仍会重新查重并重新经过 confirm_upload。</span></div>}
+		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>verified_not_applied 会重新查重并再次要求上传确认；verified_uploaded 还必须填写目标种子 ID 与模板中的 submitted torrent SHA，Worker 只读查证该 ID，绝不再次上传。</span></div>}
         {confirmRequired && <label className="confirm-live">
           <input type="checkbox" checked={confirmUpload} onChange={(event) => setConfirmUpload(event.target.checked)} />
           <span><strong>我已人工复核目标站规则、最终查重与不可变上传包，并确认执行 live 上传。</strong><small>此确认不会被系统或 AI 自动推断。</small></span>
@@ -406,9 +406,18 @@ function reconciliationInputReady(raw: string): boolean {
 	try {
 		const parsed = JSON.parse(raw) as {reconciliation?: Record<string, unknown>};
 		const value = parsed?.reconciliation;
-		return !!value && value.confirmed === true && typeof value.blocker_code === "string" && value.blocker_code.length > 0 &&
+		const baseReady = !!value && value.confirmed === true && typeof value.blocker_code === "string" && value.blocker_code.length > 0 &&
 			typeof value.attempt_id === "string" && value.attempt_id.length > 0 && typeof value.decision === "string" && value.decision !== "unreconciled" &&
 			typeof value.evidence_sha256 === "string" && /^[a-f0-9]{64}$/.test(value.evidence_sha256) && typeof value.observed_at === "string" && value.observed_at.length > 0;
+		if (!baseReady) return false;
+		if (value.decision === "verified_uploaded") {
+			return typeof value.observed_torrent_id === "string" && /^[0-9]{1,20}$/.test(value.observed_torrent_id) &&
+				typeof value.submitted_torrent_sha256 === "string" && /^[a-f0-9]{64}$/.test(value.submitted_torrent_sha256);
+		}
+		if (value.decision === "verified_remote_state") {
+			return typeof value.observed_hash === "string" && value.observed_hash.length > 0;
+		}
+		return value.decision === "verified_not_applied";
 	} catch {
 		return false;
 	}

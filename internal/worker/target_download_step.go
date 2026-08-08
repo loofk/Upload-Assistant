@@ -218,10 +218,23 @@ func (executor targetTorrentDownloadExecutor) inputs(snapshotBody json.RawMessag
 		bindings.UploadReceipt.Torrent.SHA256 != bindings.SubmittedTorrentArtifact.SHA256 ||
 		bindings.UploadReceipt.Upload.TorrentID != bindings.TorrentID || bindings.UploadReceipt.Upload.DetailsURL != uploaded.DetailsURL ||
 		bindings.UploadReceipt.Upload.Adapter == "" || bindings.UploadReceipt.FreshDuplicate.SHA256 == "" ||
-		bindings.UploadReceipt.CurrentRule.Fingerprint == "" {
+		bindings.UploadReceipt.CurrentRule.Fingerprint == "" || !validTargetUploadRecoveryReceipt(bindings.UploadReceipt) {
 		return targetTorrentDownloadBindings{}, fmt.Errorf("target upload receipt verification failed")
 	}
 	return bindings, nil
+}
+
+func validTargetUploadRecoveryReceipt(receipt targetUploadReceipt) bool {
+	if receipt.Reconciliation == nil {
+		return true
+	}
+	recovery := receipt.Reconciliation
+	evidenceDigest, err := hex.DecodeString(recovery.EvidenceSHA256)
+	return recovery.Recovered && recovery.Decision == "verified_uploaded" && recovery.AttemptID != "" &&
+		err == nil && len(evidenceDigest) == sha256.Size && recovery.EvidenceSHA256 == strings.ToLower(recovery.EvidenceSHA256) &&
+		recovery.EvidenceSHA256 == receipt.Upload.ResponseSHA256 &&
+		!recovery.ObservedAt.IsZero() && recovery.ObservedTorrentID == receipt.Upload.TorrentID &&
+		recovery.SubmittedTorrentSHA256 == receipt.Torrent.SHA256
 }
 
 func validateDownloadedTargetTorrent(downloaded sites.DownloadedTargetTorrent, bindings targetTorrentDownloadBindings) (torrentmeta.Inspection, error) {

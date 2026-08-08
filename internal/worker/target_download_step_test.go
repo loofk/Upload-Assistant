@@ -160,3 +160,25 @@ func targetTorrentDownloadResult(t *testing.T, torrent []byte) sites.DownloadedT
 		},
 	}
 }
+
+func TestTargetDownloadValidatesRecoveredUploadReceiptBinding(t *testing.T) {
+	torrentSHA := strings.Repeat("a", 64)
+	receipt := targetUploadReceipt{
+		Torrent: sites.TargetArtifactEvidence{SHA256: torrentSHA},
+		Upload: sites.TargetUploadEvidence{
+			TorrentID: "98765", ResponseSHA256: strings.Repeat("b", 64),
+		},
+		Reconciliation: &targetUploadRecoveryReceipt{
+			Recovered: true, Decision: "verified_uploaded", AttemptID: "attempt-1",
+			EvidenceSHA256: strings.Repeat("b", 64), ObservedAt: time.Unix(5, 0).UTC(),
+			ObservedTorrentID: "98765", SubmittedTorrentSHA256: torrentSHA,
+		},
+	}
+	if !validTargetUploadRecoveryReceipt(receipt) {
+		t.Fatal("valid recovered upload receipt was rejected")
+	}
+	receipt.Reconciliation.ObservedTorrentID = "42"
+	if validTargetUploadRecoveryReceipt(receipt) {
+		t.Fatal("mismatched recovered upload receipt was accepted")
+	}
+}

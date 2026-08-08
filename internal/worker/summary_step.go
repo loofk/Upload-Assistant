@@ -188,6 +188,7 @@ type summaryBindings struct {
 	}
 	Upload struct {
 		Uploaded      bool                   `json:"uploaded"`
+		Recovered     bool                   `json:"recovered"`
 		Status        string                 `json:"status"`
 		Target        string                 `json:"target"`
 		TorrentID     string                 `json:"uploaded_torrent_id"`
@@ -349,6 +350,7 @@ func (executor summaryExecutor) Execute(ctx context.Context, execution Execution
 				"tool":                       bindings.TargetTorrent.Tool, "tool_version": bindings.TargetTorrent.ToolVersion,
 			},
 			"upload": map[string]any{
+				"recovered":    bindings.Upload.Recovered,
 				"submitted_at": bindings.Upload.SubmittedAt, "response_sha256": bindings.Upload.ResponseSHA,
 				"configuration_sha256": bindings.Upload.Configuration,
 				"receipt_artifact_id":  bindings.Upload.ReceiptID, "receipt_sha256": bindings.Upload.ReceiptSHA,

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,23 @@ type fakeTargetUploader struct {
 	request sites.TargetUploadRequest
 	target  string
 	calls   int
+}
+
+type failingTargetArtifactRecorder struct {
+	inputs []workflow.RegisterArtifactInput
+	failAt int
+}
+
+func (recorder *failingTargetArtifactRecorder) RegisterArtifact(_ context.Context, input workflow.RegisterArtifactInput) (workflow.Artifact, error) {
+	recorder.inputs = append(recorder.inputs, input)
+	if len(recorder.inputs) == recorder.failAt {
+		return workflow.Artifact{}, errors.New("fixture artifact catalog unavailable")
+	}
+	return workflow.Artifact{
+		ID: "artifact-1", JobID: input.JobID, StepID: input.StepID, AttemptID: input.AttemptID,
+		Kind: input.Kind, StoragePath: input.StoragePath, Filename: input.Filename, SHA256: input.SHA256,
+		SizeBytes: input.SizeBytes,
+	}, nil
 }
 
 func (uploader *fakeTargetUploader) Upload(_ context.Context, target string, request sites.TargetUploadRequest, _ workflow.Actor) (sites.TargetUploadEvidence, error) {
@@ -113,6 +131,126 @@ func TestTargetUploadStepStopsOnFinalDuplicateAndUnknownOutcome(t *testing.T) {
 		len(recorder.inputs) != 1 || blocked.ResumeState["confirm_upload"] != false {
 		t.Fatalf("unknown outcome blocker/artifacts = %#v/%#v", blocked, recorder.inputs)
 	}
+}
+
+func TestTargetUploadStepTreatsPostWriteLocalFailureAsUnknownOutcome(t *testing.T) {
+	execution, store := targetUploadExecution(t, true)
+	duplicateEvidence := mteam.DuplicateEvidence{
+		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("d", 64),
+		Query: mteam.DuplicateQuery{IMDbID: "tt1234567"}, CheckedAt: time.Unix(2, 0).UTC(),
+	}
+	uploadEvidence := sites.TargetUploadEvidence{
+		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("c", 64),
+		TorrentID: "98765", DetailsURL: "https://kp.m-team.cc/details/98765",
+		ResponseSHA256: strings.Repeat("e", 64), SubmittedAt: time.Unix(3, 0).UTC(),
+	}
+	recorder := &failingTargetArtifactRecorder{failAt: 2}
+	_, err := (targetUploadExecutor{
+		uploader: &fakeTargetUploader{result: uploadEvidence}, duplicates: &fakeTargetDuplicateChecker{result: duplicateEvidence},
+		rules: fakeRuleProvider{revision: targetUploadRuleRevision(t)}, artifacts: store, recorder: recorder,
+	}).Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if blocked.Blockers[0].Code != "target_upload_outcome_unknown" || blocked.NextActions[0].Action != "reconcile_target_upload" ||
+		blocked.ResumeState["confirm_upload"] != false || len(recorder.inputs) != 2 {
+		t.Fatalf("post-write persistence blocker/artifacts = %#v/%#v", blocked, recorder.inputs)
+	}
+
+	execution, store = targetUploadExecution(t, true)
+	_, err = (targetUploadExecutor{
+		uploader:   &fakeTargetUploader{result: sites.TargetUploadEvidence{SiteCode: "MTEAM", Adapter: "mteam_api"}},
+		duplicates: &fakeTargetDuplicateChecker{result: duplicateEvidence}, rules: fakeRuleProvider{revision: targetUploadRuleRevision(t)},
+		artifacts: store, recorder: &sequenceArtifactRecorder{},
+	}).Execute(context.Background(), execution)
+	blocked = requireBlockError(t, err)
+	if blocked.Blockers[0].Code != "target_upload_outcome_unknown" {
+		t.Fatalf("invalid post-write evidence blocker = %#v", blocked)
+	}
+}
+
+func TestTargetUploadStepRecoversVerifiedUploadWithoutSecondWrite(t *testing.T) {
+	execution, store := targetUploadExecution(t, false)
+	execution = targetUploadRecoveryExecution(t, execution, "98765")
+	duplicates := &fakeTargetDuplicateChecker{result: mteam.DuplicateEvidence{
+		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("d", 64),
+		Query: mteam.DuplicateQuery{IMDbID: "tt1234567"}, Duplicate: true, ResultCount: 1,
+		Candidates: []mteam.DuplicateCandidate{{ID: "98765", Name: "Recovered.Release"}}, CheckedAt: time.Unix(4, 0).UTC(),
+	}}
+	uploader := &fakeTargetUploader{}
+	recorder := &sequenceArtifactRecorder{}
+	output, err := (targetUploadExecutor{
+		uploader: uploader, duplicates: duplicates, rules: fakeRuleProvider{revision: targetUploadRuleRevision(t)},
+		artifacts: store, recorder: recorder,
+	}).Execute(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Uploaded  bool   `json:"uploaded"`
+		Recovered bool   `json:"recovered"`
+		TorrentID string `json:"uploaded_torrent_id"`
+	}
+	if json.Unmarshal(output, &result) != nil || !result.Uploaded || !result.Recovered || result.TorrentID != "98765" ||
+		duplicates.calls != 1 || uploader.calls != 0 || len(recorder.inputs) != 2 ||
+		recorder.inputs[0].Kind != "preupload_duplicate_check" || recorder.inputs[1].Kind != "target_upload_receipt" {
+		t.Fatalf("recovered output/dependencies/artifacts = %s/%#v/%#v/%#v", output, duplicates, uploader, recorder.inputs)
+	}
+	receiptFile, err := store.Open(recorder.inputs[1].StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiptFile.Close()
+	var receipt targetUploadReceipt
+	if json.NewDecoder(receiptFile).Decode(&receipt) != nil || receipt.Reconciliation == nil ||
+		!receipt.Reconciliation.Recovered || receipt.Reconciliation.AttemptID != "original-upload-attempt" ||
+		receipt.Reconciliation.EvidenceSHA256 != strings.Repeat("e", 64) {
+		t.Fatalf("recovery receipt = %#v", receipt.Reconciliation)
+	}
+
+	execution, store = targetUploadExecution(t, false)
+	execution = targetUploadRecoveryExecution(t, execution, "98765")
+	duplicates = &fakeTargetDuplicateChecker{result: mteam.DuplicateEvidence{
+		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("d", 64),
+		Query: mteam.DuplicateQuery{IMDbID: "tt1234567"}, Duplicate: true, ResultCount: 1,
+		Candidates: []mteam.DuplicateCandidate{{ID: "42", Name: "Another.Release"}}, CheckedAt: time.Unix(4, 0).UTC(),
+	}}
+	uploader = &fakeTargetUploader{}
+	_, err = (targetUploadExecutor{
+		uploader: uploader, duplicates: duplicates, rules: fakeRuleProvider{revision: targetUploadRuleRevision(t)},
+		artifacts: store, recorder: &sequenceArtifactRecorder{},
+	}).Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if blocked.Blockers[0].Code != "target_reconciliation_candidate_not_found" || uploader.calls != 0 {
+		t.Fatalf("mismatched reconciliation blocker/uploader = %#v/%#v", blocked, uploader)
+	}
+}
+
+func targetUploadRecoveryExecution(t *testing.T, execution Execution, torrentID string) Execution {
+	t.Helper()
+	var snapshot struct {
+		JobInput      map[string]any             `json:"job_input"`
+		ResumeState   map[string]any             `json:"resume_state"`
+		PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
+	}
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var targetTorrent struct {
+		SHA256 string `json:"target_torrent_sha256"`
+	}
+	if json.Unmarshal(snapshot.PreviousSteps["target_torrent"], &targetTorrent) != nil || targetTorrent.SHA256 == "" {
+		t.Fatal("target torrent evidence is missing")
+	}
+	snapshot.ResumeState = map[string]any{
+		"confirm_upload": false,
+		"reconciliation": map[string]any{
+			"blocker_code": "target_upload_outcome_unknown", "attempt_id": "original-upload-attempt",
+			"decision": "verified_uploaded", "confirmed": true, "evidence_sha256": strings.Repeat("e", 64),
+			"observed_at": "2026-08-08T12:00:00Z", "observed_torrent_id": torrentID,
+			"submitted_torrent_sha256": targetTorrent.SHA256,
+		},
+	}
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	return execution
 }
 
 func targetUploadExecution(t *testing.T, confirmed bool) (Execution, WorkflowArtifactStore) {

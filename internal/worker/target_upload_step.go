@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,6 +53,18 @@ type targetUploadBindings struct {
 	RuleRevisionID        string
 	RuleFingerprint       string
 	RuleAcceptanceSHA     string
+	Reconciliation        targetUploadReconciliation
+}
+
+type targetUploadReconciliation struct {
+	BlockerCode            string `json:"blocker_code"`
+	AttemptID              string `json:"attempt_id"`
+	Decision               string `json:"decision"`
+	Confirmed              bool   `json:"confirmed"`
+	EvidenceSHA256         string `json:"evidence_sha256"`
+	ObservedAt             string `json:"observed_at"`
+	ObservedTorrentID      string `json:"observed_torrent_id"`
+	SubmittedTorrentSHA256 string `json:"submitted_torrent_sha256"`
 }
 
 type preuploadDuplicateDocument struct {
@@ -74,6 +87,17 @@ type targetUploadReceipt struct {
 	PriorDuplicate sites.TargetArtifactEvidence `json:"prior_duplicate_check"`
 	FreshDuplicate sites.TargetArtifactEvidence `json:"preupload_duplicate_check"`
 	Upload         sites.TargetUploadEvidence   `json:"upload"`
+	Reconciliation *targetUploadRecoveryReceipt `json:"reconciliation,omitempty"`
+}
+
+type targetUploadRecoveryReceipt struct {
+	Recovered              bool      `json:"recovered"`
+	Decision               string    `json:"decision"`
+	AttemptID              string    `json:"attempt_id"`
+	EvidenceSHA256         string    `json:"evidence_sha256"`
+	ObservedAt             time.Time `json:"observed_at"`
+	ObservedTorrentID      string    `json:"observed_torrent_id"`
+	SubmittedTorrentSHA256 string    `json:"submitted_torrent_sha256"`
 }
 
 type targetUploadConfirmation struct {
@@ -95,6 +119,9 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 	bindings, err := executor.inputs(execution.Step.InputSnapshot)
 	if err != nil {
 		return nil, invalidSnapshotBlock(err)
+	}
+	if bindings.Reconciliation.Decision == "verified_uploaded" {
+		return executor.recoverUploaded(ctx, execution, bindings)
 	}
 	if !bindings.Confirmed {
 		return nil, &BlockError{
@@ -153,8 +180,23 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 		return nil, targetUploadAdapterBlock(err, bindings, freshDuplicateArtifact)
 	}
 	if err := validateTargetUploadEvidence(upload, bindings); err != nil {
-		return nil, targetUploadEvidenceBlock("target_upload_evidence_invalid", err.Error(), bindings)
+		return nil, targetUploadPostWriteBlock("target upload returned invalid success evidence: "+err.Error(), bindings, freshDuplicateArtifact, upload)
 	}
+	output, err := executor.persistUploadReceipt(ctx, execution, bindings, freshDuplicateArtifact, upload, nil)
+	if err != nil {
+		return nil, targetUploadPostWriteBlock("target upload succeeded but its immutable receipt could not be persisted: "+err.Error(), bindings, freshDuplicateArtifact, upload)
+	}
+	return output, nil
+}
+
+func (executor targetUploadExecutor) persistUploadReceipt(
+	ctx context.Context,
+	execution Execution,
+	bindings targetUploadBindings,
+	freshDuplicateArtifact sites.TargetArtifactEvidence,
+	upload sites.TargetUploadEvidence,
+	recovery *targetUploadRecoveryReceipt,
+) (json.RawMessage, error) {
 	receipt := targetUploadReceipt{
 		SchemaVersion: 1, Target: bindings.Target,
 		Confirmation: targetUploadConfirmation{Confirmed: true, Actor: execution.Actor, BoundAt: time.Now().UTC()},
@@ -163,7 +205,7 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 		},
 		Package: bindings.PackageArtifact, Torrent: bindings.TargetTorrentArtifact,
 		TorrentReceipt: bindings.TargetTorrentReceipt, PriorDuplicate: bindings.PriorDuplicate,
-		FreshDuplicate: freshDuplicateArtifact, Upload: upload,
+		FreshDuplicate: freshDuplicateArtifact, Upload: upload, Reconciliation: recovery,
 	}
 	body, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
@@ -184,6 +226,7 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 			"target_torrent_sha256":            bindings.TargetTorrentArtifact.SHA256,
 			"preupload_duplicate_check_sha256": freshDuplicateArtifact.SHA256,
 			"rule_fingerprint":                 bindings.RuleFingerprint, "configuration_sha256": upload.ConfigurationSHA256,
+			"recovered": recovery != nil,
 		}),
 		Retention: artifactRetention, Actor: execution.Actor,
 	})
@@ -192,6 +235,7 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 	}
 	return mustJSON(map[string]any{
 		"uploaded": true, "status": "uploaded", "target": bindings.Target,
+		"recovered":           recovery != nil,
 		"uploaded_torrent_id": upload.TorrentID, "details_url": upload.DetailsURL,
 		"submitted_at": upload.SubmittedAt, "response_sha256": upload.ResponseSHA256,
 		"configuration_sha256":                  upload.ConfigurationSHA256,
@@ -204,13 +248,152 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 	}), nil
 }
 
+func (executor targetUploadExecutor) recoverUploaded(
+	ctx context.Context,
+	execution Execution,
+	bindings targetUploadBindings,
+) (json.RawMessage, error) {
+	reconciliation := bindings.Reconciliation
+	observedAt, timeErr := time.Parse(time.RFC3339, reconciliation.ObservedAt)
+	evidenceDigest, evidenceErr := hex.DecodeString(reconciliation.EvidenceSHA256)
+	if reconciliation.BlockerCode != "target_upload_outcome_unknown" || reconciliation.AttemptID == "" ||
+		!reconciliation.Confirmed || timeErr != nil || observedAt.IsZero() || evidenceErr != nil || len(evidenceDigest) != 32 ||
+		reconciliation.SubmittedTorrentSHA256 != bindings.TargetTorrentArtifact.SHA256 ||
+		!numericTorrentID(reconciliation.ObservedTorrentID) {
+		return nil, targetUploadReconciliationBlock(
+			"target_reconciliation_evidence_invalid",
+			"verified_uploaded reconciliation is incomplete or is not bound to the immutable submitted torrent",
+			bindings, nil,
+		)
+	}
+	freshDuplicate, err := executor.duplicates.DuplicateCheck(ctx, bindings.Target, bindings.PriorDuplicateQuery, execution.Actor)
+	if err != nil {
+		code, message, _ := sites.ErrorDetails(err)
+		return nil, targetUploadReconciliationBlock(code, message, bindings, nil)
+	}
+	if err := validateTargetDuplicateEvidence(freshDuplicate, bindings.Target, bindings.PriorDuplicateQuery); err != nil ||
+		freshDuplicate.Adapter != bindings.Package.Adapter {
+		if err == nil {
+			err = fmt.Errorf("target reconciliation adapter does not match the immutable target package")
+		}
+		return nil, targetUploadReconciliationBlock("target_reconciliation_evidence_invalid", err.Error(), bindings, nil)
+	}
+	freshDuplicateArtifact, err := executor.persistPreuploadDuplicate(ctx, execution, bindings, freshDuplicate)
+	if err != nil {
+		return nil, targetUploadReconciliationBlock("target_reconciliation_persistence_failed", err.Error(), bindings, nil)
+	}
+	matched := false
+	for _, candidate := range freshDuplicate.Candidates {
+		if candidate.ID == reconciliation.ObservedTorrentID {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return nil, targetUploadReconciliationBlock(
+			"target_reconciliation_candidate_not_found",
+			"the fresh target search did not contain the operator-confirmed torrent id; no upload was attempted",
+			bindings, &freshDuplicateArtifact,
+		)
+	}
+	upload := sites.TargetUploadEvidence{
+		SiteCode: bindings.Target, Adapter: bindings.Package.Adapter,
+		ConfigurationSHA256: freshDuplicate.ConfigurationSHA256,
+		TorrentID:           reconciliation.ObservedTorrentID,
+		DetailsURL:          "https://kp.m-team.cc/details/" + reconciliation.ObservedTorrentID,
+		ResponseSHA256:      reconciliation.EvidenceSHA256,
+		SubmittedAt:         observedAt.UTC(),
+	}
+	if err := validateTargetUploadEvidence(upload, bindings); err != nil {
+		return nil, targetUploadReconciliationBlock("target_reconciliation_evidence_invalid", err.Error(), bindings, &freshDuplicateArtifact)
+	}
+	recovery := &targetUploadRecoveryReceipt{
+		Recovered: true, Decision: reconciliation.Decision, AttemptID: reconciliation.AttemptID,
+		EvidenceSHA256: reconciliation.EvidenceSHA256, ObservedAt: observedAt.UTC(),
+		ObservedTorrentID: reconciliation.ObservedTorrentID, SubmittedTorrentSHA256: reconciliation.SubmittedTorrentSHA256,
+	}
+	output, err := executor.persistUploadReceipt(ctx, execution, bindings, freshDuplicateArtifact, upload, recovery)
+	if err != nil {
+		return nil, targetUploadReconciliationBlock("target_reconciliation_persistence_failed", err.Error(), bindings, &freshDuplicateArtifact)
+	}
+	return output, nil
+}
+
+func targetUploadReconciliationBlock(
+	code, message string,
+	bindings targetUploadBindings,
+	artifact *sites.TargetArtifactEvidence,
+) *BlockError {
+	parameters := map[string]any{
+		"site_code": bindings.Target, "torrent_id": bindings.Reconciliation.ObservedTorrentID,
+		"submitted_torrent_sha256": bindings.TargetTorrentArtifact.SHA256,
+	}
+	if artifact != nil {
+		parameters["artifact_id"] = artifact.ArtifactID
+		parameters["artifact_sha256"] = artifact.SHA256
+	}
+	return &BlockError{
+		Blockers: []Blocker{{Code: code, Message: message, SiteCode: bindings.Target}},
+		NextActions: []NextAction{{
+			Action: "review_target_reconciliation", Description: "Review the fresh target-search artifact and correct the reconciliation evidence before resuming; never retry the upload.",
+			Parameters: parameters,
+		}},
+		ResumeState: map[string]any{"reconciliation": bindings.Reconciliation, "confirm_upload": false},
+	}
+}
+
+func targetUploadPostWriteBlock(
+	message string,
+	bindings targetUploadBindings,
+	freshDuplicate sites.TargetArtifactEvidence,
+	upload sites.TargetUploadEvidence,
+) *BlockError {
+	parameters := map[string]any{
+		"site_code": bindings.Target, "submitted_torrent_sha256": bindings.TargetTorrentArtifact.SHA256,
+		"preupload_duplicate_check_sha256": freshDuplicate.SHA256,
+	}
+	if numericTorrentID(upload.TorrentID) {
+		parameters["observed_torrent_id"] = upload.TorrentID
+	}
+	if len(upload.ResponseSHA256) == 64 {
+		parameters["response_sha256"] = upload.ResponseSHA256
+	}
+	return &BlockError{
+		Blockers: []Blocker{{Code: "target_upload_outcome_unknown", Message: message, SiteCode: bindings.Target}},
+		NextActions: []NextAction{{
+			Action: "reconcile_target_upload", Description: "Do not retry the upload. Inspect the target site and reconcile the exact submitted torrent before resuming.",
+			Parameters: parameters,
+		}},
+		ResumeState: map[string]any{
+			"target_upload": map[string]any{
+				"outcome": "unreconciled", "submitted_torrent_sha256": bindings.TargetTorrentArtifact.SHA256,
+				"preupload_duplicate_check": freshDuplicate, "observed_torrent_id": upload.TorrentID,
+			},
+			"confirm_upload": false,
+		},
+	}
+}
+
+func numericTorrentID(value string) bool {
+	if value == "" || len(value) > 20 {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (executor targetUploadExecutor) inputs(snapshotBody json.RawMessage) (targetUploadBindings, error) {
 	var snapshot struct {
 		JobInput struct {
 			ConfirmUpload *bool `json:"confirm_upload"`
 		} `json:"job_input"`
 		ResumeState struct {
-			ConfirmUpload *bool `json:"confirm_upload"`
+			ConfirmUpload  *bool                      `json:"confirm_upload"`
+			Reconciliation targetUploadReconciliation `json:"reconciliation"`
 		} `json:"resume_state"`
 		PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
 	}
@@ -227,7 +410,10 @@ func (executor targetUploadExecutor) inputs(snapshotBody json.RawMessage) (targe
 	if !decodePrevious(snapshot.PreviousSteps, "source_parse", &parsed) || parsed.Target == "" {
 		return targetUploadBindings{}, fmt.Errorf("source_parse target evidence is missing")
 	}
-	bindings := targetUploadBindings{Target: strings.ToUpper(strings.TrimSpace(parsed.Target)), Confirmed: confirmed}
+	bindings := targetUploadBindings{
+		Target: strings.ToUpper(strings.TrimSpace(parsed.Target)), Confirmed: confirmed,
+		Reconciliation: snapshot.ResumeState.Reconciliation,
+	}
 
 	var packageOutput struct {
 		Prepared           bool   `json:"prepared"`

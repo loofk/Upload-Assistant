@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -185,11 +186,11 @@ func (s *Store) ReplayJob(
 
 	var originalKind string
 	var originalStatus JobStatus
-	var originalInput, originalBlockers json.RawMessage
+	var originalInput, originalBlockers, originalResumeState json.RawMessage
 	err = tx.QueryRow(ctx, `
-		SELECT kind, status, input, blockers
+		SELECT kind, status, input, blockers, resume_state
 		FROM jobs WHERE id = $1 FOR UPDATE`, originalJobID).Scan(
-		&originalKind, &originalStatus, &originalInput, &originalBlockers,
+		&originalKind, &originalStatus, &originalInput, &originalBlockers, &originalResumeState,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
@@ -232,6 +233,20 @@ func (s *Store) ReplayJob(
 		return Job{}, fmt.Errorf("inspect replay blockers: %w", err)
 	} else if blocker != "" {
 		return Job{}, fmt.Errorf("%w: blocker %s requires reconciliation on the original job", ErrReplayUnsafe, blocker)
+	}
+	if activeVerifiedUploadRecovery(originalResumeState) {
+		return Job{}, fmt.Errorf("%w: verified_uploaded recovery must finish or be cancelled on the original job", ErrReplayUnsafe)
+	}
+	var targetUploadCompleted bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM job_steps
+			WHERE job_id = $1 AND step_key = 'target_upload' AND status = 'complete'
+		)`, originalJobID).Scan(&targetUploadCompleted); err != nil {
+		return Job{}, fmt.Errorf("inspect replay external writes: %w", err)
+	}
+	if targetUploadCompleted {
+		return Job{}, fmt.Errorf("%w: a completed target upload cannot be replayed from the beginning", ErrReplayUnsafe)
 	}
 	var replayJobID string
 	err = tx.QueryRow(ctx, `
@@ -323,6 +338,17 @@ func unsafeReplayBlocker(body json.RawMessage) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func activeVerifiedUploadRecovery(body json.RawMessage) bool {
+	var state struct {
+		Reconciliation struct {
+			BlockerCode string `json:"blocker_code"`
+			Decision    string `json:"decision"`
+		} `json:"reconciliation"`
+	}
+	return json.Unmarshal(body, &state) == nil && state.Reconciliation.BlockerCode == "target_upload_outcome_unknown" &&
+		state.Reconciliation.Decision == "verified_uploaded"
 }
 
 func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
@@ -1034,13 +1060,15 @@ func (s *Store) ResumeJob(ctx context.Context, jobID string, resumeState json.Ra
 }
 
 type reconciliationInput struct {
-	BlockerCode    string `json:"blocker_code"`
-	AttemptID      string `json:"attempt_id"`
-	Decision       string `json:"decision"`
-	Confirmed      bool   `json:"confirmed"`
-	EvidenceSHA256 string `json:"evidence_sha256"`
-	ObservedAt     string `json:"observed_at"`
-	ObservedHash   string `json:"observed_hash,omitempty"`
+	BlockerCode            string `json:"blocker_code"`
+	AttemptID              string `json:"attempt_id"`
+	Decision               string `json:"decision"`
+	Confirmed              bool   `json:"confirmed"`
+	EvidenceSHA256         string `json:"evidence_sha256"`
+	ObservedAt             string `json:"observed_at"`
+	ObservedHash           string `json:"observed_hash,omitempty"`
+	ObservedTorrentID      string `json:"observed_torrent_id,omitempty"`
+	SubmittedTorrentSHA256 string `json:"submitted_torrent_sha256,omitempty"`
 }
 
 func addReconciliationTemplate(blockers, nextActions, resumeState json.RawMessage, attemptID string) (json.RawMessage, error) {
@@ -1055,6 +1083,16 @@ func addReconciliationTemplate(blockers, nextActions, resumeState json.RawMessag
 	template := map[string]any{
 		"blocker_code": blockerCode, "attempt_id": attemptID,
 		"decision": "unreconciled", "confirmed": false,
+	}
+	if blockerCode == "target_upload_outcome_unknown" {
+		var current struct {
+			TargetUpload struct {
+				SubmittedTorrentSHA256 string `json:"submitted_torrent_sha256"`
+			} `json:"target_upload"`
+		}
+		if json.Unmarshal(resumeState, &current) == nil && current.TargetUpload.SubmittedTorrentSHA256 != "" {
+			template["required_submitted_torrent_sha256"] = strings.ToLower(strings.TrimSpace(current.TargetUpload.SubmittedTorrentSHA256))
+		}
 	}
 	if blockerCode == "downloader_partial_add_requires_reconciliation" {
 		var actions []struct {
@@ -1083,7 +1121,24 @@ func validateResumeReconciliation(
 	if err != nil {
 		return nil, fmt.Errorf("inspect reconciliation blockers: %w", err)
 	}
+	var current map[string]json.RawMessage
+	if err := json.Unmarshal(currentResumeState, &current); err != nil {
+		return nil, fmt.Errorf("inspect current reconciliation state: %w", err)
+	}
 	if blockerCode == "" {
+		if activeVerifiedUploadRecovery(currentResumeState) {
+			var proposed map[string]json.RawMessage
+			if err := json.Unmarshal(proposedResumeState, &proposed); err != nil || proposed == nil {
+				return nil, fmt.Errorf("%w: recovery resume state must be a JSON object", ErrReconciliation)
+			}
+			if proposedReconciliation, exists := proposed["reconciliation"]; exists {
+				currentCanonical, currentErr := canonicalJSON(current["reconciliation"])
+				proposedCanonical, proposedErr := canonicalJSON(proposedReconciliation)
+				if currentErr != nil || proposedErr != nil || !bytes.Equal(currentCanonical, proposedCanonical) {
+					return nil, fmt.Errorf("%w: an active verified_uploaded recovery decision cannot be changed or downgraded", ErrReconciliation)
+				}
+			}
+		}
 		return nil, nil
 	}
 	var proposed map[string]json.RawMessage
@@ -1113,14 +1168,11 @@ func validateResumeReconciliation(
 		return nil, fmt.Errorf("%w: reconciliation.observed_at must be an RFC3339 time that is not in the future", ErrReconciliation)
 	}
 
-	var current map[string]json.RawMessage
-	if err := json.Unmarshal(currentResumeState, &current); err != nil {
-		return nil, fmt.Errorf("inspect current reconciliation state: %w", err)
-	}
 	var template struct {
-		BlockerCode          string `json:"blocker_code"`
-		AttemptID            string `json:"attempt_id"`
-		RequiredObservedHash string `json:"required_observed_hash"`
+		BlockerCode                    string `json:"blocker_code"`
+		AttemptID                      string `json:"attempt_id"`
+		RequiredObservedHash           string `json:"required_observed_hash"`
+		RequiredSubmittedTorrentSHA256 string `json:"required_submitted_torrent_sha256"`
 	}
 	if err := json.Unmarshal(current["reconciliation"], &template); err != nil || template.BlockerCode != blockerCode || template.AttemptID != currentAttemptID {
 		return nil, fmt.Errorf("%w: persisted reconciliation template is missing or stale", ErrReconciliation)
@@ -1128,8 +1180,16 @@ func validateResumeReconciliation(
 
 	switch blockerCode {
 	case "target_upload_outcome_unknown":
-		if reconciliation.Decision != "verified_not_applied" {
-			return nil, fmt.Errorf("%w: target upload unknown outcomes only support verified_not_applied before a fresh duplicate gate", ErrReconciliation)
+		switch reconciliation.Decision {
+		case "verified_not_applied":
+		case "verified_uploaded":
+			if !numericIdentifier(reconciliation.ObservedTorrentID, 20) ||
+				template.RequiredSubmittedTorrentSHA256 == "" ||
+				reconciliation.SubmittedTorrentSHA256 != template.RequiredSubmittedTorrentSHA256 {
+				return nil, fmt.Errorf("%w: verified_uploaded must bind a numeric target torrent id and the exact submitted torrent SHA-256", ErrReconciliation)
+			}
+		default:
+			return nil, fmt.Errorf("%w: target upload reconciliation only supports verified_not_applied or verified_uploaded", ErrReconciliation)
 		}
 	case "downloader_partial_add_requires_reconciliation":
 		if reconciliation.Decision != "verified_remote_state" || template.RequiredObservedHash == "" ||
@@ -1143,9 +1203,24 @@ func validateResumeReconciliation(
 	return map[string]any{
 		"blocker_code": blockerCode, "attempt_id": currentAttemptID, "decision": reconciliation.Decision,
 		"evidence_sha256": reconciliation.EvidenceSHA256, "observed_at": observedAt.UTC().Format(time.RFC3339),
-		"observed_hash":         strings.ToLower(strings.TrimSpace(reconciliation.ObservedHash)),
-		"reconciliation_sha256": sha256Hex(reconciliationHashBody),
+		"observed_hash":            strings.ToLower(strings.TrimSpace(reconciliation.ObservedHash)),
+		"observed_torrent_id":      strings.TrimSpace(reconciliation.ObservedTorrentID),
+		"submitted_torrent_sha256": strings.ToLower(strings.TrimSpace(reconciliation.SubmittedTorrentSHA256)),
+		"reconciliation_sha256":    sha256Hex(reconciliationHashBody),
 	}, nil
+}
+
+func numericIdentifier(value string, maxLength int) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > maxLength {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) CancelJob(ctx context.Context, jobID string, actor Actor) (Job, error) {
