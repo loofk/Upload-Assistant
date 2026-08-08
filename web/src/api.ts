@@ -11,6 +11,7 @@ import type {
   ImageHost,
 	MediaManager,
 	MetadataProvider,
+	Notification,
 	NotificationChannel,
   JobEnvelope,
   JobListEnvelope,
@@ -112,6 +113,21 @@ export class ApiClient {
 
   async listNotifications(): Promise<NotificationListEnvelope> {
     return this.request("/api/v2/notifications?limit=25");
+  }
+
+  async reconcileNotification(notificationID: string, input: {
+    decision: "verified_not_delivered" | "verified_delivered";
+    evidenceSHA256: string;
+    observedAt: string;
+    messageID?: string;
+  }): Promise<{ok: true; status: "queued" | "sent"; notification_id: string; notification: Notification}> {
+    return this.request(`/api/v2/notifications/${encodeURIComponent(notificationID)}/reconcile`, {
+      method: "POST",
+      body: JSON.stringify({
+        decision: input.decision, confirmed: true, evidence_sha256: input.evidenceSHA256,
+        observed_at: input.observedAt, ...(input.messageID ? {message_id: input.messageID} : {}),
+      }),
+    });
   }
 
   async listAuditEvents(options: {

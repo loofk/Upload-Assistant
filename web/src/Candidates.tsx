@@ -110,6 +110,34 @@ export default function Candidates({client, onJobCreated, onError}: {
     }
   };
 
+  const reconcileNotification = async (notification: Notification, decision: "verified_not_delivered" | "verified_delivered") => {
+    const evidenceSHA256 = window.prompt("输入人工核对证据的 lowercase SHA-256；不会上传证据原文。")?.trim() ?? "";
+    if (!/^[a-f0-9]{64}$/.test(evidenceSHA256)) {
+      onError(new Error("通知对账需要合法的 lowercase SHA-256。"));
+      return;
+    }
+    const messageID = decision === "verified_delivered" ? window.prompt("输入已在 Discord 观察到的精确数字 message_id。")?.trim() ?? "" : undefined;
+    if (decision === "verified_delivered" && !/^[0-9]{1,30}$/.test(messageID ?? "")) {
+      onError(new Error("verified_delivered 需要精确的数字 message_id。"));
+      return;
+    }
+    const confirmation = decision === "verified_delivered"
+      ? "确认该消息已送达？系统只记录远端回执，绝不会再次调用 webhook。"
+      : "确认该消息未送达并允许一次显式重试？这可能产生一条新的 Discord 消息。";
+    if (!window.confirm(confirmation)) return;
+    setBusy(true);
+    try {
+      await client.reconcileNotification(notification.id, {
+        decision, evidenceSHA256, observedAt: new Date().toISOString(), messageID,
+      });
+      await load();
+    } catch (reason) {
+      onError(reason);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const selected = items.filter((item) => item.rank != null).length;
   const submittable = items.filter((item) => item.status === "candidate" && item.rank != null).length;
   const blocked = items.filter((item) => item.status === "blocked" || item.status === "expired").length;
@@ -158,6 +186,10 @@ export default function Candidates({client, onJobCreated, onError}: {
         {notifications.slice(0, 5).map((notification) => <article key={notification.id}>
           <span>{notificationLabel(notification)} · {notification.channel} · {notification.status}</span><code>{notification.job_id?.slice(0, 8) || "无任务"}</code>
           <time>{new Date(notification.created_at).toLocaleString("zh-CN")}</time>
+		  {notification.status === "outcome_unknown" && <div className="schedule-actions">
+			<button className="ghost compact" disabled={busy} onClick={() => void reconcileNotification(notification, "verified_not_delivered")}>确认未送达并重试</button>
+			<button className="ghost compact" disabled={busy} onClick={() => void reconcileNotification(notification, "verified_delivered")}>确认已送达</button>
+		  </div>}
         </article>)}
         {notifications.length === 0 && <p>暂无已完成的调度通知。</p>}
       </div>

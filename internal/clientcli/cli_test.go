@@ -172,6 +172,31 @@ func TestAuditListUsesExactFiltersAndStableCursor(t *testing.T) {
 	}
 }
 
+func TestNotificationReconciliationSendsExplicitEvidence(t *testing.T) {
+	id := "77777777-7777-4777-8777-777777777777"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v2/notifications/"+id+"/reconcile" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		body, _ := io.ReadAll(request.Body)
+		var payload map[string]any
+		if json.Unmarshal(body, &payload) != nil || payload["decision"] != "verified_delivered" || payload["confirmed"] != true || payload["message_id"] != "1234567890" || payload["evidence_sha256"] != strings.Repeat("a", 64) {
+			t.Fatalf("reconciliation payload = %s", body)
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"sent","notification_id":"` + id + `"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--api-url", server.URL, "notifications", "reconcile", id,
+		"--decision", "verified_delivered", "--evidence-sha256", strings.Repeat("a", 64),
+		"--observed-at", "2026-08-08T12:00:00Z", "--message-id", "1234567890", "--confirm",
+	}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"status": "sent"`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func TestJobAttemptsUsesOpaquePaginationCursor(t *testing.T) {
 	jobID := "00000000-0000-0000-0000-000000000001"
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

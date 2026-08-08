@@ -8,7 +8,7 @@ Upload Assistant 是面向中文 PT 圈的本地转种、发种与每日候选�
 
 - `/api/v2` 任务 API：`queued/running/paused/blocked/failed/complete/cancelled`，支持逐步暂停、恢复、重试与幂等创建。
 - U2/CHD → MTEAM 参考闭环：源站识别/拉种、远程下载器、MediaInfo/BDInfo/截图、imgbb/PTPimg、目标查重/上传、新种下载/注入、做种核验与最终 summary。
-- PostgreSQL 持久调度：每日候选、排名、风险/阻塞、通知、运行历史与崩溃后租约接管。
+- PostgreSQL 持久调度：每日候选、排名、风险/阻塞、通知、运行历史与崩溃后租约接管；通知写入结果不明时禁止盲重试并要求显式对账。
 - 独立集成配置：qBittorrent、Transmission、rTorrent、Deluge Web、imgbb、PTPimg、截图策略、Discord webhook、Sonarr/Radarr，以及显式 TMDb/PTGen 元数据 provider。
 - Markdown 站点规则：结构化 front matter、原始规则文本、不可变版本、fingerprint、人工审批和激活。
 - 审计：每个任务的 hash 链、artifact SHA-256，以及配置和外部动作的全局脱敏日志。

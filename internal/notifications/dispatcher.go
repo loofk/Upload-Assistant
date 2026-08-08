@@ -20,7 +20,10 @@ import (
 
 const maxDiscordResponseBytes = 256 << 10
 
-var ErrNoDelivery = errors.New("no notification delivery is ready")
+var (
+	ErrNoDelivery             = errors.New("no notification delivery is ready")
+	ErrDeliveryOutcomeUnknown = errors.New("notification delivery outcome is unknown")
+)
 
 type Delivery struct {
 	ID          string
@@ -33,6 +36,7 @@ type DeliveryStore interface {
 	Claim(context.Context, string, time.Time, time.Duration) (Delivery, error)
 	Complete(context.Context, string, string, map[string]any) error
 	Fail(context.Context, string, string, time.Time, time.Duration) error
+	MarkOutcomeUnknown(context.Context, string, string, map[string]any) error
 	GetRuntimeNotificationChannel(context.Context, string) (integrations.RuntimeNotificationChannel, error)
 }
 
@@ -94,8 +98,20 @@ func (dispatcher *Dispatcher) RunOnce(ctx context.Context) error {
 		receipt, err := dispatcher.deliver(ctx, delivery)
 		if err == nil {
 			if err := dispatcher.store.Complete(ctx, delivery.ID, dispatcher.owner, receipt); err != nil {
-				return err
+				if retryErr := dispatcher.store.Complete(ctx, delivery.ID, dispatcher.owner, receipt); retryErr == nil {
+					continue
+				} else if unknownErr := dispatcher.store.MarkOutcomeUnknown(ctx, delivery.ID, dispatcher.owner, receipt); unknownErr != nil {
+					return fmt.Errorf("persist notification receipt: %v; local retry: %v; preserve unknown outcome: %w", err, retryErr, unknownErr)
+				}
+				dispatcher.logger.Warn("notification delivered but local completion failed; automatic retry disabled", "notification_id", delivery.ID, "channel", delivery.ChannelName)
 			}
+			continue
+		}
+		if errors.Is(err, ErrDeliveryOutcomeUnknown) {
+			if unknownErr := dispatcher.store.MarkOutcomeUnknown(ctx, delivery.ID, dispatcher.owner, receipt); unknownErr != nil {
+				return unknownErr
+			}
+			dispatcher.logger.Warn("notification outcome is unknown; automatic retry disabled", "notification_id", delivery.ID, "channel", delivery.ChannelName, "attempt", delivery.Attempts)
 			continue
 		}
 		retry := time.Duration(1<<min(delivery.Attempts-1, 6)) * time.Minute
@@ -127,6 +143,11 @@ func (dispatcher *Dispatcher) deliver(ctx context.Context, delivery Delivery) (m
 		return nil, err
 	}
 	body, _ := json.Marshal(message)
+	evidence := map[string]any{
+		"adapter": runtime.Adapter, "payload_sha256": sha256Hex(delivery.Payload),
+		"request_sha256": sha256Hex(body), "configuration_sha256": runtime.ConfigurationSHA256,
+		"attempted_at": dispatcher.now().UTC().Format(time.RFC3339Nano),
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, time.Duration(runtime.ChannelConfig.TimeoutSeconds)*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, webhook.String(), bytes.NewReader(body))
@@ -137,31 +158,45 @@ func (dispatcher *Dispatcher) deliver(ctx context.Context, delivery Delivery) (m
 	request.Header.Set("Content-Type", "application/json")
 	response, err := dispatcher.client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("notification request failed")
+		return evidence, fmt.Errorf("%w: notification request ended without a response", ErrDeliveryOutcomeUnknown)
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxDiscordResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read notification response: %w", err)
+		return evidence, fmt.Errorf("%w: notification response is unreadable", ErrDeliveryOutcomeUnknown)
 	}
 	if len(responseBody) > maxDiscordResponseBytes {
-		return nil, fmt.Errorf("notification response is too large")
+		return evidence, fmt.Errorf("%w: notification response is too large", ErrDeliveryOutcomeUnknown)
 	}
+	evidence["response_sha256"] = sha256Hex(responseBody)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if response.StatusCode >= 500 {
+			return evidence, fmt.Errorf("%w: notification endpoint returned HTTP %d", ErrDeliveryOutcomeUnknown, response.StatusCode)
+		}
 		return nil, fmt.Errorf("notification endpoint returned HTTP %d", response.StatusCode)
 	}
 	var remote struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(responseBody, &remote); err != nil || strings.TrimSpace(remote.ID) == "" {
-		return nil, fmt.Errorf("notification endpoint returned an incomplete receipt")
+	if err := json.Unmarshal(responseBody, &remote); err != nil || !numericDiscordMessageID(remote.ID) {
+		return evidence, fmt.Errorf("%w: notification endpoint returned an incomplete success receipt", ErrDeliveryOutcomeUnknown)
 	}
-	return map[string]any{
-		"adapter": runtime.Adapter, "message_id": cleanID(remote.ID),
-		"payload_sha256": sha256Hex(delivery.Payload), "request_sha256": sha256Hex(body),
-		"response_sha256": sha256Hex(responseBody), "configuration_sha256": runtime.ConfigurationSHA256,
-		"delivered_at": dispatcher.now().UTC().Format(time.RFC3339Nano),
-	}, nil
+	evidence["message_id"] = cleanID(remote.ID)
+	evidence["delivered_at"] = dispatcher.now().UTC().Format(time.RFC3339Nano)
+	return evidence, nil
+}
+
+func numericDiscordMessageID(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 30 {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func discordMessage(payload json.RawMessage) (map[string]any, error) {

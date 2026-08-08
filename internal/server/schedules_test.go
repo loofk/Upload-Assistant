@@ -19,6 +19,7 @@ type fakeScheduleService struct {
 	schedule      schedules.Schedule
 	schedules     []schedules.Schedule
 	notifications []schedules.Notification
+	reconciled    schedules.NotificationReconciliationInput
 	runs          []schedules.Run
 }
 
@@ -35,6 +36,10 @@ func (service *fakeScheduleService) Update(_ context.Context, id string, input s
 }
 func (service *fakeScheduleService) ListNotifications(context.Context, int) ([]schedules.Notification, error) {
 	return service.notifications, nil
+}
+func (service *fakeScheduleService) ReconcileNotification(_ context.Context, id string, input schedules.NotificationReconciliationInput, _ time.Time) (schedules.Notification, error) {
+	service.reconciled = input
+	return schedules.Notification{ID: id, Channel: "discord-main", Status: "sent", Payload: json.RawMessage(`{}`), RemoteReceipt: json.RawMessage(`{"message_id":"123"}`)}, nil
 }
 func (service *fakeScheduleService) ListRuns(context.Context, string, int) ([]schedules.Run, error) {
 	return service.runs, nil
@@ -73,14 +78,30 @@ func TestUpdateDailyScheduleCanDisableIt(t *testing.T) {
 
 func TestNotificationsRedactEmbeddedSecrets(t *testing.T) {
 	service := &fakeScheduleService{notifications: []schedules.Notification{{
-		ID: "notification", Channel: "in_app", Status: "sent",
+		ID: "notification", Channel: "discord-main", Status: "outcome_unknown",
 		Payload: json.RawMessage(`{"job_id":"job","source_url":"https://example.invalid/details?id=1&passkey=do-not-return"}`),
 	}}}
 	request := candidateRequest(http.MethodGet, "/api/v2/notifications", "", "jobs:read")
 	response := httptest.NewRecorder()
 	(scheduleAPI{service: service}).notifications(response, request)
-	if response.Code != http.StatusOK || bytes.Contains(response.Body.Bytes(), []byte("do-not-return")) {
+	if response.Code != http.StatusOK || bytes.Contains(response.Body.Bytes(), []byte("do-not-return")) ||
+		!bytes.Contains(response.Body.Bytes(), []byte("notification_delivery_outcome_unknown")) || !bytes.Contains(response.Body.Bytes(), []byte("reconcile_notification")) {
 		t.Fatalf("notification response = %d/%s", response.Code, response.Body.String())
+	}
+}
+
+func TestNotificationReconciliationRequiresExplicitEvidenceAndActor(t *testing.T) {
+	id := "77777777-7777-4777-8777-777777777777"
+	service := &fakeScheduleService{}
+	request := candidateRequest(http.MethodPost, "/api/v2/notifications/"+id+"/reconcile", `{
+		"decision":"verified_delivered","confirmed":true,"evidence_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"observed_at":"2026-08-08T12:00:00Z","message_id":"123"
+	}`, "jobs:write")
+	request.SetPathValue("notification_id", id)
+	response := httptest.NewRecorder()
+	(scheduleAPI{service: service}).reconcileNotification(response, request)
+	if response.Code != http.StatusOK || service.reconciled.ActorID == "" || service.reconciled.MessageID != "123" || !bytes.Contains(response.Body.Bytes(), []byte(`"status":"sent"`)) {
+		t.Fatalf("notification reconciliation = %d/%s/%#v", response.Code, response.Body.String(), service.reconciled)
 	}
 }
 

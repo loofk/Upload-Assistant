@@ -99,3 +99,12 @@ type Notification struct {
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 }
+
+type NotificationReconciliationInput struct {
+	Decision       string `json:"decision"`
+	Confirmed      bool   `json:"confirmed"`
+	EvidenceSHA256 string `json:"evidence_sha256"`
+	ObservedAt     string `json:"observed_at"`
+	MessageID      string `json:"message_id,omitempty"`
+	ActorID        string `json:"-"`
+}

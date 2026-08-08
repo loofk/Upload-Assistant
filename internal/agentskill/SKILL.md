@@ -76,7 +76,7 @@ Rule changes follow an immutable review sequence: import Markdown as a draft, in
 
 Credentials are write-only inputs. Confirm successful storage from redacted API responses; never try to read secrets back. Keep downloader path mappings explicit and validate them before running jobs.
 
-Discord uses an encrypted incoming `webhook_url`, not the legacy bot token. Select channel names explicitly in `DailyCandidateScheduleConfig.notification_channels`. Inspect `status`, `attempts`, `payload_sha256`, and `remote_receipt` in `/api/v2/notifications`; retry state never authorizes candidate submission or upload.
+Discord uses an encrypted incoming `webhook_url`, not the legacy bot token. Select channel names explicitly in `DailyCandidateScheduleConfig.notification_channels`. Inspect `status`, `attempts`, `payload_sha256`, and `remote_receipt` in `/api/v2/notifications`. Never retry `outcome_unknown`: call `POST /api/v2/notifications/{notification_id}/reconcile` only with operator-confirmed evidence; `verified_not_delivered` permits one queued retry, while `verified_delivered` requires the exact numeric Discord message ID and performs no webhook call. Notification state never authorizes candidate submission or upload.
 
 Sonarr and Radarr are independent read-only metadata helpers. Configure each v3 base endpoint and encrypted `api_key`, explicitly probe it before relying on it, then use lookup with Sonarr `tvdb_id` or `path` plus `title`, or Radarr `tmdb_id` or exact `path`. Treat `matched=false` as a normal miss and continue with other metadata sources. Audit records intentionally store query/response hashes and normalized IDs instead of paths or raw responses.
 

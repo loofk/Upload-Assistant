@@ -131,9 +131,9 @@ var adapterCatalog = []AdapterCapability{
 	},
 	{
 		ID: "notification_channel/discord_webhook", Kind: "notification_channel", Adapter: "discord_webhook", DisplayName: "Discord Incoming Webhook",
-		RuntimeSupported: true, Operations: []string{"deliver_candidate_summary", "retry_delivery"}, CredentialFields: []string{"webhook_url"},
-		SafetyGates: []string{"explicit_schedule_opt_in", "mentions_disabled", "payload_hash", "remote_receipt_hash"},
-		Constraints: []string{"candidate discovery notifications only; delivery never submits or uploads a torrent", "redirects are disabled and responses are bounded"},
+		RuntimeSupported: true, Operations: []string{"deliver_candidate_summary", "reconcile_unknown_delivery", "retry_known_rejection"}, CredentialFields: []string{"webhook_url"},
+		SafetyGates: []string{"delivery_intent_audit", "explicit_schedule_opt_in", "mentions_disabled", "outcome_reconciliation", "payload_hash", "remote_receipt_hash"},
+		Constraints: []string{"candidate discovery notifications only; delivery never submits or uploads a torrent", "redirects are disabled and responses are bounded", "response loss and expired sending leases never auto-retry"},
 	},
 	{
 		ID: "screenshot_engine/ffmpeg", Kind: "screenshot_engine", Adapter: "ffmpeg", DisplayName: "FFmpeg",

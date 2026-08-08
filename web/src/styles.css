@@ -339,6 +339,7 @@ td code { color: #a7d7c1; }
 .candidate-notifications article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; padding: 7px; background: #07120e; border-radius: 7px; font-size: 8px; }
 .candidate-notifications article span { overflow-wrap: anywhere; }
 .candidate-notifications article time { grid-column: 1 / -1; color: var(--quiet); }
+.candidate-notifications article .schedule-actions { grid-column: 1 / -1; }
 .compact-empty { min-height: 60px; padding: 12px; }
 .candidate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .candidate-card { min-width: 0; padding: 17px; background: linear-gradient(145deg, #0c1915, #09130f); border: 1px solid var(--line); border-radius: 12px; }

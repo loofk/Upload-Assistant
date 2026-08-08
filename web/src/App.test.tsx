@@ -227,6 +227,33 @@ describe("App authentication boundary", () => {
 	expect(screen.getByText("目标查重通过")).toBeInTheDocument();
   });
 
+  it("requires operator evidence before retrying an unknown Discord delivery", async () => {
+	sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+	const notificationID = "77777777-7777-4777-8777-777777777777";
+	const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+	  const path = String(input);
+	  const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+		: path.startsWith("/api/v2/candidates/daily?") ? {ok: true, status: "ready", date: "2026-08-08", count: 0, ready_count: 0, blockers: [], next_actions: [], candidates: []}
+		: path.startsWith("/api/v2/schedules/daily-candidates?") ? {ok: true, status: "ready", count: 0, schedules: [], blockers: [], next_actions: []}
+		: path.startsWith("/api/v2/notifications?") ? {ok: true, status: "ready", count: 1, blockers: [], next_actions: [], notifications: [{
+		  id: notificationID, channel: "discord-main", status: "outcome_unknown", payload: {}, remote_receipt: {}, attempts: 1,
+		  scheduled_at: "2026-08-08T00:00:00Z", created_at: "2026-08-08T00:00:00Z", updated_at: "2026-08-08T00:00:00Z",
+		}]}
+		: path === `/api/v2/notifications/${notificationID}/reconcile` && init?.method === "POST" ? {ok: true, status: "queued", notification_id: notificationID, notification: {id: notificationID, status: "queued"}, blockers: [], next_actions: []}
+		: {};
+	  return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	vi.spyOn(window, "prompt").mockReturnValue("a".repeat(64));
+	vi.spyOn(window, "confirm").mockReturnValue(true);
+	render(<App />);
+	await userEvent.click(screen.getByRole("button", {name: "每日候选"}));
+	await userEvent.click(await screen.findByRole("button", {name: "确认未送达并重试"}));
+	await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => path === `/api/v2/notifications/${notificationID}/reconcile` && init?.method === "POST")).toBe(true));
+	const call = fetchMock.mock.calls.find(([path, init]) => path === `/api/v2/notifications/${notificationID}/reconcile` && init?.method === "POST");
+	expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({decision: "verified_not_delivered", confirmed: true, evidence_sha256: "a".repeat(64)});
+  });
+
   it("requires reviewed legacy fingerprint before migration", async () => {
     sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
     const fingerprint = "a".repeat(64);

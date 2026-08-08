@@ -16,6 +16,7 @@ type ScheduleService interface {
 	Update(context.Context, string, schedules.UpdateInput, time.Time) (schedules.Schedule, error)
 	ListRuns(context.Context, string, int) ([]schedules.Run, error)
 	ListNotifications(context.Context, int) ([]schedules.Notification, error)
+	ReconcileNotification(context.Context, string, schedules.NotificationReconciliationInput, time.Time) (schedules.Notification, error)
 }
 
 type scheduleAPI struct{ service ScheduleService }
@@ -42,6 +43,7 @@ func registerScheduleRoutes(mux *http.ServeMux, service ScheduleService) {
 	mux.HandleFunc("PATCH /api/v2/schedules/daily-candidates/{schedule_id}", api.update)
 	mux.HandleFunc("GET /api/v2/schedules/daily-candidates/{schedule_id}/runs", api.runs)
 	mux.HandleFunc("GET /api/v2/notifications", api.notifications)
+	mux.HandleFunc("POST /api/v2/notifications/{notification_id}/reconcile", api.reconcileNotification)
 }
 
 func (api scheduleAPI) runs(w http.ResponseWriter, r *http.Request) {
@@ -173,9 +175,64 @@ func (api scheduleAPI) notifications(w http.ResponseWriter, r *http.Request) {
 		items[index].Payload = redactJSON(items[index].Payload)
 		items[index].RemoteReceipt = redactJSON(items[index].RemoteReceipt)
 	}
+	blockers := []map[string]any{}
+	nextActions := []map[string]any{}
+	for _, item := range items {
+		if item.Status == "outcome_unknown" {
+			blockers = append(blockers, map[string]any{
+				"code": "notification_delivery_outcome_unknown", "message": "Discord delivery must be reconciled before any retry",
+				"notification_id": item.ID, "channel": item.Channel,
+			})
+			nextActions = append(nextActions, map[string]any{
+				"action": "reconcile_notification", "parameters": map[string]any{"notification_id": item.ID},
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "status": "ready", "count": len(items), "notifications": items,
-		"blockers": []any{}, "next_actions": []any{},
+		"blockers": blockers, "next_actions": nextActions,
+	})
+}
+
+func (api scheduleAPI) reconcileNotification(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "jobs:write")
+	if !ok {
+		return
+	}
+	id := r.PathValue("notification_id")
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_notification_id", "notification_id must be a UUID")
+		return
+	}
+	var request schedules.NotificationReconciliationInput
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	request.ActorID = principal.UserID
+	item, err := api.service.ReconcileNotification(r.Context(), id, request, time.Now().UTC())
+	if err != nil {
+		switch {
+		case errors.Is(err, schedules.ErrNotFound):
+			writeProblem(w, http.StatusNotFound, "notification_not_found", "notification was not found")
+		case errors.Is(err, schedules.ErrConflict):
+			writeProblem(w, http.StatusConflict, "notification_reconciliation_conflict", "only an outcome_unknown notification can be reconciled")
+		case errors.Is(err, schedules.ErrInvalid):
+			writeProblem(w, http.StatusBadRequest, "invalid_notification_reconciliation", err.Error())
+		default:
+			writeProblem(w, http.StatusInternalServerError, "internal_error", "notification reconciliation could not be completed")
+		}
+		return
+	}
+	item.Payload = redactJSON(item.Payload)
+	item.RemoteReceipt = redactJSON(item.RemoteReceipt)
+	nextActions := []any{}
+	if item.Status == "queued" {
+		nextActions = []any{map[string]any{"action": "wait_for_notification_delivery", "parameters": map[string]any{"notification_id": item.ID}}}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": item.Status, "notification_id": item.ID, "notification": item,
+		"blockers": []any{}, "next_actions": nextActions,
 	})
 }
 

@@ -148,6 +148,15 @@
         "responses": {"200": {"description": "Redacted in-app and external delivery audit", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/notifications/{notification_id}/reconcile": {
+      "post": {
+        "operationId": "reconcileNotification",
+        "description": "Resolves an outcome_unknown external notification. verified_not_delivered explicitly permits one queued retry; verified_delivered records the observed Discord message without another webhook call.",
+        "parameters": [{"name": "notification_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationReconciliationRequest"}}}},
+        "responses": {"200": {"description": "Notification reconciled without an implicit remote retry", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/audit-events": {
       "get": {
         "operationId": "listAuditEvents",
@@ -762,9 +771,33 @@
         "properties": {
           "id": {"type": "string", "format": "uuid"}, "schedule_run_id": {"type": "string", "format": "uuid"},
           "job_id": {"type": "string", "format": "uuid"}, "notification_channel_id": {"type": "string", "format": "uuid"}, "channel": {"type": "string"},
-          "status": {"type": "string", "enum": ["queued", "sending", "sent", "failed", "cancelled"]}, "payload": {"type": "object"}, "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "remote_receipt": {"type": "object"}, "attempts": {"type": "integer"},
+          "status": {"type": "string", "enum": ["queued", "sending", "sent", "failed", "outcome_unknown", "cancelled"]}, "payload": {"type": "object"}, "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "remote_receipt": {"type": "object"}, "attempts": {"type": "integer"},
           "last_error": {"type": "string"}, "scheduled_at": {"type": "string", "format": "date-time"},
           "sent_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "NotificationReconciliationRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["decision", "confirmed", "evidence_sha256", "observed_at"],
+        "properties": {
+          "decision": {"type": "string", "enum": ["verified_not_delivered", "verified_delivered"]},
+          "confirmed": {"type": "boolean", "const": true},
+          "evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "message_id": {"type": "string", "pattern": "^[0-9]{1,30}$", "description": "Required only for verified_delivered."}
+        },
+        "oneOf": [
+          {"not": {"required": ["message_id"]}, "properties": {"decision": {"const": "verified_not_delivered"}}},
+          {"required": ["message_id"], "properties": {"decision": {"const": "verified_delivered"}}}
+        ]
+      },
+      "NotificationEnvelope": {
+        "type": "object", "required": ["ok", "status", "notification_id", "notification", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true}, "status": {"type": "string", "enum": ["queued", "sent"]},
+          "notification_id": {"type": "string", "format": "uuid"}, "notification": {"$ref": "#/components/schemas/Notification"},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
         }
       },
       "NotificationListEnvelope": {

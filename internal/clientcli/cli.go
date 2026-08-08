@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -601,12 +602,76 @@ func (r runner) integrations(ctx context.Context, args []string) (json.RawMessag
 }
 
 func (r runner) notifications(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) > 0 && args[0] == "reconcile" {
+		if len(args) < 2 {
+			return nil, errors.New("usage: notifications reconcile NOTIFICATION_ID --decision verified_not_delivered|verified_delivered --evidence-sha256 SHA256 --observed-at RFC3339 --confirm [--message-id ID]")
+		}
+		id, err := validUUID(args[1], "notification ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("notifications reconcile")
+		decision := flags.String("decision", "", "verified_not_delivered or verified_delivered")
+		evidence := flags.String("evidence-sha256", "", "lowercase SHA-256 of reviewed evidence")
+		observed := flags.String("observed-at", "", "RFC3339 observation time")
+		messageID := flags.String("message-id", "", "numeric Discord message id for verified_delivered")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm the reconciliation decision")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if *decision != "verified_not_delivered" && *decision != "verified_delivered" {
+			return nil, errors.New("--decision must be verified_not_delivered or verified_delivered")
+		}
+		if !*confirmed {
+			return nil, errors.New("notification reconciliation requires --confirm")
+		}
+		if !validLowerSHA256(*evidence) {
+			return nil, errors.New("--evidence-sha256 must be a lowercase SHA-256")
+		}
+		observedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(*observed))
+		if err != nil || observedAt.IsZero() {
+			return nil, errors.New("--observed-at must be an RFC3339 timestamp")
+		}
+		if *decision == "verified_delivered" && !numericID(*messageID, 30) {
+			return nil, errors.New("verified_delivered requires a numeric --message-id")
+		}
+		body := map[string]any{
+			"decision": *decision, "confirmed": true, "evidence_sha256": *evidence,
+			"observed_at": observedAt.UTC().Format(time.RFC3339),
+		}
+		if strings.TrimSpace(*messageID) != "" {
+			body["message_id"] = strings.TrimSpace(*messageID)
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/notifications/"+id+"/reconcile", nil, body, nil, true)
+	}
 	flags := newFlags("notifications")
 	limit := flags.Int("limit", 25, "result limit")
 	if err := parseFlags(flags, args); err != nil {
 		return nil, err
 	}
 	return r.request(ctx, http.MethodGet, "/api/v2/notifications", url.Values{"limit": []string{strconv.Itoa(*limit)}}, nil, nil, true)
+}
+
+func validLowerSHA256(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 64 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func numericID(value string, max int) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > max {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (r runner) audit(ctx context.Context, args []string) (json.RawMessage, error) {
@@ -925,6 +990,7 @@ Usage:
   upload-assistant cli [global options] rules active SITE
   upload-assistant cli [global options] integrations list COLLECTION
   upload-assistant cli [global options] notifications [--limit N]
+  upload-assistant cli [global options] notifications reconcile NOTIFICATION_ID --decision DECISION --evidence-sha256 SHA256 --observed-at RFC3339 --confirm [--message-id ID]
   upload-assistant cli [global options] audit list [filters]
   upload-assistant cli [global options] readiness live --source U2|CHD --target MTEAM --downloader NAME --image-host NAME --screenshot-profile NAME --tmdb-provider NAME --ptgen-provider NAME
   upload-assistant cli [global options] shell

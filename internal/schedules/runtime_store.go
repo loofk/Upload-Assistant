@@ -251,7 +251,8 @@ func (s *Store) PublishTerminalNotifications(ctx context.Context, limit int) (in
 			DO UPDATE SET job_id = EXCLUDED.job_id, channel = EXCLUDED.channel, status = 'queued',
 			              payload = EXCLUDED.payload, payload_sha256 = EXCLUDED.payload_sha256, attempts = 0,
 			              last_error = NULL, sent_at = NULL, remote_receipt = '{}', scheduled_at = now(),
-			              lease_owner = NULL, lease_expires_at = NULL, updated_at = now()`,
+			              lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+			WHERE notifications.status NOT IN ('sending', 'outcome_unknown')`,
 			value.runID, value.jobID, payload, payloadSHA256, value.scheduleID)
 		if err != nil {
 			return published, fmt.Errorf("enqueue external schedule notifications: %w", err)
@@ -293,4 +294,132 @@ func (s *Store) ListNotifications(ctx context.Context, limit int) ([]Notificatio
 		return nil, fmt.Errorf("iterate in-app notifications: %w", err)
 	}
 	return result, nil
+}
+
+func (s *Store) ReconcileNotification(ctx context.Context, id string, input NotificationReconciliationInput, now time.Time) (Notification, error) {
+	input.Decision = strings.TrimSpace(input.Decision)
+	input.EvidenceSHA256 = strings.TrimSpace(input.EvidenceSHA256)
+	input.MessageID = strings.TrimSpace(input.MessageID)
+	input.ActorID = strings.TrimSpace(input.ActorID)
+	observedAt, observedErr := time.Parse(time.RFC3339, strings.TrimSpace(input.ObservedAt))
+	if !input.Confirmed || input.ActorID == "" || !lowerSHA256(input.EvidenceSHA256) || observedErr != nil ||
+		observedAt.IsZero() || observedAt.After(now.Add(5*time.Minute)) {
+		return Notification{}, fmt.Errorf("%w: notification reconciliation requires confirmation, a lowercase evidence SHA-256, and a non-future RFC3339 observed_at", ErrInvalid)
+	}
+	if input.Decision != "verified_not_delivered" && input.Decision != "verified_delivered" {
+		return Notification{}, fmt.Errorf("%w: notification reconciliation decision is unsupported", ErrInvalid)
+	}
+	if input.Decision == "verified_not_delivered" && input.MessageID != "" {
+		return Notification{}, fmt.Errorf("%w: verified_not_delivered cannot include a Discord message_id", ErrInvalid)
+	}
+	if input.Decision == "verified_delivered" && !numericNotificationID(input.MessageID) {
+		return Notification{}, fmt.Errorf("%w: verified_delivered requires the exact numeric Discord message_id", ErrInvalid)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Notification{}, fmt.Errorf("begin notification reconciliation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var status, payloadSHA, channelID string
+	var priorEvidence json.RawMessage
+	err = tx.QueryRow(ctx, `
+		SELECT status, COALESCE(payload_sha256, ''), remote_receipt, notification_channel_id::text
+		FROM notifications WHERE id = $1 FOR UPDATE`, id).Scan(&status, &payloadSHA, &priorEvidence, &channelID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Notification{}, ErrNotFound
+	}
+	if err != nil {
+		return Notification{}, fmt.Errorf("lock notification reconciliation: %w", err)
+	}
+	if status != "outcome_unknown" {
+		return Notification{}, fmt.Errorf("%w: only outcome_unknown notifications can be reconciled", ErrConflict)
+	}
+	var knownReceipt struct {
+		MessageID string `json:"message_id"`
+	}
+	if json.Unmarshal(priorEvidence, &knownReceipt) == nil && numericNotificationID(knownReceipt.MessageID) &&
+		(input.Decision != "verified_delivered" || input.MessageID != knownReceipt.MessageID) {
+		return Notification{}, fmt.Errorf("%w: a persisted Discord success receipt can only be reconciled as verified_delivered with the exact message_id", ErrInvalid)
+	}
+	priorHash := sha256.Sum256(priorEvidence)
+	receipt := map[string]any{
+		"schema_version": 1, "reconciled": true, "decision": input.Decision,
+		"evidence_sha256": input.EvidenceSHA256, "observed_at": observedAt.UTC().Format(time.RFC3339),
+		"payload_sha256": payloadSHA, "prior_outcome_evidence_sha256": hex.EncodeToString(priorHash[:]),
+	}
+	if input.MessageID != "" {
+		receipt["message_id"] = input.MessageID
+	}
+	receiptBody, _ := json.Marshal(receipt)
+	if input.Decision == "verified_delivered" {
+		_, err = tx.Exec(ctx, `
+			UPDATE notifications
+			SET status = 'sent', remote_receipt = $2, sent_at = $3, last_error = NULL,
+			    lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+			WHERE id = $1`, id, receiptBody, observedAt)
+	} else {
+		_, err = tx.Exec(ctx, `
+			UPDATE notifications
+			SET status = 'queued', remote_receipt = $2, scheduled_at = now(), sent_at = NULL,
+			    last_error = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+			WHERE id = $1`, id, receiptBody)
+	}
+	if err != nil {
+		return Notification{}, fmt.Errorf("apply notification reconciliation: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE notification_channels SET health_status = 'unknown', updated_at = now() WHERE id = $1`, channelID); err != nil {
+		return Notification{}, fmt.Errorf("reset reconciled notification channel health: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events(actor_type, actor_id, action, resource_type, resource_id, payload)
+		VALUES ('user', $1, 'notification.reconciled', 'notification', $2, $3)`, input.ActorID, id, receiptBody); err != nil {
+		return Notification{}, fmt.Errorf("audit notification reconciliation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Notification{}, fmt.Errorf("commit notification reconciliation: %w", err)
+	}
+	return s.getNotification(ctx, id)
+}
+
+func (s *Store) getNotification(ctx context.Context, id string) (Notification, error) {
+	var notification Notification
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, COALESCE(schedule_run_id::text, ''), COALESCE(job_id::text, ''),
+		       COALESCE(notification_channel_id::text, ''), channel, status, payload,
+		       COALESCE(payload_sha256, ''), remote_receipt, attempts, COALESCE(last_error, ''),
+		       scheduled_at, sent_at, created_at, updated_at
+		FROM notifications WHERE id = $1`, id).Scan(
+		&notification.ID, &notification.ScheduleRunID, &notification.JobID, &notification.NotificationChannelID,
+		&notification.Channel, &notification.Status, &notification.Payload, &notification.PayloadSHA256,
+		&notification.RemoteReceipt, &notification.Attempts, &notification.LastError,
+		&notification.ScheduledAt, &notification.SentAt, &notification.CreatedAt, &notification.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Notification{}, ErrNotFound
+	}
+	if err != nil {
+		return Notification{}, fmt.Errorf("get notification: %w", err)
+	}
+	return notification, nil
+}
+
+func lowerSHA256(value string) bool {
+	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func numericNotificationID(value string) bool {
+	if value == "" || len(value) > 30 {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }

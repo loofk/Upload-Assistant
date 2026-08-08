@@ -101,10 +101,10 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 - `GET /api/v2/candidates/daily` 读取按日期持久化的候选、排序、推荐理由、风险、阻塞、metadata 和目标站查重证据。
 - `POST /api/v2/candidates/{candidate_id}/retorrent-job` 只创建安全的未确认转种 job；它不会推断 `accept_rules`，并固定以 `confirm_upload=false` 开始。
 - `GET/POST /api/v2/schedules/daily-candidates` 与 `PATCH /api/v2/schedules/daily-candidates/{schedule_id}` 管理 PostgreSQL 持久的每日扫描计划；`GET .../{schedule_id}/runs` 可审计每次触发、租约、重试次数和关联 job。当前 cron 明确限定为 `分 时 * * *`，避免接受服务无法可靠解释的表达式。
-- `GET /api/v2/notifications` 读取脱敏的本地/外部投递状态、尝试次数、payload SHA-256 和远端回执 hash。调度、排名和通知均不代表用户批准候选，也不会自动创建正式转种任务或上传种子。
+- `GET /api/v2/notifications` 读取脱敏的本地/外部投递状态、尝试次数、payload SHA-256 和远端回执 hash。`POST /api/v2/notifications/{notification_id}/reconcile` 只处理 `outcome_unknown`：`verified_not_delivered` 显式允许一次排队重试，`verified_delivered` 绑定人工证据与精确 Discord message ID 且不再次调用 webhook。调度、排名和通知均不代表用户批准候选，也不会自动创建正式转种任务或上传种子。
 - `GET/PUT /api/v2/notification-channels` 独立管理 Discord incoming webhook。Webhook URL 进入加密 secret；每日调度只有在 `config.notification_channels` 显式列出已启用渠道后才投递。
 
-Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最多 8 次指数退避、崩溃后接管和 `wait=true` 送达回执。消息禁用 mentions，只含候选摘要与本地任务 ID。`sent` 只表示通知被 Discord 接收，不表示候选获批或种子已上传。
+Discord 投递由 PostgreSQL 队列和独立 Worker 执行；外部 POST 前先提交 `notification.delivery_started` 意图审计，并使用租约、对明确拒绝最多 8 次指数退避和 `wait=true` 送达回执。网络无响应、5xx、成功响应不可解析、本地回执事务失败或发送租约过期均进入 `outcome_unknown`，自动投递器不会接管重发；只有人工对账可决定排队重试或仅补录送达回执。消息禁用 mentions，只含候选摘要与本地任务 ID。`sent` 只表示通知被 Discord 接收或经人工证据确认，不表示候选获批或种子已上传。
 
 ## Sonarr / Radarr
 
