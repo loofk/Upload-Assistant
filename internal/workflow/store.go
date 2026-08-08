@@ -235,20 +235,20 @@ func (s *Store) ReplayJob(
 		return Job{}, fmt.Errorf("%w: blocker %s requires reconciliation on the original job", ErrReplayUnsafe, blocker)
 	}
 	if activeVerifiedExternalRecovery(originalResumeState) {
-		return Job{}, fmt.Errorf("%w: verified_uploaded recovery must finish or be cancelled on the original job", ErrReplayUnsafe)
+		return Job{}, fmt.Errorf("%w: verified external-write recovery must finish or be cancelled on the original job", ErrReplayUnsafe)
 	}
 	var externalWriteCompleted bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM job_steps
-			WHERE job_id = $1 AND step_key IN ('image_upload', 'target_upload') AND status = 'complete'
+			WHERE job_id = $1 AND step_key IN ('downloader_add', 'image_upload', 'target_upload', 'target_inject') AND status = 'complete'
 		) OR EXISTS(
-			SELECT 1 FROM artifacts WHERE job_id = $1 AND kind = 'image_upload_receipt'
+			SELECT 1 FROM artifacts WHERE job_id = $1 AND kind IN ('image_upload_receipt', 'target_injection_receipt')
 		)`, originalJobID).Scan(&externalWriteCompleted); err != nil {
 		return Job{}, fmt.Errorf("inspect replay external writes: %w", err)
 	}
 	if externalWriteCompleted {
-		return Job{}, fmt.Errorf("%w: a completed external upload step cannot be replayed from the beginning", ErrReplayUnsafe)
+		return Job{}, fmt.Errorf("%w: a completed external write step cannot be replayed from the beginning", ErrReplayUnsafe)
 	}
 	var replayJobID string
 	err = tx.QueryRow(ctx, `
@@ -349,11 +349,16 @@ func activeVerifiedExternalRecovery(body json.RawMessage) bool {
 			Decision    string `json:"decision"`
 		} `json:"reconciliation"`
 	}
-	if json.Unmarshal(body, &state) != nil || state.Reconciliation.Decision != "verified_uploaded" {
+	if json.Unmarshal(body, &state) != nil {
 		return false
 	}
-	return state.Reconciliation.BlockerCode == "target_upload_outcome_unknown" ||
-		state.Reconciliation.BlockerCode == "image_upload_outcome_unknown"
+	if state.Reconciliation.Decision == "verified_uploaded" {
+		return state.Reconciliation.BlockerCode == "target_upload_outcome_unknown" ||
+			state.Reconciliation.BlockerCode == "image_upload_outcome_unknown"
+	}
+	return state.Reconciliation.Decision == "verified_remote_state" &&
+		(state.Reconciliation.BlockerCode == "downloader_partial_add_requires_reconciliation" ||
+			state.Reconciliation.BlockerCode == "downloader_add_outcome_unknown")
 }
 
 func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
@@ -695,7 +700,7 @@ func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Durat
 			return Job{}, fmt.Errorf("lock expired step attempt: %w", recoveryErr)
 		}
 		if recoveryErr == nil {
-			if stepKey == "target_upload" || stepKey == "image_upload" {
+			if stepKey == "target_upload" || stepKey == "image_upload" || stepKey == "downloader_add" || stepKey == "target_inject" {
 				blockers, nextActions, resumeState, prepareErr := expiredExternalWriteReconciliation(stepKey, attemptID, attemptSnapshot)
 				if prepareErr != nil {
 					return Job{}, prepareErr
@@ -773,27 +778,63 @@ func expiredExternalWriteReconciliation(stepKey, attemptID string, snapshot json
 	action := "reconcile_image_upload"
 	message := "worker lease expired during image upload; inspect unrecorded screenshots before any retry"
 	resume := map[string]any{}
+	var frozen struct {
+		ResumeState   map[string]any             `json:"resume_state"`
+		PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
+	}
+	if json.Unmarshal(snapshot, &frozen) == nil && frozen.ResumeState != nil {
+		resume = frozen.ResumeState
+	}
 	if stepKey == "target_upload" {
 		blockerCode = "target_upload_outcome_unknown"
 		action = "reconcile_target_upload"
 		message = "worker lease expired during target upload; inspect the target site before any retry"
 		resume["confirm_upload"] = false
-		var frozen struct {
-			PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
-		}
 		var targetTorrent struct {
 			SHA256 string `json:"target_torrent_sha256"`
 		}
-		if json.Unmarshal(snapshot, &frozen) == nil && json.Unmarshal(frozen.PreviousSteps["target_torrent"], &targetTorrent) == nil && targetTorrent.SHA256 != "" {
+		if json.Unmarshal(frozen.PreviousSteps["target_torrent"], &targetTorrent) == nil && targetTorrent.SHA256 != "" {
 			resume["target_upload"] = map[string]any{
 				"outcome": "unreconciled", "submitted_torrent_sha256": strings.ToLower(targetTorrent.SHA256),
 			}
 		}
+	} else if stepKey == "downloader_add" || stepKey == "target_inject" {
+		blockerCode = "downloader_add_outcome_unknown"
+		action = "reconcile_downloader_add"
+		message = "worker lease expired during downloader add; inspect the expected infohash before any retry"
+		var hashes struct {
+			V1SHA1   string `json:"v1_sha1"`
+			V2SHA256 string `json:"v2_sha256"`
+		}
+		if stepKey == "downloader_add" {
+			var source struct {
+				Hashes json.RawMessage `json:"hashes"`
+			}
+			if json.Unmarshal(frozen.PreviousSteps["source_torrent"], &source) == nil {
+				_ = json.Unmarshal(source.Hashes, &hashes)
+			}
+		} else {
+			var target struct {
+				Hashes json.RawMessage `json:"target_torrent_hashes"`
+			}
+			if json.Unmarshal(frozen.PreviousSteps["target_torrent_download"], &target) == nil {
+				_ = json.Unmarshal(target.Hashes, &hashes)
+			}
+		}
+		expectedHash := strings.ToLower(strings.TrimSpace(hashes.V1SHA1))
+		if expectedHash == "" {
+			expectedHash = strings.ToLower(strings.TrimSpace(hashes.V2SHA256))
+		}
+		resume["downloader_add"] = map[string]any{"outcome": "unreconciled", "expected_hash": expectedHash, "step_key": stepKey}
 	}
 	blockers, _ := json.Marshal([]map[string]string{{"code": blockerCode, "message": message}})
+	parameters := map[string]any{"attempt_id": attemptID, "step_key": stepKey}
+	if downloaderState, ok := resume["downloader_add"].(map[string]any); ok {
+		parameters["observed_hash"] = downloaderState["expected_hash"]
+	}
 	nextActions, _ := json.Marshal([]map[string]any{{
 		"action": action, "description": "Do not retry blindly; reconcile the expired external write attempt.",
-		"parameters": map[string]any{"attempt_id": attemptID, "step_key": stepKey},
+		"parameters": parameters,
 	}})
 	resumeBody, err := json.Marshal(resume)
 	if err != nil {
@@ -1188,7 +1229,7 @@ func addReconciliationTemplate(blockers, nextActions, resumeState json.RawMessag
 			}
 		}
 	}
-	if blockerCode == "downloader_partial_add_requires_reconciliation" {
+	if blockerCode == "downloader_partial_add_requires_reconciliation" || blockerCode == "downloader_add_outcome_unknown" {
 		var actions []struct {
 			Parameters map[string]any `json:"parameters"`
 		}
@@ -1229,7 +1270,7 @@ func validateResumeReconciliation(
 				currentCanonical, currentErr := canonicalJSON(current["reconciliation"])
 				proposedCanonical, proposedErr := canonicalJSON(proposedReconciliation)
 				if currentErr != nil || proposedErr != nil || !bytes.Equal(currentCanonical, proposedCanonical) {
-					return nil, fmt.Errorf("%w: an active verified_uploaded recovery decision cannot be changed or downgraded", ErrReconciliation)
+					return nil, fmt.Errorf("%w: an active verified external-write recovery decision cannot be changed or downgraded", ErrReconciliation)
 				}
 			}
 		}
@@ -1297,7 +1338,7 @@ func validateResumeReconciliation(
 		default:
 			return nil, fmt.Errorf("%w: image upload reconciliation only supports verified_not_applied or verified_uploaded", ErrReconciliation)
 		}
-	case "downloader_partial_add_requires_reconciliation":
+	case "downloader_partial_add_requires_reconciliation", "downloader_add_outcome_unknown":
 		if reconciliation.Decision != "verified_remote_state" || template.RequiredObservedHash == "" ||
 			!strings.EqualFold(reconciliation.ObservedHash, template.RequiredObservedHash) {
 			return nil, fmt.Errorf("%w: downloader reconciliation must verify the exact observed hash", ErrReconciliation)
@@ -1369,7 +1410,7 @@ func (s *Store) transitionJob(
 	if !containsStatus(allowed, current) {
 		return Job{}, fmt.Errorf("%w: cannot transition job from %s to %s", ErrConflict, current, target)
 	}
-	if current == JobRunning && (currentStepKey == "target_upload" || currentStepKey == "image_upload") &&
+	if current == JobRunning && (currentStepKey == "target_upload" || currentStepKey == "image_upload" || currentStepKey == "downloader_add" || currentStepKey == "target_inject") &&
 		(target == JobPaused || target == JobCancelled) {
 		return Job{}, fmt.Errorf("%w: %s is an in-flight external write and can only stop at a step boundary", ErrConflict, currentStepKey)
 	}

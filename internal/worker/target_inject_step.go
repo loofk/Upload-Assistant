@@ -65,6 +65,8 @@ type targetInjectReceipt struct {
 	Rule                targetInjectRuleReceipt      `json:"rule"`
 	Options             targetInjectOptionsReceipt   `json:"options"`
 	Add                 downloaders.AddEvidence      `json:"add"`
+	Recovered           bool                         `json:"recovered"`
+	Reconciliation      downloaderAddReconciliation  `json:"reconciliation,omitempty"`
 	InjectedAt          time.Time                    `json:"injected_at"`
 }
 
@@ -103,15 +105,30 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 	if boolValue(bindings.Control.Paused) {
 		return nil, targetDownloaderConfigurationBlock(fmt.Errorf("target_downloader.paused must be false so required seeding can start"), bindings)
 	}
-	evidence, err := executor.provider.Add(ctx, bindings.Control.Name, bindings.Torrent, qbittorrent.AddOptions{
+	addOptions := qbittorrent.AddOptions{
 		SavePath: bindings.Control.SavePath, Category: bindings.Control.Category, Tags: append([]string(nil), bindings.Control.Tags...),
 		ApplyLabels:  bindings.Control.ApplyLabels,
 		SkipChecking: false, Paused: false, DownloadLimit: bindings.AppliedDownloadLimit, UploadLimit: bindings.AppliedUploadLimit,
-	}, execution.Actor)
+	}
+	var snapshot struct {
+		ResumeState retorrentRuntimeControls `json:"resume_state"`
+	}
+	_ = json.Unmarshal(execution.Step.InputSnapshot, &snapshot)
+	evidence, recovered, recoveryErr := recoverDownloaderAdd(ctx, executor.provider, bindings.Control.Name, bindings.Torrent, addOptions, snapshot.ResumeState.Reconciliation, execution.Actor)
+	if recoveryErr != nil {
+		return nil, recoveryErr
+	}
+	if !recovered {
+		evidence, err = executor.provider.Add(ctx, bindings.Control.Name, bindings.Torrent, addOptions, execution.Actor)
+	}
 	if err != nil {
+		expectedHash := bindings.TorrentInspection.Hashes.V1SHA1
+		if expectedHash == "" {
+			expectedHash = bindings.TorrentInspection.Hashes.V2SHA256
+		}
 		return nil, downloaderBlock(err, bindings.Control.Name, "inject_target_torrent", map[string]any{
 			"target": bindings.Target, "torrent_id": bindings.TorrentID,
-			"target_torrent_sha256": bindings.TorrentArtifact.SHA256,
+			"target_torrent_sha256": bindings.TorrentArtifact.SHA256, "expected_hash": expectedHash,
 		})
 	}
 	if err := validateTargetInjectionEvidence(evidence, bindings); err != nil {
@@ -135,7 +152,10 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 			DownloadLimit: bindings.AppliedDownloadLimit, UploadLimit: bindings.AppliedUploadLimit,
 			SkipChecking: false, Paused: false,
 		},
-		Add: evidence, InjectedAt: time.Now().UTC(),
+		Add: evidence, Recovered: recovered, InjectedAt: time.Now().UTC(),
+	}
+	if recovered {
+		receipt.Reconciliation = snapshot.ResumeState.Reconciliation
 	}
 	body, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
@@ -166,7 +186,7 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 	return mustJSON(map[string]any{
 		"injected": true, "status": "injected", "target": bindings.Target, "uploaded_torrent_id": bindings.TorrentID,
 		"downloader_name": bindings.Control.Name, "downloader_adapter": evidence.Adapter, "downloader_configuration_sha256": evidence.ConfigurationSHA256,
-		"torrent_hash": torrentHash, "add_evidence": evidence,
+		"torrent_hash": torrentHash, "add_evidence": evidence, "recovered": recovered,
 		"options": receipt.Options, "rule": receipt.Rule,
 		"expected_remote_content_path":           bindings.RemoteContentRoot,
 		"target_torrent_artifact_id":             bindings.TorrentArtifact.ArtifactID,

@@ -12,13 +12,15 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
+	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
 type fakeConfigurationStore struct {
-	runtime      integrations.RuntimeDownloader
-	healthStatus string
-	auditActions []string
+	runtime         integrations.RuntimeDownloader
+	healthStatus    string
+	auditActions    []string
+	failAuditAction string
 }
 
 func (store *fakeConfigurationStore) GetRuntimeDownloader(context.Context, string) (integrations.RuntimeDownloader, error) {
@@ -32,6 +34,9 @@ func (store *fakeConfigurationStore) RecordDownloaderHealth(_ context.Context, _
 
 func (store *fakeConfigurationStore) AuditDownloaderAction(_ context.Context, _ string, action string, _ map[string]any, _ workflow.Actor) error {
 	store.auditActions = append(store.auditActions, action)
+	if action == store.failAuditAction {
+		return errors.New("fixture audit failure")
+	}
 	return nil
 }
 
@@ -210,7 +215,7 @@ func TestManagerRejectsUnsupportedConfiguredDelugeLabelsBeforeRemoteCall(t *test
 		},
 		Credentials: map[string]string{"password": "secret"},
 	}}
-	metainfo := []byte("d8:announce14:https://t.test4:infod6:lengthi1e4:name4:testee")
+	metainfo := validManagerMetainfo()
 	_, err := NewManager(store).Add(context.Background(), "deluge", metainfo, qbittorrent.AddOptions{}, workflow.Actor{Type: "test", ID: "manager"})
 	if !errors.Is(err, integrations.ErrValidation) || !strings.Contains(err.Error(), "category") {
 		t.Fatalf("Add() capability error = %v", err)
@@ -218,6 +223,99 @@ func TestManagerRejectsUnsupportedConfiguredDelugeLabelsBeforeRemoteCall(t *test
 	if calls != 0 {
 		t.Fatalf("Add() made %d calls before capability validation", calls)
 	}
+}
+
+func TestManagerPersistsAddIntentBeforeRemoteWrite(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	store := qBittorrentAddStore(t, server.URL)
+	store.failAuditAction = "torrent.add_intent"
+	metainfo := validManagerMetainfo()
+	evidence, err := NewManager(store).Add(context.Background(), "qbit", metainfo, qbittorrent.AddOptions{}, workflow.Actor{Type: "test", ID: "manager"})
+	if err == nil || !strings.Contains(err.Error(), "persist downloader add intent") || evidence.TorrentSHA256 != "" {
+		t.Fatalf("Add() evidence/error = %#v/%v", evidence, err)
+	}
+	if calls != 0 || strings.Join(store.auditActions, ",") != "torrent.add_intent" {
+		t.Fatalf("remote calls/audits = %d/%#v", calls, store.auditActions)
+	}
+}
+
+func TestManagerReturnsEvidenceWhenAddResultAuditIsUnknown(t *testing.T) {
+	metainfo := validManagerMetainfo()
+	hashes, err := torrentmeta.Hashes(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/torrents/add":
+			addCalls++
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"hash": hashes.V1SHA1, "name": "test", "state": "downloading", "progress": 0,
+				"total_size": 1, "save_path": "/downloads", "content_path": "/downloads/test",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	store := qBittorrentAddStore(t, server.URL)
+	store.failAuditAction = "torrent.add"
+	evidence, err := NewManager(store).Add(context.Background(), "qbit", metainfo, qbittorrent.AddOptions{SavePath: "/downloads"}, workflow.Actor{Type: "test", ID: "manager"})
+	if !errors.Is(err, ErrAddOutcomeUnknown) || evidence.Result.Hashes != hashes || evidence.Observed == nil || evidence.TorrentSHA256 == "" {
+		t.Fatalf("Add() evidence/error = %#v/%v", evidence, err)
+	}
+	if addCalls != 1 || strings.Join(store.auditActions, ",") != "torrent.add_intent,torrent.add" {
+		t.Fatalf("remote add calls/audits = %d/%#v", addCalls, store.auditActions)
+	}
+}
+
+func TestManagerClassifiesUntrustworthyRemoteAddResponse(t *testing.T) {
+	metainfo := validManagerMetainfo()
+	hashes, err := torrentmeta.Hashes(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/torrents/add" {
+			http.Error(w, "ambiguous upstream failure", http.StatusInternalServerError)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	store := qBittorrentAddStore(t, server.URL)
+	evidence, err := NewManager(store).Add(context.Background(), "qbit", metainfo, qbittorrent.AddOptions{}, workflow.Actor{Type: "test", ID: "manager"})
+	if !errors.Is(err, ErrAddOutcomeUnknown) || evidence.Result.Hashes != hashes || evidence.TorrentSHA256 == "" {
+		t.Fatalf("Add() evidence/error = %#v/%v", evidence, err)
+	}
+	if strings.Join(store.auditActions, ",") != "torrent.add_intent" {
+		t.Fatalf("audits = %#v", store.auditActions)
+	}
+}
+
+func qBittorrentAddStore(t *testing.T, endpoint string) *fakeConfigurationStore {
+	t.Helper()
+	capability, ok := integrations.DownloaderAdapterCapabilityFor("qbittorrent")
+	if !ok {
+		t.Fatal("qBittorrent capability is missing")
+	}
+	return &fakeConfigurationStore{runtime: integrations.RuntimeDownloader{
+		Downloader:     integrations.Downloader{Name: "qbit", Adapter: "qbittorrent", Enabled: true, AdapterCapability: capability},
+		EndpointConfig: integrations.EndpointConfig{Endpoint: endpoint, TimeoutSeconds: 5},
+		Credentials:    map[string]string{"api_key": "qbt_test"}, ConfigurationSHA256: strings.Repeat("a", 64),
+	}}
+}
+
+func validManagerMetainfo() []byte {
+	return []byte("d8:announce14:https://t.test4:infod6:lengthi1e4:name4:test12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee")
 }
 
 func TestMapPathUsesPathBoundary(t *testing.T) {

@@ -271,24 +271,24 @@
       }
     },
     "/api/v2/jobs/{job_id}/pause": {
-      "post": {"operationId": "pauseJob", "description": "Pauses at a durable boundary. In-flight image_upload and target_upload external writes reject mid-step interruption.", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job paused", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+      "post": {"operationId": "pauseJob", "description": "Pauses at a durable boundary. In-flight downloader_add, image_upload, target_upload, and target_inject external writes reject mid-step interruption.", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job paused", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/jobs/{job_id}/resume": {
       "post": {
         "operationId": "resumeJob",
-		"description": "Queues a paused, blocked, or failed job. Unknown target/image upload outcomes and partial downloader writes require an explicit attempt-bound reconciliation decision; a generic retry is rejected with reconciliation_required.",
+		"description": "Queues a paused, blocked, or failed job. Unknown target/image upload outcomes and partial or unknown downloader adds require an explicit attempt-bound reconciliation decision; a generic retry is rejected with reconciliation_required.",
         "parameters": [{"$ref": "#/components/parameters/JobID"}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResumeJobRequest"}}}},
         "responses": {"200": {"description": "Job queued for recovery", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/api/v2/jobs/{job_id}/cancel": {
-      "post": {"operationId": "cancelJob", "description": "Cancels without deleting evidence. In-flight image_upload and target_upload external writes reject mid-step interruption.", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+      "post": {"operationId": "cancelJob", "description": "Cancels without deleting evidence. In-flight downloader_add, image_upload, target_upload, and target_inject external writes reject mid-step interruption.", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/jobs/{job_id}/replay": {
       "post": {
         "operationId": "replayJob",
-        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs, reconciliation-required or unknown external outcomes, active recovery, and jobs with completed target/image uploads or image receipts are rejected.",
+        "description": "Creates a new linked job only from a blocked, failed, or cancelled job. Rule acceptance, manual obligations, resume state, and live-upload confirmation are never inherited. Running/paused/complete jobs, reconciliation-required or unknown external outcomes, active recovery, and jobs with any completed downloader, target, or image-host write are rejected.",
         "parameters": [{"$ref": "#/components/parameters/JobID"}, {"$ref": "#/components/parameters/IdempotencyKey"}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReplayJobRequest"}}}},
         "responses": {
@@ -373,7 +373,7 @@
       "post": {"operationId": "probeDownloader", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "responses": {"200": {"description": "Authenticated downloader version probe", "content": {"application/json": {"schema": {"type": "object"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/downloaders/{name}/torrents": {
-      "post": {"operationId": "addDownloaderTorrent", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AddTorrentRequest"}}}}, "responses": {"200": {"description": "Torrent added with hash evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}}
+      "post": {"operationId": "addDownloaderTorrent", "description": "Persists an add-intent audit before the remote write. Ambiguous or partial results return a blocked response with expected hash evidence and must be reconciled by read-only inspection before any further add.", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AddTorrentRequest"}}}}, "responses": {"200": {"description": "Torrent added with hash evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"description": "Downloader add requires reconciliation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloaderAddReconciliationResponse"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/downloaders/{name}/torrents/{hash}": {
       "get": {"operationId": "inspectDownloaderTorrent", "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}], "responses": {"200": {"description": "Torrent state and mapped path evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
@@ -843,13 +843,13 @@
 		"type": "object", "additionalProperties": false,
 		"required": ["blocker_code", "attempt_id", "decision", "confirmed", "evidence_sha256", "observed_at"],
 		"properties": {
-		  "blocker_code": {"type": "string", "enum": ["target_upload_outcome_unknown", "image_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"]},
+		  "blocker_code": {"type": "string", "enum": ["target_upload_outcome_unknown", "image_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation", "downloader_add_outcome_unknown"]},
 		  "attempt_id": {"type": "string", "format": "uuid", "description": "Exact latest blocked/failed attempt returned by the attempts API."},
 		  "decision": {"type": "string", "enum": ["verified_not_applied", "verified_uploaded", "verified_remote_state"]},
 		  "confirmed": {"type": "boolean", "const": true},
 		  "evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of the operator-reviewed external reconciliation evidence; raw evidence and credentials are not copied into the job event."},
 		  "observed_at": {"type": "string", "format": "date-time"},
-		  "observed_hash": {"type": "string", "description": "Required for a downloader partial add and must match the exact hash in the persisted reconciliation template."},
+		  "observed_hash": {"type": "string", "description": "Required for a partial or unknown downloader add and must match the exact submitted hash in the persisted reconciliation template."},
 		  "observed_torrent_id": {"type": "string", "pattern": "^[0-9]{1,20}$", "description": "Required for verified_uploaded; the worker performs a fresh read-only target search and must observe this exact torrent id."},
 		  "submitted_torrent_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Required for target verified_uploaded and must equal the immutable submitted target torrent SHA-256 in the persisted reconciliation template."},
 		  "pending_evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Required for image verified_uploaded and must equal the server-generated pending image evidence SHA-256 in the persisted reconciliation template."}
@@ -859,8 +859,21 @@
 		  {"required": ["observed_torrent_id", "submitted_torrent_sha256"], "properties": {"blocker_code": {"const": "target_upload_outcome_unknown"}, "decision": {"const": "verified_uploaded"}}},
 		  {"properties": {"blocker_code": {"const": "image_upload_outcome_unknown"}, "decision": {"const": "verified_not_applied"}}},
 		  {"required": ["pending_evidence_sha256"], "properties": {"blocker_code": {"const": "image_upload_outcome_unknown"}, "decision": {"const": "verified_uploaded"}}},
-		  {"required": ["observed_hash"], "properties": {"blocker_code": {"const": "downloader_partial_add_requires_reconciliation"}, "decision": {"const": "verified_remote_state"}}}
+		  {"required": ["observed_hash"], "properties": {"blocker_code": {"const": "downloader_partial_add_requires_reconciliation"}, "decision": {"const": "verified_remote_state"}}},
+		  {"required": ["observed_hash"], "properties": {"blocker_code": {"const": "downloader_add_outcome_unknown"}, "decision": {"const": "verified_remote_state"}}}
 		]
+	  },
+	  "DownloaderAddReconciliationResponse": {
+		"type": "object", "additionalProperties": false,
+		"required": ["ok", "status", "error", "evidence", "blockers", "next_actions"],
+		"properties": {
+		  "ok": {"type": "boolean", "const": false},
+		  "status": {"type": "string", "const": "blocked"},
+		  "error": {"type": "object", "required": ["code", "detail"], "properties": {"code": {"type": "string", "enum": ["downloader_partial_add_requires_reconciliation", "downloader_add_outcome_unknown"]}, "detail": {"type": "string"}}},
+		  "evidence": {"type": "object", "description": "Credential-free submitted torrent hashes, torrent SHA-256, adapter configuration SHA-256, and any trustworthy remote observation."},
+		  "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+		  "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+		}
 	  },
       "ReplayJobRequest": {
         "type": "object", "additionalProperties": false,

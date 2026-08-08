@@ -118,12 +118,43 @@ func (api downloaderActionsAPI) add(w http.ResponseWriter, r *http.Request) {
 		}, workflow.Actor{Type: "user", ID: principal.UserID},
 	)
 	if err != nil {
+		if errors.Is(err, downloaders.ErrAddOutcomeUnknown) {
+			writeDownloaderAddReconciliation(w, "downloader_add_outcome_unknown", "the downloader add result is not trustworthy; inspect the expected hash before any further write", evidence)
+			return
+		}
+		if _, partial := downloaders.PartialAddHash(err); partial {
+			writeDownloaderAddReconciliation(w, "downloader_partial_add_requires_reconciliation", "the downloader applied only part of the requested add operation; inspect the expected hash and settings before any further write", evidence)
+			return
+		}
 		writeDownloaderError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "status": "added", "evidence": evidence,
 		"blockers": []any{}, "next_actions": []any{},
+	})
+}
+
+func writeDownloaderAddReconciliation(w http.ResponseWriter, code, message string, evidence downloaders.AddEvidence) {
+	expectedHash := evidence.ExpectedHashes.V1SHA1
+	if expectedHash == "" {
+		expectedHash = evidence.ExpectedHashes.V2SHA256
+	}
+	if expectedHash == "" {
+		expectedHash = evidence.Result.Hashes.V1SHA1
+	}
+	if expectedHash == "" {
+		expectedHash = evidence.Result.Hashes.V2SHA256
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"ok": false, "status": "blocked", "evidence": evidence,
+		"error":    map[string]string{"code": code, "detail": message},
+		"blockers": []map[string]string{{"code": code, "message": message}},
+		"next_actions": []map[string]any{{
+			"action":      "inspect_torrent_before_retry",
+			"description": "Use the read-only torrent inspection endpoint for the exact expected hash. Do not repeat the add request blindly.",
+			"parameters":  map[string]any{"downloader_name": evidence.DownloaderName, "observed_hash": expectedHash},
+		}},
 	})
 }
 
@@ -162,6 +193,8 @@ func writeDownloaderError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "downloader_adapter_unavailable", err.Error())
 	case isPartialDownloaderAdd(err):
 		writeProblem(w, http.StatusConflict, "downloader_partial_add_requires_reconciliation", err.Error())
+	case errors.Is(err, downloaders.ErrAddOutcomeUnknown):
+		writeProblem(w, http.StatusConflict, "downloader_add_outcome_unknown", "the downloader add result is not trustworthy and must be reconciled")
 	case errors.Is(err, qbittorrent.ErrUnauthorized):
 		writeProblem(w, http.StatusBadGateway, "downloader_authentication_failed", "the downloader rejected the configured credentials")
 	case errors.Is(err, context.DeadlineExceeded):

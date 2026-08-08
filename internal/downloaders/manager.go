@@ -15,6 +15,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/rtorrent"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
+	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
@@ -51,13 +52,14 @@ type TorrentEvidence struct {
 }
 
 type AddEvidence struct {
-	DownloaderName      string                `json:"downloader_name"`
-	Adapter             string                `json:"adapter"`
-	ConfigurationSHA256 string                `json:"configuration_sha256"`
-	TorrentBytes        int                   `json:"torrent_bytes"`
-	TorrentSHA256       string                `json:"torrent_sha256"`
-	Result              qbittorrent.AddResult `json:"result"`
-	Observed            *TorrentEvidence      `json:"observed,omitempty"`
+	DownloaderName      string                 `json:"downloader_name"`
+	Adapter             string                 `json:"adapter"`
+	ConfigurationSHA256 string                 `json:"configuration_sha256"`
+	TorrentBytes        int                    `json:"torrent_bytes"`
+	TorrentSHA256       string                 `json:"torrent_sha256"`
+	ExpectedHashes      torrentmeta.InfoHashes `json:"expected_hashes"`
+	Result              qbittorrent.AddResult  `json:"result"`
+	Observed            *TorrentEvidence       `json:"observed,omitempty"`
 }
 
 type TorrentFilesEvidence struct {
@@ -160,8 +162,29 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	if err := validateAddCapabilities(runtime.AdapterCapability, options); err != nil {
 		return AddEvidence{}, err
 	}
+	inspection, err := torrentmeta.Inspect(metainfo)
+	if err != nil {
+		return AddEvidence{}, err
+	}
+	torrentSHA := sha256.Sum256(metainfo)
+	evidence := AddEvidence{
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter, ConfigurationSHA256: runtime.ConfigurationSHA256,
+		TorrentBytes: len(metainfo), TorrentSHA256: hex.EncodeToString(torrentSHA[:]),
+		ExpectedHashes: inspection.Hashes, Result: qbittorrent.AddResult{Hashes: inspection.Hashes},
+	}
+	if err := manager.store.AuditDownloaderAction(ctx, name, "torrent.add_intent", map[string]any{
+		"torrent_bytes": evidence.TorrentBytes, "torrent_sha256": evidence.TorrentSHA256,
+		"configuration_sha256": evidence.ConfigurationSHA256,
+		"v1_infohash":          inspection.Hashes.V1SHA1, "v2_infohash": inspection.Hashes.V2SHA256,
+		"save_path": options.SavePath, "category": options.Category, "tags": options.Tags,
+		"apply_labels": addLabelsEnabled(options), "skip_checking": options.SkipChecking, "paused": options.Paused,
+		"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
+	}, actor); err != nil {
+		return AddEvidence{}, fmt.Errorf("persist downloader add intent: %w", err)
+	}
 	result, err := client.Add(ctx, metainfo, options)
 	if err != nil {
+		evidence.Result = mergeAddResult(evidence.Result, result)
 		if partialHash, partial := PartialAddHash(err); partial {
 			auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 			defer cancel()
@@ -171,13 +194,16 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 				"apply_labels":            addLabelsEnabled(options),
 				"reconciliation_required": true, "error": safeError(err),
 			}, actor)
+			return evidence, err
 		}
-		return AddEvidence{}, err
+		if errors.Is(err, qbittorrent.ErrUnauthorized) {
+			return AddEvidence{}, err
+		}
+		return evidence, fmt.Errorf("%w: downloader request ended without a trustworthy add result: %w", ErrAddOutcomeUnknown, err)
 	}
-	torrentSHA := sha256.Sum256(metainfo)
-	evidence := AddEvidence{
-		DownloaderName: runtime.Name, Adapter: runtime.Adapter, ConfigurationSHA256: runtime.ConfigurationSHA256, TorrentBytes: len(metainfo),
-		TorrentSHA256: hex.EncodeToString(torrentSHA[:]), Result: result,
+	evidence.Result = result
+	if evidence.Result.Hashes != inspection.Hashes {
+		return evidence, fmt.Errorf("%w: downloader returned hashes that do not match the submitted metainfo", ErrAddOutcomeUnknown)
 	}
 	if result.Observed != nil {
 		observed := buildTorrentEvidence(runtime, *result.Observed)
@@ -191,9 +217,19 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 		"category": options.Category, "tags": options.Tags, "apply_labels": addLabelsEnabled(options),
 		"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
 	}, actor); err != nil {
-		return AddEvidence{}, err
+		return evidence, fmt.Errorf("%w: persist downloader add result audit", ErrAddOutcomeUnknown)
 	}
 	return evidence, nil
+}
+
+func mergeAddResult(expected, observed qbittorrent.AddResult) qbittorrent.AddResult {
+	if observed.Hashes.V1SHA1 != "" || observed.Hashes.V2SHA256 != "" {
+		expected.Hashes = observed.Hashes
+	}
+	if observed.Observed != nil {
+		expected.Observed = observed.Observed
+	}
+	return expected
 }
 
 func validateAddCapabilities(capability integrations.DownloaderAdapterCapability, options qbittorrent.AddOptions) error {

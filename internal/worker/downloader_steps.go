@@ -12,11 +12,13 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
+	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
@@ -71,8 +73,19 @@ type downloaderControl struct {
 }
 
 type retorrentRuntimeControls struct {
-	Downloader       downloaderControl `json:"downloader"`
-	TargetDownloader downloaderControl `json:"target_downloader"`
+	Downloader       downloaderControl           `json:"downloader"`
+	TargetDownloader downloaderControl           `json:"target_downloader"`
+	Reconciliation   downloaderAddReconciliation `json:"reconciliation"`
+}
+
+type downloaderAddReconciliation struct {
+	BlockerCode    string `json:"blocker_code"`
+	AttemptID      string `json:"attempt_id"`
+	Decision       string `json:"decision"`
+	Confirmed      bool   `json:"confirmed"`
+	EvidenceSHA256 string `json:"evidence_sha256"`
+	ObservedAt     string `json:"observed_at"`
+	ObservedHash   string `json:"observed_hash"`
 }
 
 type downloaderSnapshot struct {
@@ -97,7 +110,6 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 		return nil, fmt.Errorf("downloader workflow dependencies are unavailable")
 	}
 	snapshot, control, sourceTorrent, sourceRule, err := parseDownloaderSnapshot(execution.Step.InputSnapshot)
-	_ = snapshot
 	if err != nil {
 		return nil, invalidSnapshotBlock(err)
 	}
@@ -128,10 +140,21 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 		SkipChecking: boolValue(control.SkipChecking), Paused: boolValue(control.Paused),
 		DownloadLimit: appliedDownload, UploadLimit: appliedUpload,
 	}
-	evidence, err := executor.provider.Add(ctx, control.Name, metainfo, addOptions, execution.Actor)
+	evidence, recovered, recoveryErr := recoverDownloaderAdd(ctx, executor.provider, control.Name, metainfo, addOptions, snapshot.ResumeState.Reconciliation, execution.Actor)
+	if recoveryErr != nil {
+		return nil, recoveryErr
+	}
+	if !recovered {
+		evidence, err = executor.provider.Add(ctx, control.Name, metainfo, addOptions, execution.Actor)
+	}
 	if err != nil {
+		hashes, _ := torrentmeta.Hashes(metainfo)
+		expectedHash := hashes.V1SHA1
+		if expectedHash == "" {
+			expectedHash = hashes.V2SHA256
+		}
 		return nil, downloaderBlock(err, control.Name, "add_source_torrent", map[string]any{
-			"source_torrent_sha256": sourceTorrent.SHA256,
+			"source_torrent_sha256": sourceTorrent.SHA256, "expected_hash": expectedHash,
 		})
 	}
 	torrentHash := evidence.Result.Hashes.V1SHA1
@@ -140,7 +163,7 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 	}
 	return mustJSON(map[string]any{
 		"downloader_name": control.Name, "downloader_adapter": evidence.Adapter, "torrent_hash": torrentHash,
-		"add_evidence": evidence,
+		"add_evidence": evidence, "recovered": recovered,
 		"limits": map[string]any{
 			"requested_download": control.DownloadLimit, "requested_upload": control.UploadLimit,
 			"policy_download": policyDownload, "policy_upload": policyUpload,
@@ -153,6 +176,94 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 			"skip_checking": boolValue(control.SkipChecking), "paused": boolValue(control.Paused),
 		},
 	}), nil
+}
+
+func recoverDownloaderAdd(
+	ctx context.Context,
+	provider DownloaderProvider,
+	name string,
+	metainfo []byte,
+	options qbittorrent.AddOptions,
+	reconciliation downloaderAddReconciliation,
+	actor workflow.Actor,
+) (downloaders.AddEvidence, bool, error) {
+	if reconciliation.Decision != "verified_remote_state" {
+		return downloaders.AddEvidence{}, false, nil
+	}
+	inspection, err := torrentmeta.Inspect(metainfo)
+	if err != nil {
+		return downloaders.AddEvidence{}, true, downloaderRecoveryBlock("submitted torrent metainfo is invalid during recovery", name, reconciliation)
+	}
+	expectedHash := inspection.Hashes.V1SHA1
+	if expectedHash == "" {
+		expectedHash = inspection.Hashes.V2SHA256
+	}
+	observedAt, observedErr := time.Parse(time.RFC3339, reconciliation.ObservedAt)
+	evidenceDigest, evidenceErr := hex.DecodeString(reconciliation.EvidenceSHA256)
+	if reconciliation.AttemptID == "" || !reconciliation.Confirmed || observedErr != nil || observedAt.IsZero() ||
+		evidenceErr != nil || len(evidenceDigest) != sha256.Size || reconciliation.EvidenceSHA256 != strings.ToLower(reconciliation.EvidenceSHA256) ||
+		(reconciliation.BlockerCode != "downloader_partial_add_requires_reconciliation" && reconciliation.BlockerCode != "downloader_add_outcome_unknown") ||
+		!strings.EqualFold(reconciliation.ObservedHash, expectedHash) {
+		return downloaders.AddEvidence{}, true, downloaderRecoveryBlock("downloader reconciliation is invalid or bound to another torrent", name, reconciliation)
+	}
+	observed, err := provider.Inspect(ctx, name, expectedHash, actor)
+	if err != nil {
+		return downloaders.AddEvidence{}, true, downloaderRecoveryBlock("the reconciled downloader torrent could not be inspected: "+err.Error(), name, reconciliation)
+	}
+	if err := validateRecoveredDownloaderAdd(observed, inspection, options, name); err != nil {
+		return downloaders.AddEvidence{}, true, downloaderRecoveryBlock(err.Error(), name, reconciliation)
+	}
+	torrentSHA := sha256.Sum256(metainfo)
+	result := qbittorrent.AddResult{Hashes: inspection.Hashes, Observed: &observed.Torrent}
+	return downloaders.AddEvidence{
+		DownloaderName: name, Adapter: observed.Adapter, ConfigurationSHA256: observed.ConfigurationSHA256,
+		TorrentBytes: len(metainfo), TorrentSHA256: hex.EncodeToString(torrentSHA[:]),
+		ExpectedHashes: inspection.Hashes, Result: result, Observed: &observed,
+	}, true, nil
+}
+
+func validateRecoveredDownloaderAdd(observed downloaders.TorrentEvidence, inspection torrentmeta.Inspection, options qbittorrent.AddOptions, name string) error {
+	configurationDigest, configurationErr := hex.DecodeString(observed.ConfigurationSHA256)
+	if observed.DownloaderName != name || observed.Adapter == "" || configurationErr != nil || len(configurationDigest) != sha256.Size ||
+		observed.ConfigurationSHA256 != strings.ToLower(observed.ConfigurationSHA256) ||
+		!hashMatches(observed.Torrent.Hash, inspection.Hashes) ||
+		observed.Torrent.TotalSize != inspection.TotalSizeBytes {
+		return fmt.Errorf("the remote downloader observation is not bound to the submitted torrent")
+	}
+	if options.SavePath != "" && observed.Torrent.SavePath != options.SavePath {
+		return fmt.Errorf("the remote downloader save path does not match the reviewed add options")
+	}
+	if observed.Torrent.DownloadLimit != options.DownloadLimit || observed.Torrent.UploadLimit != options.UploadLimit {
+		return fmt.Errorf("the remote downloader limits do not match the reviewed add options")
+	}
+	if options.ApplyLabels == nil || *options.ApplyLabels {
+		if options.Category != "" && observed.Torrent.Category != options.Category {
+			categoryCanBeLabel := observed.Adapter == "transmission"
+			if !categoryCanBeLabel || !tagsContainAll(observed.Torrent.Tags, []string{options.Category}) {
+				return fmt.Errorf("the remote downloader category does not match the reviewed add options")
+			}
+		}
+		if !tagsContainAll(observed.Torrent.Tags, nonEmptyOptionStrings(options.Tags)) {
+			return fmt.Errorf("the remote downloader tags do not match the reviewed add options")
+		}
+	}
+	state := strings.ToLower(observed.Torrent.State)
+	remotePaused := strings.Contains(state, "paused") || strings.Contains(state, "stopped")
+	if options.Paused != remotePaused {
+		return fmt.Errorf("the remote downloader paused state does not match the reviewed add options")
+	}
+	return nil
+}
+
+func downloaderRecoveryBlock(message, name string, reconciliation downloaderAddReconciliation) *BlockError {
+	return &BlockError{
+		Blockers: []Blocker{{Code: "downloader_reconciliation_observation_mismatch", Message: message}},
+		NextActions: []NextAction{{
+			Action: "review_downloader_reconciliation", Description: "Keep the verified_remote_state decision and correct the exact remote torrent settings before resuming local recovery.",
+			Parameters: map[string]any{"downloader_name": name, "observed_hash": reconciliation.ObservedHash},
+		}},
+		ResumeState: map[string]any{"downloader": map[string]any{"name": name}, "reconciliation": reconciliation},
+	}
 }
 
 func (executor downloaderWaitExecutor) Execute(ctx context.Context, execution Execution) (json.RawMessage, error) {
@@ -371,6 +482,7 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	action := "retry_step"
 	description := "Verify downloader availability, then resume this step."
 	partialHash, partialAdd := downloaders.PartialAddHash(err)
+	unknownAdd := errors.Is(err, downloaders.ErrAddOutcomeUnknown)
 	switch {
 	case errors.Is(err, integrations.ErrNotFound):
 		code, action = "downloader_configuration_required", "configure_downloader"
@@ -383,7 +495,10 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 		description = "Use a supported downloader adapter or implement the configured adapter."
 	case partialAdd:
 		code, action = "downloader_partial_add_requires_reconciliation", "inspect_torrent_before_retry"
-		description = "The torrent was added, but applying mandatory settings failed. Inspect this exact hash before resuming; a duplicate add is idempotent."
+		description = "The torrent was added, but applying mandatory settings failed. Inspect this exact hash before resuming; recovery verifies remote state without another add."
+	case unknownAdd:
+		code, action = "downloader_add_outcome_unknown", "inspect_torrent_before_retry"
+		description = "The downloader add outcome is unknown. Inspect the exact expected hash before resuming; automatic retry is disabled."
 	case errors.Is(err, qbittorrent.ErrUnauthorized):
 		code, action = "downloader_authentication_failed", "configure_downloader_credentials"
 		description = "Refresh the encrypted downloader credentials before resuming."
@@ -397,6 +512,8 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	}
 	if partialAdd {
 		parameters["observed_hash"] = partialHash
+	} else if unknownAdd {
+		parameters["observed_hash"] = strings.ToLower(strings.TrimSpace(fmt.Sprint(evidence["expected_hash"])))
 	}
 	return &BlockError{
 		Blockers:    []Blocker{{Code: code, Message: err.Error()}},

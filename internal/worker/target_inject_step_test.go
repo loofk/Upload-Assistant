@@ -106,6 +106,55 @@ func TestTargetInjectStepAcceptsCapabilityLimitedAdapterWithExplicitNoLabelMode(
 	}
 }
 
+func TestTargetInjectStepRecoversVerifiedRemoteStateWithoutSecondWrite(t *testing.T) {
+	execution, store, torrent := targetInjectExecution(t, map[string]any{
+		"name": "box", "category": "MTEAM", "tags": []string{"retorrent", "mteam"},
+		"upload_limit_bytes_per_second": 4 * 1024 * 1024,
+	})
+	inspection, err := torrentmeta.Inspect(torrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot["resume_state"] = downloaderRecoveryState("downloader_add_outcome_unknown", inspection.Hashes.V1SHA1)
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	evidence := targetAddEvidence(torrent, inspection, "box")
+	evidence.Observed.Torrent.UploadLimit = 2 * 1024 * 1024
+	provider := &fakeDownloaderProvider{inspection: *evidence.Observed}
+	recorder := &sequenceArtifactRecorder{}
+	output, err := (targetInjectExecutor{provider: provider, artifacts: store, recorder: recorder}).Execute(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.addCalls != 0 || provider.inspectCalls != 1 || provider.inspectHash != inspection.Hashes.V1SHA1 || len(recorder.inputs) != 1 {
+		t.Fatalf("provider/artifacts = %#v/%#v", provider, recorder.inputs)
+	}
+	var result struct {
+		Recovered bool `json:"recovered"`
+	}
+	if json.Unmarshal(output, &result) != nil || !result.Recovered {
+		t.Fatalf("target recovery output = %s", output)
+	}
+	file, err := store.Open(recorder.inputs[0].StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, _ := io.ReadAll(file)
+	file.Close()
+	if !bytes.Contains(receipt, []byte(`"recovered": true`)) || !bytes.Contains(receipt, []byte(`"decision": "verified_remote_state"`)) {
+		t.Fatalf("target recovery receipt = %s", receipt)
+	}
+	provider.inspection.Torrent.State = "stoppedUP"
+	_, err = (targetInjectExecutor{provider: provider, artifacts: store, recorder: &sequenceArtifactRecorder{}}).Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if blocked.Blockers[0].Code != "downloader_reconciliation_observation_mismatch" || provider.addCalls != 0 {
+		t.Fatalf("paused recovery blocker/provider = %#v/%#v", blocked, provider)
+	}
+}
+
 func targetInjectExecution(t *testing.T, targetControl map[string]any) (Execution, WorkflowArtifactStore, []byte) {
 	t.Helper()
 	downloadExecution, store, _ := targetTorrentDownloadExecution(t)

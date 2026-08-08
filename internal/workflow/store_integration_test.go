@@ -314,7 +314,7 @@ func TestReplayRejectsCompletedTargetUpload(t *testing.T) {
 		ExecutionMode: ExecutionStep, IdempotencyKey: "reject-completed-upload-" + uuid.NewString(),
 		Owner: "integration-test", Actor: Actor{Type: "test", ID: "completed-upload-replay"},
 	})
-	if !errors.Is(err, ErrReplayUnsafe) || !strings.Contains(err.Error(), "completed external upload") {
+	if !errors.Is(err, ErrReplayUnsafe) || !strings.Contains(err.Error(), "completed external write") {
 		t.Fatalf("completed target upload replay error = %v", err)
 	}
 }
@@ -515,12 +515,92 @@ func TestExpiredExternalWriteLeaseRequiresReconciliation(t *testing.T) {
 	}
 }
 
+func TestExpiredDownloaderAddLeaseRequiresReconciliation(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(pool)
+	definition := RetorrentDefinition()
+	workflowID, err := store.EnsureDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(ctx, workflowID, definition, CreateJobInput{
+		Kind: "retorrent", ExecutionMode: ExecutionAuto,
+		Input:          json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=4","target":"MTEAM","confirm_upload":false}`),
+		IdempotencyKey: "expired-downloader-add-" + uuid.NewString(), Owner: "integration-test",
+		Actor: Actor{Type: "test", ID: "expired-downloader-add"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM jobs WHERE id = $1", job.ID) })
+	var stepID string
+	if err := pool.QueryRow(ctx, "SELECT id::text FROM job_steps WHERE job_id = $1 AND step_key = 'downloader_add'", job.ID).Scan(&stepID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE job_steps SET status = 'pending' WHERE job_id = $1", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE job_steps SET status = 'running', started_at = now() WHERE id = $1", stepID); err != nil {
+		t.Fatal(err)
+	}
+	expectedHash := "0123456789abcdef0123456789abcdef01234567"
+	snapshot := json.RawMessage(`{"resume_state":{"operator_note":"preserve"},"previous_steps":{"source_torrent":{"hashes":{"v1_sha1":"` + expectedHash + `"}}}}`)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO step_attempts(job_step_id, attempt, status, input_snapshot)
+		VALUES ($1, 1, 'running', $2)`, stepID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE jobs SET status = 'running', current_step_key = 'downloader_add', lease_owner = 'expired-worker',
+		       lease_expires_at = now() - interval '1 second', heartbeat_at = now() - interval '1 minute'
+		WHERE id = $1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PauseJob(ctx, job.ID, Actor{Type: "test", ID: "expired-downloader-add"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("in-flight downloader add pause error = %v", err)
+	}
+	if _, err := store.CancelJob(ctx, job.ID, Actor{Type: "test", ID: "expired-downloader-add"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("in-flight downloader add cancel error = %v", err)
+	}
+	if _, err := store.ClaimNextJob(ctx, "recovery-worker", time.Minute, Actor{Type: "worker", ID: "recovery-worker"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired downloader add claim error = %v", err)
+	}
+	blocked, err := store.GetJob(ctx, job.ID)
+	var resume struct {
+		OperatorNote   string `json:"operator_note"`
+		Reconciliation struct {
+			RequiredObservedHash string `json:"required_observed_hash"`
+		} `json:"reconciliation"`
+	}
+	resumeErr := json.Unmarshal(blocked.ResumeState, &resume)
+	if err != nil || resumeErr != nil || blocked.Status != JobBlocked || firstBlockerCode(blocked.Blockers) != "downloader_add_outcome_unknown" ||
+		resume.OperatorNote != "preserve" || resume.Reconciliation.RequiredObservedHash != expectedHash {
+		t.Fatalf("expired downloader add job/error = %#v/%v", blocked, err)
+	}
+	if _, err := store.ResumeJob(ctx, job.ID, json.RawMessage(`{}`), Actor{Type: "test", ID: "expired-downloader-add"}); !errors.Is(err, ErrReconciliation) {
+		t.Fatalf("expired downloader add generic resume error = %v", err)
+	}
+}
+
 func TestSafeReplayInputAndReconciliationBlockers(t *testing.T) {
 	input, err := safeReplayInput("retorrent", json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=1","accept_rules":{"U2":{"accepted":true}},"confirm_upload":true,"downloader":{"name":"box"}}`))
 	if err != nil || string(input) != `{"confirm_upload":false,"downloader":{"name":"box"},"source_url":"https://u2.dmhy.org/details.php?id=1"}` {
 		t.Fatalf("safeReplayInput() input/error = %s/%v", input, err)
 	}
-	for _, code := range []string{"target_upload_outcome_unknown", "image_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation"} {
+	for _, code := range []string{"target_upload_outcome_unknown", "image_upload_outcome_unknown", "downloader_partial_add_requires_reconciliation", "downloader_add_outcome_unknown"} {
 		blocker, err := unsafeReplayBlocker(json.RawMessage(`[{"code":"` + code + `"}]`))
 		if err != nil || blocker != code {
 			t.Fatalf("unsafeReplayBlocker(%s) = %q/%v", code, blocker, err)
@@ -534,6 +614,22 @@ func TestSafeReplayInputAndReconciliationBlockers(t *testing.T) {
 		!bytes.Contains(expiredResume, []byte(`"required_submitted_torrent_sha256":"`+strings.Repeat("f", 64)+`"`)) ||
 		!bytes.Contains(expiredResume, []byte(`"confirm_upload":false`)) {
 		t.Fatalf("expired target upload reconciliation = %s/%s/%v", expiredBlockers, expiredResume, err)
+	}
+	expectedHash := "0123456789abcdef0123456789abcdef01234567"
+	for _, fixture := range []struct {
+		step     string
+		snapshot json.RawMessage
+	}{
+		{"downloader_add", json.RawMessage(`{"resume_state":{"operator_note":"keep"},"previous_steps":{"source_torrent":{"hashes":{"v1_sha1":"` + expectedHash + `"}}}}`)},
+		{"target_inject", json.RawMessage(`{"resume_state":{"operator_note":"keep"},"previous_steps":{"target_torrent_download":{"target_torrent_hashes":{"v1_sha1":"` + expectedHash + `"}}}}`)},
+	} {
+		blockers, actions, resume, err := expiredExternalWriteReconciliation(fixture.step, "55555555-5555-4555-8555-555555555555", fixture.snapshot)
+		if err != nil || !bytes.Contains(blockers, []byte(`"downloader_add_outcome_unknown"`)) ||
+			!bytes.Contains(actions, []byte(`"observed_hash":"`+expectedHash+`"`)) ||
+			!bytes.Contains(resume, []byte(`"required_observed_hash":"`+expectedHash+`"`)) ||
+			!bytes.Contains(resume, []byte(`"operator_note":"keep"`)) || !bytes.Contains(resume, []byte(`"step_key":"`+fixture.step+`"`)) {
+			t.Fatalf("expired %s reconciliation = %s/%s/%s/%v", fixture.step, blockers, actions, resume, err)
+		}
 	}
 }
 
@@ -604,5 +700,27 @@ func TestResumeReconciliationRequiresAttemptBoundEvidence(t *testing.T) {
 	downloaderValid := json.RawMessage(`{"reconciliation":{"blocker_code":"downloader_partial_add_requires_reconciliation","attempt_id":"` + attemptID + `","decision":"verified_remote_state","confirmed":true,"evidence_sha256":"` + strings.Repeat("b", 64) + `","observed_at":"2026-08-08T11:59:00Z","observed_hash":"0123456789abcdef0123456789abcdef01234567"}}`)
 	if _, err := validateResumeReconciliation(downloaderBlockers, downloaderCurrent, downloaderValid, attemptID, now); err != nil {
 		t.Fatalf("downloader reconciliation error = %v", err)
+	}
+	if !activeVerifiedExternalRecovery(downloaderValid) {
+		t.Fatal("verified_remote_state resume state must remain replay-protected")
+	}
+	if _, err := validateResumeReconciliation(
+		json.RawMessage(`[{"code":"downloader_reconciliation_observation_mismatch"}]`), downloaderValid,
+		json.RawMessage(`{}`), attemptID, now,
+	); err != nil {
+		t.Fatalf("unchanged downloader recovery resume error = %v", err)
+	}
+	downloaderDowngraded := bytes.Replace(downloaderValid, []byte(`"verified_remote_state"`), []byte(`"unreconciled"`), 1)
+	if _, err := validateResumeReconciliation(
+		json.RawMessage(`[{"code":"downloader_reconciliation_observation_mismatch"}]`), downloaderValid,
+		downloaderDowngraded, attemptID, now,
+	); !errors.Is(err, ErrReconciliation) {
+		t.Fatalf("downgraded downloader recovery error = %v", err)
+	}
+	downloaderUnknownBlockers := json.RawMessage(`[{"code":"downloader_add_outcome_unknown"}]`)
+	downloaderUnknownCurrent := bytes.Replace(downloaderCurrent, []byte("downloader_partial_add_requires_reconciliation"), []byte("downloader_add_outcome_unknown"), 1)
+	downloaderUnknownValid := bytes.Replace(downloaderValid, []byte("downloader_partial_add_requires_reconciliation"), []byte("downloader_add_outcome_unknown"), 1)
+	if _, err := validateResumeReconciliation(downloaderUnknownBlockers, downloaderUnknownCurrent, downloaderUnknownValid, attemptID, now); err != nil {
+		t.Fatalf("unknown downloader reconciliation error = %v", err)
 	}
 }

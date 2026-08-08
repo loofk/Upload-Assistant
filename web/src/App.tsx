@@ -331,7 +331,8 @@ function JobDetail({
     }
   };
 
-  const canPause = ["queued", "running", "blocked", "failed"].includes(detail.status);
+  const externalWriteInFlight = detail.status === "running" && ["downloader_add", "image_upload", "target_upload", "target_inject"].includes(detail.current_step ?? "");
+  const canPause = ["queued", "running", "blocked", "failed"].includes(detail.status) && !externalWriteInFlight;
   const canResume = ["paused", "blocked", "failed"].includes(detail.status);
   const canReplay = ["blocked", "failed", "cancelled"].includes(detail.status) && !reconciliationRequired;
   const completedSteps = detail.steps.filter((step) => step.status === "complete" || step.status === "skipped").length;
@@ -362,7 +363,7 @@ function JobDetail({
           {canPause && <button className="secondary" disabled={busy} onClick={() => void transition("pause")}>暂停</button>}
           {canResume && <button className="primary" disabled={busy || (reconciliationRequired && !reconciliationReady)} onClick={() => void resume()}>{reconciliationRequired ? "对账后续跑" : "续跑"}</button>}
           {canReplay && <button className="secondary" disabled={busy} onClick={() => void replay()}>重放新任务</button>}
-          {!terminalStatuses.has(detail.status) && <button className="danger" disabled={busy} onClick={() => void transition("cancel")}>取消</button>}
+          {!terminalStatuses.has(detail.status) && !externalWriteInFlight && <button className="danger" disabled={busy} onClick={() => void transition("cancel")}>取消</button>}
         </div>
       </header>
 
@@ -377,7 +378,7 @@ function JobDetail({
       {canResume && <section className="resume-panel">
         <div className="section-title"><div><p className="eyebrow">RECOVERY INPUT</p><h2>恢复参数</h2></div><span>提交后会写入审计事件</span></div>
         <textarea aria-label="resume_state JSON" spellCheck={false} value={resumeText} onChange={(event) => setResumeText(event.target.value)} />
-		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>目标站 verified_uploaded 必须绑定目标种子 ID 与 submitted torrent SHA；图床 verified_uploaded 必须绑定服务器生成的 pending evidence SHA。两者都只恢复本地回执，绝不再次上传。</span></div>}
+		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>目标站 verified_uploaded 必须绑定目标种子 ID 与 submitted torrent SHA；图床 verified_uploaded 必须绑定服务器生成的 pending evidence SHA；下载器 verified_remote_state 必须绑定系统给出的 expected infohash。恢复只会读取远端状态或补写本地回执，绝不再次执行外部写入。</span></div>}
         {confirmRequired && <label className="confirm-live">
           <input type="checkbox" checked={confirmUpload} onChange={(event) => setConfirmUpload(event.target.checked)} />
           <span><strong>我已人工复核目标站规则、最终查重与不可变上传包，并确认执行 live 上传。</strong><small>此确认不会被系统或 AI 自动推断。</small></span>

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
@@ -14,15 +15,19 @@ import (
 )
 
 type fakeDownloaderProvider struct {
-	addOptions qbittorrent.AddOptions
-	addBytes   []byte
-	addName    string
-	addCalls   int
-	addResult  downloaders.AddEvidence
-	addResults []downloaders.AddEvidence
-	inspection downloaders.TorrentEvidence
-	files      downloaders.TorrentFilesEvidence
-	err        error
+	addOptions   qbittorrent.AddOptions
+	addBytes     []byte
+	addName      string
+	addCalls     int
+	addResult    downloaders.AddEvidence
+	addResults   []downloaders.AddEvidence
+	inspection   downloaders.TorrentEvidence
+	files        downloaders.TorrentFilesEvidence
+	err          error
+	inspectErr   error
+	inspectName  string
+	inspectHash  string
+	inspectCalls int
 }
 
 func (provider *fakeDownloaderProvider) Add(_ context.Context, name string, metainfo []byte, options qbittorrent.AddOptions, _ workflow.Actor) (downloaders.AddEvidence, error) {
@@ -36,8 +41,11 @@ func (provider *fakeDownloaderProvider) Add(_ context.Context, name string, meta
 	return provider.addResult, provider.err
 }
 
-func (provider *fakeDownloaderProvider) Inspect(_ context.Context, _, _ string, _ workflow.Actor) (downloaders.TorrentEvidence, error) {
-	return provider.inspection, provider.err
+func (provider *fakeDownloaderProvider) Inspect(_ context.Context, name, hash string, _ workflow.Actor) (downloaders.TorrentEvidence, error) {
+	provider.inspectCalls++
+	provider.inspectName = name
+	provider.inspectHash = hash
+	return provider.inspection, provider.inspectErr
 }
 
 func (provider *fakeDownloaderProvider) Files(_ context.Context, _, _ string, _ workflow.Actor) (downloaders.TorrentFilesEvidence, error) {
@@ -116,6 +124,80 @@ func TestDownloaderAddAllowsExplicitNoLabelModeForCapabilityLimitedAdapter(t *te
 	if provider.addOptions.Category != "" || len(provider.addOptions.Tags) != 0 {
 		t.Fatalf("explicit no-label options = %#v", provider.addOptions)
 	}
+}
+
+func TestDownloaderAddUnknownOutcomeBlocksWithExpectedHash(t *testing.T) {
+	metainfo := []byte("d8:announce14:https://t.test4:infod4:name7:fixtureee")
+	hashes, err := torrentmeta.Hashes(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := artifacts.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := store.Write(context.Background(), artifacts.Scope{JobID: "job-id", StepID: "source-step", AttemptID: "source-attempt"}, "source.torrent", bytes.NewReader(metainfo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeDownloaderProvider{addResult: downloaders.AddEvidence{
+		DownloaderName: "box", Adapter: "qbittorrent", Result: qbittorrent.AddResult{Hashes: hashes},
+	}, err: downloaders.ErrAddOutcomeUnknown}
+	_, executeErr := (downloaderAddExecutor{provider: provider, artifacts: store}).Execute(context.Background(), downloaderAddExecution(written.RelativePath, written.SizeBytes, written.SHA256))
+	blocked := requireBlockError(t, executeErr)
+	if provider.addCalls != 1 || blocked.Blockers[0].Code != "downloader_add_outcome_unknown" ||
+		blocked.NextActions[0].Action != "inspect_torrent_before_retry" || blocked.NextActions[0].Parameters["observed_hash"] != hashes.V1SHA1 {
+		t.Fatalf("provider/block = %#v/%#v", provider, blocked)
+	}
+}
+
+func TestDownloaderAddVerifiedRemoteStateRecoversWithoutSecondWrite(t *testing.T) {
+	metainfo := []byte("d8:announce14:https://t.test4:infod6:lengthi1e4:name4:test12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee")
+	inspection, err := torrentmeta.Inspect(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := artifacts.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := store.Write(context.Background(), artifacts.Scope{JobID: "job-id", StepID: "source-step", AttemptID: "source-attempt"}, "source.torrent", bytes.NewReader(metainfo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := downloaderAddExecution(written.RelativePath, written.SizeBytes, written.SHA256)
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot["resume_state"] = downloaderRecoveryState("downloader_add_outcome_unknown", inspection.Hashes.V1SHA1)
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	provider := &fakeDownloaderProvider{inspection: downloaders.TorrentEvidence{
+		DownloaderName: "box", Adapter: "qbittorrent", ConfigurationSHA256: strings.Repeat("d", 64),
+		Torrent: qbittorrent.Torrent{
+			Hash: inspection.Hashes.V1SHA1, TotalSize: inspection.TotalSizeBytes, SavePath: "/remote/downloads",
+			Category: "retorrent", Tags: "source,U2", DownloadLimit: 20 * 1024 * 1024, UploadLimit: 50_000_000,
+		},
+	}}
+	output, err := (downloaderAddExecutor{provider: provider, artifacts: store}).Execute(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Recovered   bool   `json:"recovered"`
+		TorrentHash string `json:"torrent_hash"`
+	}
+	if json.Unmarshal(output, &result) != nil || !result.Recovered || result.TorrentHash != inspection.Hashes.V1SHA1 ||
+		provider.addCalls != 0 || provider.inspectCalls != 1 || provider.inspectName != "box" || provider.inspectHash != inspection.Hashes.V1SHA1 {
+		t.Fatalf("result/provider = %s/%#v", output, provider)
+	}
+}
+
+func downloaderRecoveryState(blockerCode, hash string) map[string]any {
+	return map[string]any{"reconciliation": map[string]any{
+		"blocker_code": blockerCode, "attempt_id": "previous-attempt", "decision": "verified_remote_state", "confirmed": true,
+		"evidence_sha256": strings.Repeat("e", 64), "observed_at": "2026-08-08T11:59:00Z", "observed_hash": hash,
+	}}
 }
 
 func TestDownloaderWaitBlocksWithObservedProgressAndCompletesOnResume(t *testing.T) {
