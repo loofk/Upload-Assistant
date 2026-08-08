@@ -57,6 +57,29 @@ func TestSourceInspectUsesFrozenReference(t *testing.T) {
 	}
 }
 
+func TestSourceInspectStoresDescriptionAsSeparateArtifact(t *testing.T) {
+	store := mustArtifactStore(t)
+	recorder := &fakeArtifactRecorder{}
+	execution := sourceExecution(t)
+	executor := sourceInspectExecutor{
+		provider: fakeSourceProvider{info: sites.SourceInfo{
+			Tracker: "U2", TorrentID: "60635", Name: "fixture",
+			DescriptionHTML: "<p>source description</p>", DescriptionLength: 18,
+		}},
+		artifacts: store, recorder: recorder,
+	}
+	output, err := executor.Execute(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorder.recorded.Kind != "source_description" || recorder.recorded.SHA256 == "" {
+		t.Fatalf("description artifact = %#v", recorder.recorded)
+	}
+	if string(output) == "" || json.Valid(output) == false {
+		t.Fatalf("description output = %s", output)
+	}
+}
+
 func TestSourceTorrentPersistsAuditedArtifact(t *testing.T) {
 	metainfo := []byte("d8:announce14:https://t.test4:infod4:name7:fixtureee")
 	hashes, err := torrentmeta.Hashes(metainfo)

@@ -27,6 +27,7 @@ type Config struct {
 	DatabaseMaxIdle  time.Duration
 	DatabaseMaxLife  time.Duration
 	MasterKeyFile    string
+	MediaInfoBinary  string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -46,6 +47,7 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		DatabaseMinConns: 1,
 		DatabaseMaxIdle:  5 * time.Minute,
 		DatabaseMaxLife:  30 * time.Minute,
+		MediaInfoBinary:  envOrDefault(lookup, "UA_MEDIAINFO_BIN", "mediainfo"),
 	}
 	cfg.MasterKeyFile = filepath.Clean(envOrDefault(lookup, "UA_MASTER_KEY_FILE", filepath.Join(cfg.DataDir, "master-keys")))
 	if cfg.DatabaseURL == "" {
@@ -56,6 +58,12 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 	}
 	if !filepath.IsAbs(cfg.MasterKeyFile) {
 		return Config{}, fmt.Errorf("UA_MASTER_KEY_FILE must be an absolute path: %s", cfg.MasterKeyFile)
+	}
+	if strings.ContainsAny(cfg.MediaInfoBinary, "\r\n\x00") || strings.TrimSpace(cfg.MediaInfoBinary) == "" {
+		return Config{}, fmt.Errorf("UA_MEDIAINFO_BIN must be a binary name or absolute path")
+	}
+	if strings.ContainsAny(cfg.MediaInfoBinary, `/\\`) && !filepath.IsAbs(cfg.MediaInfoBinary) {
+		return Config{}, fmt.Errorf("UA_MEDIAINFO_BIN path must be absolute: %s", cfg.MediaInfoBinary)
 	}
 	switch cfg.LogLevel {
 	case "debug", "info", "warn", "error":

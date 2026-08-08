@@ -22,6 +22,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
+	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/server"
@@ -132,6 +133,8 @@ func serve(args []string) error {
 		worker.WithRuleProvider(ruleStore),
 		worker.WithSourceAdapters(sourceRegistry, artifactStore),
 		worker.WithDownloader(downloaderManager, artifactStore),
+		worker.WithMetadata(artifactStore),
+		worker.WithMediaInfo(media.NewMediaInfo(cfg.MediaInfoBinary, 2*time.Minute), artifactStore),
 	)
 	go jobRunner.Run(ctx)
 

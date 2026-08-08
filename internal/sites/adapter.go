@@ -26,6 +26,7 @@ type SourceInfo struct {
 	PromotionLabels   []string  `json:"promotion_labels"`
 	Free              bool      `json:"free"`
 	RetrievedAt       time.Time `json:"retrieved_at"`
+	DescriptionHTML   string    `json:"-"`
 }
 
 type DownloadedTorrent struct {

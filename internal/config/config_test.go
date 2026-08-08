@@ -23,6 +23,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	if cfg.MasterKeyFile != filepath.Join(defaultDataDir, "master-keys") {
 		t.Fatalf("MasterKeyFile = %q", cfg.MasterKeyFile)
 	}
+	if cfg.MediaInfoBinary != "mediainfo" {
+		t.Fatalf("MediaInfoBinary = %q", cfg.MediaInfoBinary)
+	}
 }
 
 func TestLoadFromRejectsRelativeMasterKeyFile(t *testing.T) {

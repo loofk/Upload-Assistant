@@ -313,7 +313,8 @@ func parseDetails(siteCode, torrentID, detailsURL, page string) sites.SourceInfo
 		result.TorrentHash = strings.ToLower(match[1])
 	}
 	if match := descriptionPattern.FindStringSubmatch(page); len(match) == 2 {
-		result.DescriptionLength = len([]rune(normalizedText(match[1])))
+		result.DescriptionHTML = strings.TrimSpace(match[1])
+		result.DescriptionLength = len([]rune(normalizedText(result.DescriptionHTML)))
 	}
 	for _, label := range promotionLabels(text) {
 		result.PromotionLabels = append(result.PromotionLabels, label)

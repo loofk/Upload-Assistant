@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
@@ -30,14 +31,20 @@ type ArtifactRecorder interface {
 
 func WithSourceAdapters(provider SourceProvider, artifactStore ArtifactWriter) Option {
 	return func(runner *Runner) {
-		runner.executors["source_inspect"] = sourceInspectExecutor{provider: provider}
+		runner.executors["source_inspect"] = sourceInspectExecutor{
+			provider: provider, artifacts: artifactStore, recorder: runner.runtime,
+		}
 		runner.executors["source_torrent"] = sourceTorrentExecutor{
 			provider: provider, artifacts: artifactStore, recorder: runner.runtime,
 		}
 	}
 }
 
-type sourceInspectExecutor struct{ provider SourceProvider }
+type sourceInspectExecutor struct {
+	provider  SourceProvider
+	artifacts ArtifactWriter
+	recorder  ArtifactRecorder
+}
 
 func (executor sourceInspectExecutor) Execute(ctx context.Context, execution Execution) (json.RawMessage, error) {
 	if executor.provider == nil {
@@ -51,7 +58,33 @@ func (executor sourceInspectExecutor) Execute(ctx context.Context, execution Exe
 	if err != nil {
 		return nil, sourceAdapterBlock(err, reference, "inspect_source")
 	}
-	return mustJSON(map[string]any{"source_info": info}), nil
+	result := map[string]any{"source_info": info}
+	if strings.TrimSpace(info.DescriptionHTML) != "" {
+		if executor.artifacts == nil || executor.recorder == nil {
+			return nil, fmt.Errorf("source description artifact dependencies are unavailable")
+		}
+		file, err := executor.artifacts.Write(ctx, artifacts.Scope{
+			JobID: execution.Job.ID, StepID: execution.Step.ID, AttemptID: execution.Attempt.ID,
+		}, "source-description.html", strings.NewReader(info.DescriptionHTML))
+		if err != nil {
+			return nil, fmt.Errorf("persist source description artifact: %w", err)
+		}
+		recorded, err := executor.recorder.RegisterArtifact(ctx, workflow.RegisterArtifactInput{
+			JobID: execution.Job.ID, StepID: execution.Step.ID, AttemptID: execution.Attempt.ID,
+			Kind: "source_description", StoragePath: file.RelativePath, Filename: file.Filename,
+			MIMEType: "text/html; charset=utf-8", SizeBytes: file.SizeBytes, SHA256: file.SHA256,
+			Metadata:  mustJSON(map[string]any{"tracker": reference.Tracker, "torrent_id": reference.TorrentID}),
+			Retention: artifactRetention, Actor: execution.Actor,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("register source description artifact: %w", err)
+		}
+		result["description_artifact"] = map[string]any{
+			"artifact_id": recorded.ID, "storage_path": recorded.StoragePath,
+			"sha256": recorded.SHA256, "size_bytes": recorded.SizeBytes,
+		}
+	}
+	return mustJSON(result), nil
 }
 
 type sourceTorrentExecutor struct {

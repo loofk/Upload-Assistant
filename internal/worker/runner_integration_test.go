@@ -15,6 +15,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
@@ -109,6 +110,10 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithRuleProvider(fakeRuleProvider{revision: rule}),
 		WithSourceAdapters(source, artifactStore),
 		WithDownloader(downloader, artifactStore, allowedContentRoot),
+		WithMetadata(artifactStore),
+		WithMediaInfo(&fakeMediaInspector{result: media.Inspection{
+			Tool: "mediainfo", Version: "fixture", Document: json.RawMessage(`{"media":{"track":[]}}`), DurationMS: 1,
+		}}, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -168,6 +173,28 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 2 || storedArtifacts[1].Kind != "content_manifest" {
 		t.Fatalf("content-resolved artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("metadata RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "media_info" {
+		t.Fatalf("metadata job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 3 || storedArtifacts[2].Kind != "metadata" {
+		t.Fatalf("metadata artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("media info RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "screenshots" {
+		t.Fatalf("media-info job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 4 || storedArtifacts[3].Kind != "mediainfo" {
+		t.Fatalf("media-info artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {
