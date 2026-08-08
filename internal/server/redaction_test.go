@@ -45,3 +45,30 @@ func TestRedactStepsReplacesInputSnapshotWithDigest(t *testing.T) {
 		t.Fatalf("snapshot marker/error = %#v/%v", snapshot, err)
 	}
 }
+
+func TestRedactAttemptsHidesRawSnapshotAndNestedSecrets(t *testing.T) {
+	attempts := redactAttempts([]workflow.Attempt{{
+		InputSnapshot: json.RawMessage(`{"cookie":"attempt-input-secret"}`),
+		OutputSummary: json.RawMessage(`{"nested":{"api_key":"attempt-output-secret"}}`),
+		ErrorDetails:  json.RawMessage(`[{"message":"https://tracker.invalid/announce/attempt-error-secret"}]`),
+	}})
+	if len(attempts) != 1 {
+		t.Fatalf("attempt count = %d", len(attempts))
+	}
+	encoded, err := json.Marshal(attempts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"attempt-input-secret", "attempt-output-secret", "attempt-error-secret"} {
+		if bytes.Contains(encoded, []byte(secret)) {
+			t.Fatalf("redacted attempt exposed %q: %s", secret, encoded)
+		}
+	}
+	var snapshot struct {
+		Redacted bool   `json:"redacted"`
+		SHA256   string `json:"sha256"`
+	}
+	if err := json.Unmarshal(attempts[0].InputSnapshot, &snapshot); err != nil || !snapshot.Redacted || len(snapshot.SHA256) != 64 {
+		t.Fatalf("attempt snapshot/error = %#v/%v", snapshot, err)
+	}
+}

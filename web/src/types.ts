@@ -51,6 +51,36 @@ export interface Step {
   finished_at?: string;
 }
 
+export interface StepAttempt {
+  id: string;
+  job_id: string;
+  step_id: string;
+  step_key: string;
+  step_position: number;
+  number: number;
+  status: "running" | "paused" | "blocked" | "failed" | "complete" | "cancelled";
+  adapter?: string;
+  adapter_version?: string;
+  input_snapshot: {redacted: true; sha256: string};
+  output_summary: JsonValue;
+  error_code?: string;
+  error_details: JsonValue;
+  started_at: string;
+  finished_at?: string;
+}
+
+export interface StepAttemptListEnvelope {
+  ok: true;
+  status: JobStatus;
+  job_id: string;
+  current_step?: string;
+  attempts: StepAttempt[];
+  has_more: boolean;
+  next_cursor: string;
+  blockers: Blocker[];
+  next_actions: NextAction[];
+}
+
 export interface Artifact {
   id: string;
   job_id: string;

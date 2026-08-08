@@ -117,6 +117,18 @@ describe("ApiClient safety defaults", () => {
     });
   });
 
+  it("lists redacted job attempts with an opaque cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true, status: "blocked", job_id: "job-id", attempts: [], has_more: false,
+      next_cursor: "", blockers: [], next_actions: [],
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("ua_test-token-value-that-is-long-enough").getAttempts("job/id", "opaque-attempt-cursor");
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/v2/jobs/job%2Fid/attempts?limit=500&cursor=opaque-attempt-cursor");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
+  });
+
   it("requests a local-only live readiness report without confirmation fields", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ok: false, status: "blocked", configuration_ready: false,

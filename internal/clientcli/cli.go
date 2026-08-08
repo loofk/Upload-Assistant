@@ -198,7 +198,7 @@ func (r runner) request(ctx context.Context, method, requestPath string, query u
 
 func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: jobs list|get|summary|steps|events|artifacts|pause|resume|retry|cancel")
+		return nil, errors.New("usage: jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|cancel")
 	}
 	switch args[0] {
 	case "list":
@@ -244,6 +244,23 @@ func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error
 		}
 		query := url.Values{"after": []string{strconv.FormatInt(*after, 10)}, "limit": []string{strconv.Itoa(*limit)}}
 		return r.request(ctx, http.MethodGet, "/api/v2/jobs/"+id+"/events", query, nil, nil, true)
+	case "attempts":
+		flags := newFlags("jobs attempts")
+		limit := flags.Int("limit", 100, "result limit")
+		cursor := flags.String("cursor", "", "opaque pagination cursor")
+		if len(args) < 2 {
+			return nil, errors.New("usage: jobs attempts <job-id> [--limit N] [--cursor CURSOR]")
+		}
+		id, err := validUUID(args[1], "job ID")
+		if err != nil {
+			return nil, err
+		}
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		query := url.Values{"limit": []string{strconv.Itoa(*limit)}}
+		setQuery(query, "cursor", *cursor)
+		return r.request(ctx, http.MethodGet, "/api/v2/jobs/"+id+"/attempts", query, nil, nil, true)
 	case "pause", "cancel", "retry":
 		if len(args) != 2 {
 			return nil, fmt.Errorf("usage: jobs %s <job-id>", args[0])
@@ -866,7 +883,7 @@ func usage() string {
 Usage:
   upload-assistant cli [global options] health
   upload-assistant cli [global options] tools
-  upload-assistant cli [global options] jobs list|get|summary|steps|events|artifacts|pause|resume|retry|cancel ...
+  upload-assistant cli [global options] jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|cancel ...
   upload-assistant cli [global options] retorrent create --source-url URL --target SITE [options]
   upload-assistant cli [global options] candidates list|scan|submit ...
   upload-assistant cli [global options] sites

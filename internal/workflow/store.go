@@ -237,6 +237,72 @@ func (s *Store) ListSteps(ctx context.Context, jobID string) ([]Step, error) {
 	return steps, nil
 }
 
+func (s *Store) ListAttempts(ctx context.Context, jobID string, filter ListAttemptsFilter) (AttemptPage, error) {
+	if filter.Limit <= 0 || filter.Limit > 500 {
+		filter.Limit = 100
+	}
+	if filter.AfterPosition < 0 || filter.AfterNumber < 0 || (filter.AfterPosition == 0) != (filter.AfterNumber == 0) {
+		return AttemptPage{}, errors.New("attempt cursor requires positive step position and attempt number")
+	}
+	query := `
+		SELECT sa.id::text, js.job_id::text, js.id::text, js.step_key, js.position,
+		       sa.attempt, sa.status, COALESCE(sa.adapter, ''), COALESCE(sa.adapter_version, ''),
+		       sa.input_snapshot, sa.output_summary, COALESCE(sa.error_code, ''),
+		       COALESCE(sa.error_message, ''), sa.started_at, sa.finished_at
+		FROM step_attempts sa
+		JOIN job_steps js ON js.id = sa.job_step_id
+		WHERE js.job_id = $1`
+	arguments := []any{jobID}
+	if filter.AfterPosition > 0 {
+		arguments = append(arguments, filter.AfterPosition, filter.AfterNumber)
+		query += " AND (js.position, sa.attempt) > ($2, $3)"
+	}
+	arguments = append(arguments, filter.Limit+1)
+	query += fmt.Sprintf(" ORDER BY js.position, sa.attempt LIMIT $%d", len(arguments))
+	rows, err := s.pool.Query(ctx, query, arguments...)
+	if err != nil {
+		return AttemptPage{}, fmt.Errorf("list step attempts: %w", err)
+	}
+	defer rows.Close()
+	attempts := make([]Attempt, 0, filter.Limit+1)
+	for rows.Next() {
+		var attempt Attempt
+		var errorDetails string
+		var finishedAt pgtype.Timestamptz
+		if err := rows.Scan(
+			&attempt.ID, &attempt.JobID, &attempt.StepID, &attempt.StepKey, &attempt.StepPosition,
+			&attempt.Number, &attempt.Status, &attempt.Adapter, &attempt.AdapterVersion,
+			&attempt.InputSnapshot, &attempt.OutputSummary, &attempt.ErrorCode, &errorDetails,
+			&attempt.StartedAt, &finishedAt,
+		); err != nil {
+			return AttemptPage{}, fmt.Errorf("scan step attempt: %w", err)
+		}
+		attempt.ErrorDetails = attemptErrorDetails(errorDetails)
+		attempt.FinishedAt = timePointer(finishedAt)
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return AttemptPage{}, fmt.Errorf("iterate step attempts: %w", err)
+	}
+	hasMore := len(attempts) > filter.Limit
+	if hasMore {
+		attempts = attempts[:filter.Limit]
+	}
+	return AttemptPage{Attempts: attempts, HasMore: hasMore}, nil
+}
+
+func attemptErrorDetails(value string) json.RawMessage {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return json.RawMessage(`{}`)
+	}
+	if json.Valid([]byte(value)) {
+		return json.RawMessage(value)
+	}
+	body, _ := json.Marshal(map[string]string{"message": value})
+	return body
+}
+
 func (s *Store) ListEvents(ctx context.Context, jobID string, after int64, limit int) ([]Event, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -737,8 +803,9 @@ func (s *Store) stopStep(
 		return Job{}, fmt.Errorf("%w: job attempt is not running for this worker", ErrConflict)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE step_attempts SET status = $2, error_message = $3::text, finished_at = now()
-		WHERE id = $1`, attemptID, stepStatus, string(blockers)); err != nil {
+		UPDATE step_attempts SET status = $2, error_message = $3::text,
+		       error_code = NULLIF($4, ''), finished_at = now()
+		WHERE id = $1`, attemptID, stepStatus, string(blockers), firstBlockerCode(blockers)); err != nil {
 		return Job{}, fmt.Errorf("stop step attempt: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -762,6 +829,20 @@ func (s *Store) stopStep(
 		return Job{}, fmt.Errorf("commit stop step transaction: %w", err)
 	}
 	return s.GetJob(ctx, jobID)
+}
+
+func firstBlockerCode(body json.RawMessage) string {
+	var blockers []struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(body, &blockers) != nil || len(blockers) == 0 {
+		return ""
+	}
+	code := strings.TrimSpace(blockers[0].Code)
+	if len(code) > 200 {
+		code = code[:200]
+	}
+	return code
 }
 
 func (s *Store) PauseJob(ctx context.Context, jobID string, actor Actor) (Job, error) {

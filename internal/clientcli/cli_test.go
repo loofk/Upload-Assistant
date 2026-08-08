@@ -172,6 +172,25 @@ func TestAuditListUsesExactFiltersAndStableCursor(t *testing.T) {
 	}
 }
 
+func TestJobAttemptsUsesOpaquePaginationCursor(t *testing.T) {
+	jobID := "00000000-0000-0000-0000-000000000001"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v2/jobs/"+jobID+"/attempts" ||
+			request.URL.Query().Get("limit") != "25" || request.URL.Query().Get("cursor") != "opaque-attempt-cursor" {
+			t.Fatalf("request = %s %s query=%v", request.Method, request.URL.Path, request.URL.Query())
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"blocked","job_id":"` + jobID + `","attempts":[],"has_more":false,"next_cursor":"","blockers":[],"next_actions":[]}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--api-url", server.URL, "jobs", "attempts", jobID, "--limit", "25", "--cursor", "opaque-attempt-cursor",
+	}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"attempts": []`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func TestLiveReadinessUsesExactLocalOnlyInputs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		query := request.URL.Query()

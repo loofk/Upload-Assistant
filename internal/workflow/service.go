@@ -66,6 +66,10 @@ func (s *Service) ListSteps(ctx context.Context, id string) ([]Step, error) {
 	return s.store.ListSteps(ctx, id)
 }
 
+func (s *Service) ListAttempts(ctx context.Context, id string, filter ListAttemptsFilter) (AttemptPage, error) {
+	return s.store.ListAttempts(ctx, id, filter)
+}
+
 func (s *Service) ListEvents(ctx context.Context, id string, after int64, limit int) ([]Event, error) {
 	return s.store.ListEvents(ctx, id, after, limit)
 }

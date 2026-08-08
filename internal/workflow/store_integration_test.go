@@ -185,6 +185,10 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	if err != nil || job.Status != JobBlocked {
 		t.Fatalf("BlockStep() job/error = %s/%v", job.Status, err)
 	}
+	attemptPage, err := store.ListAttempts(ctx, job.ID, ListAttemptsFilter{Limit: 100})
+	if err != nil || len(attemptPage.Attempts) != 2 || attemptPage.Attempts[1].ErrorCode != "credential_required" {
+		t.Fatalf("blocked attempts/error = %#v/%v", attemptPage, err)
+	}
 	job, err = store.CancelJob(ctx, job.ID, Actor{Type: "test", ID: "store-lifecycle"})
 	if err != nil || job.Status != JobCancelled {
 		t.Fatalf("CancelJob() job/error = %s/%v", job.Status, err)
@@ -288,6 +292,22 @@ func TestStorePausesRunningAttemptAndRecoversExpiredLease(t *testing.T) {
 	}
 	if _, err := store.CancelJob(ctx, job.ID, Actor{Type: "test", ID: "pause-recovery"}); err != nil {
 		t.Fatal(err)
+	}
+	firstPage, err := store.ListAttempts(ctx, job.ID, ListAttemptsFilter{Limit: 2})
+	if err != nil || len(firstPage.Attempts) != 2 || !firstPage.HasMore {
+		t.Fatalf("first attempt page/error = %#v/%v", firstPage, err)
+	}
+	if firstPage.Attempts[0].Number != 1 || firstPage.Attempts[0].Status != StepPaused ||
+		firstPage.Attempts[1].Number != 2 || firstPage.Attempts[1].Status != StepFailed ||
+		firstPage.Attempts[1].ErrorCode != "worker_lease_expired" {
+		t.Fatalf("first attempt page values = %#v", firstPage.Attempts)
+	}
+	secondPage, err := store.ListAttempts(ctx, job.ID, ListAttemptsFilter{
+		Limit: 2, AfterPosition: firstPage.Attempts[1].StepPosition, AfterNumber: firstPage.Attempts[1].Number,
+	})
+	if err != nil || len(secondPage.Attempts) != 1 || secondPage.HasMore ||
+		secondPage.Attempts[0].Number != 3 || secondPage.Attempts[0].Status != StepCancelled {
+		t.Fatalf("second attempt page/error = %#v/%v", secondPage, err)
 	}
 	events, err := store.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || VerifyEventChain(events) != nil {

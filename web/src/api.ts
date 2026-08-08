@@ -27,6 +27,7 @@ import type {
 	LegacyMigrationEnvelope,
 	LegacyMigrationPreview,
 	LegacyMigrationRecord,
+	StepAttemptListEnvelope,
 } from "./types";
 
 interface ProblemBody {
@@ -145,6 +146,12 @@ export class ApiClient {
 
   async getEvents(jobID: string): Promise<EventsEnvelope> {
     return this.request(`/api/v2/jobs/${encodeURIComponent(jobID)}/events?after=0&limit=500`);
+  }
+
+  async getAttempts(jobID: string, cursor = ""): Promise<StepAttemptListEnvelope> {
+    const query = new URLSearchParams({limit: "500"});
+    if (cursor) query.set("cursor", cursor);
+    return this.request(`/api/v2/jobs/${encodeURIComponent(jobID)}/attempts?${query.toString()}`);
   }
 
   async createJob(input: CreateJobInput): Promise<JobEnvelope> {

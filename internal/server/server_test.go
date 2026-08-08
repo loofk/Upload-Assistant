@@ -78,6 +78,7 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		"/api/v2/readiness/live",
 		"/api/v2/candidates/{candidate_id}/retorrent-job",
 		"/api/v2/jobs/{job_id}", "/api/v2/jobs/{job_id}/summary",
+		"/api/v2/jobs/{job_id}/attempts",
 		"/api/v2/jobs/{job_id}/artifacts/{artifact_id}/content",
 		"/api/v2/jobs/{job_id}/resume", "/api/v2/sites/{site_code}/rules/active",
 		"/api/v2/site-rules/{revision_id}/approve",
@@ -99,7 +100,7 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 			t.Errorf("OpenAPI path %s is missing", path)
 		}
 	}
-	for _, schema := range []string{"RetorrentSummaryArtifact", "RetorrentSummary", "JobSummaryValue", "LiveReadinessCheck", "LiveRuleConfirmation", "LiveReadinessReport"} {
+	for _, schema := range []string{"RetorrentSummaryArtifact", "RetorrentSummary", "JobSummaryValue", "StepAttempt", "StepAttemptListEnvelope", "LiveReadinessCheck", "LiveRuleConfirmation", "LiveReadinessReport"} {
 		if len(document.Components.Schemas[schema]) == 0 {
 			t.Errorf("OpenAPI schema %s is missing", schema)
 		}
@@ -125,8 +126,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 41 {
-		t.Fatalf("tool count = %d, want 41", len(tools))
+	if len(tools) != 42 {
+		t.Fatalf("tool count = %d, want 42", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {

@@ -99,11 +99,32 @@ type Step struct {
 }
 
 type Attempt struct {
-	ID        string     `json:"id"`
-	StepID    string     `json:"step_id"`
-	Number    int        `json:"number"`
-	Status    StepStatus `json:"status"`
-	StartedAt time.Time  `json:"started_at"`
+	ID             string          `json:"id"`
+	JobID          string          `json:"job_id,omitempty"`
+	StepID         string          `json:"step_id"`
+	StepKey        string          `json:"step_key,omitempty"`
+	StepPosition   int             `json:"step_position,omitempty"`
+	Number         int             `json:"number"`
+	Status         StepStatus      `json:"status"`
+	Adapter        string          `json:"adapter,omitempty"`
+	AdapterVersion string          `json:"adapter_version,omitempty"`
+	InputSnapshot  json.RawMessage `json:"input_snapshot,omitempty"`
+	OutputSummary  json.RawMessage `json:"output_summary,omitempty"`
+	ErrorCode      string          `json:"error_code,omitempty"`
+	ErrorDetails   json.RawMessage `json:"error_details,omitempty"`
+	StartedAt      time.Time       `json:"started_at"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
+}
+
+type ListAttemptsFilter struct {
+	Limit         int
+	AfterPosition int
+	AfterNumber   int
+}
+
+type AttemptPage struct {
+	Attempts []Attempt
+	HasMore  bool
 }
 
 type Event struct {

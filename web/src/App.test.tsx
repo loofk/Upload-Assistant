@@ -45,6 +45,39 @@ describe("App authentication boundary", () => {
     expect(new Headers(downloaderCall?.[1]?.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
   });
 
+  it("shows durable step attempts separately from the event chain", async () => {
+    sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+    const jobID = "44444444-4444-4444-8444-444444444444";
+    const baseJob = {
+      id: jobID, kind: "retorrent", status: "blocked", execution_mode: "step", current_step: "target_upload",
+      input: {target: "MTEAM"}, blockers: [{code: "remote_outcome_unknown"}], next_actions: [], resume_state: {}, summary: {},
+      created_at: "2026-08-08T00:00:00Z", updated_at: "2026-08-08T00:00:00Z",
+    };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [baseJob], has_more: false, next_cursor: ""}
+        : path === `/api/v2/jobs/${jobID}/summary` ? {...baseJob, ok: false, job_id: jobID, steps: [], artifacts: []}
+        : path.startsWith(`/api/v2/jobs/${jobID}/events?`) ? {ok: true, status: "ready", job_id: jobID, events: [], next_cursor: 0}
+        : path.startsWith(`/api/v2/jobs/${jobID}/attempts?`) ? {
+          ok: true, status: "blocked", job_id: jobID, current_step: "target_upload", has_more: false, next_cursor: "", blockers: baseJob.blockers, next_actions: [],
+          attempts: [{
+            id: "55555555-5555-4555-8555-555555555555", job_id: jobID,
+            step_id: "66666666-6666-4666-8666-666666666666", step_key: "target_upload", step_position: 18,
+            number: 2, status: "blocked", input_snapshot: {redacted: true, sha256: "a".repeat(64)},
+            output_summary: {}, error_code: "remote_outcome_unknown", error_details: {message: "需要人工核对远端结果"},
+            started_at: "2026-08-08T01:00:00Z", finished_at: "2026-08-08T01:00:01Z",
+          }],
+        } : {};
+      return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name: "尝试 1"}));
+    expect(await screen.findByText("上传目标站")).toBeInTheDocument();
+    expect(screen.getAllByText(/remote_outcome_unknown/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/sha256:/)).toBeInTheDocument();
+  });
+
   it("shows recursively redacted global configuration and action audits", async () => {
     sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {

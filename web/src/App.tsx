@@ -14,13 +14,14 @@ import type {
   JobSummaryEnvelope,
   JsonValue,
   Step,
+  StepAttempt,
 } from "./types";
 
 const tokenKey = "ua.v2.api-token";
 const activeStatuses = new Set<JobStatus>(["queued", "running"]);
 const terminalStatuses = new Set<JobStatus>(["complete", "cancelled"]);
 const downloadableArtifactKinds = new Set([
-  "content_manifest", "metadata", "mediainfo", "bdinfo", "screenshot", "image_upload_receipt",
+  "content_manifest", "metadata", "metadata_tmdb", "metadata_ptgen", "mediainfo", "bdinfo", "screenshot", "image_upload_receipt",
   "target_package", "duplicate_check", "target_torrent_receipt", "preupload_duplicate_check",
   "target_upload_receipt", "target_torrent_download_receipt", "target_injection_receipt",
   "target_seed_observation", "job_summary",
@@ -90,6 +91,9 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   const [selectedID, setSelectedID] = useState("");
   const [detail, setDetail] = useState<JobSummaryEnvelope | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [attempts, setAttempts] = useState<StepAttempt[]>([]);
+  const [attemptCursor, setAttemptCursor] = useState("");
+  const [attemptsHaveMore, setAttemptsHaveMore] = useState(false);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "">("");
   const [nextCursor, setNextCursor] = useState("");
   const [hasMore, setHasMore] = useState(false);
@@ -122,9 +126,14 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   const loadDetail = useCallback(async (jobID: string) => {
     if (!jobID) return;
     try {
-      const [summary, audit] = await Promise.all([client.getSummary(jobID), client.getEvents(jobID)]);
+      const [summary, audit, attemptLog] = await Promise.all([
+        client.getSummary(jobID), client.getEvents(jobID), client.getAttempts(jobID),
+      ]);
       setDetail(summary);
       setEvents(audit.events);
+      setAttempts(attemptLog.attempts);
+      setAttemptCursor(attemptLog.next_cursor);
+      setAttemptsHaveMore(attemptLog.has_more);
       setError("");
     } catch (reason) {
       setError(describeError(reason));
@@ -138,6 +147,9 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   useEffect(() => {
     setDetail(null);
     setEvents([]);
+    setAttempts([]);
+    setAttemptCursor("");
+    setAttemptsHaveMore(false);
     void loadDetail(selectedID);
   }, [selectedID, loadDetail]);
 
@@ -152,6 +164,19 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
 
   const refreshAll = async () => {
     await Promise.all([loadJobs(), selectedID ? loadDetail(selectedID) : Promise.resolve()]);
+  };
+
+  const loadMoreAttempts = async () => {
+    if (!selectedID || !attemptCursor) return;
+    try {
+      const page = await client.getAttempts(selectedID, attemptCursor);
+      setAttempts((current) => [...current, ...page.attempts]);
+      setAttemptCursor(page.next_cursor);
+      setAttemptsHaveMore(page.has_more);
+      setError("");
+    } catch (reason) {
+      setError(describeError(reason));
+    }
   };
 
   return (
@@ -197,8 +222,11 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
             detail ? <JobDetail
               detail={detail}
               events={events}
+              attempts={attempts}
+              attemptsHaveMore={attemptsHaveMore}
               client={client}
               onChanged={refreshAll}
+              onLoadMoreAttempts={loadMoreAttempts}
               onError={(reason) => setError(describeError(reason))}
             /> : <DetailSkeleton />
           ) : <WelcomePanel onCreate={() => setCreateOpen(true)} />}
@@ -234,15 +262,18 @@ function JobCard({job, selected, onSelect}: {job: Job; selected: boolean; onSele
 }
 
 function JobDetail({
-  detail, events, client, onChanged, onError,
+  detail, events, attempts, attemptsHaveMore, client, onChanged, onLoadMoreAttempts, onError,
 }: {
   detail: JobSummaryEnvelope;
   events: AuditEvent[];
+  attempts: StepAttempt[];
+  attemptsHaveMore: boolean;
   client: ApiClient;
   onChanged: () => Promise<void>;
+  onLoadMoreAttempts: () => Promise<void>;
   onError: (reason: unknown) => void;
 }) {
-  const [tab, setTab] = useState<"steps" | "artifacts" | "events" | "summary">("steps");
+  const [tab, setTab] = useState<"steps" | "attempts" | "artifacts" | "events" | "summary">("steps");
   const [resumeText, setResumeText] = useState("{}");
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -331,14 +362,15 @@ function JobDetail({
       </section>}
 
       <nav className="tabs" aria-label="任务详情">
-        {(["steps", "artifacts", "events", "summary"] as const).map((value) => (
+        {(["steps", "attempts", "artifacts", "events", "summary"] as const).map((value) => (
           <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
-            {value === "steps" ? `步骤 ${detail.steps.length}` : value === "artifacts" ? `证据 ${detail.artifacts.length}` : value === "events" ? `日志 ${events.length}` : "总结"}
+            {value === "steps" ? `步骤 ${detail.steps.length}` : value === "attempts" ? `尝试 ${attempts.length}` : value === "artifacts" ? `证据 ${detail.artifacts.length}` : value === "events" ? `日志 ${events.length}` : "总结"}
           </button>
         ))}
       </nav>
 
       {tab === "steps" && <StepsView steps={detail.steps} />}
+      {tab === "attempts" && <AttemptsView attempts={attempts} hasMore={attemptsHaveMore} onLoadMore={onLoadMoreAttempts} />}
       {tab === "artifacts" && <ArtifactsView artifacts={detail.artifacts} jobID={detail.job_id} client={client} onError={onError} />}
       {tab === "events" && <EventsView events={events} />}
       {tab === "summary" && <SummaryView summary={detail.summary} status={detail.status} />}
@@ -368,6 +400,28 @@ function StepsView({steps}: {steps: Step[]}) {
       </div>
     </details>
   ))}</section>;
+}
+
+function AttemptsView({attempts, hasMore, onLoadMore}: {
+  attempts: StepAttempt[];
+  hasMore: boolean;
+  onLoadMore: () => Promise<void>;
+}) {
+  if (!attempts.length) return <Empty text="尚无步骤尝试记录。Worker 开始执行步骤后会在这里留下独立审计记录。" />;
+  return <section className="event-list">{attempts.map((attempt) => (
+    <details className="event-row" key={attempt.id} open={attempt.status === "blocked" || attempt.status === "failed"}>
+      <summary>
+        <span className="event-sequence">{attempt.step_position}.{attempt.number}</span>
+        <div><strong>{humanizeStep(attempt.step_key)}</strong><small>{attempt.step_key}{attempt.error_code ? ` · ${attempt.error_code}` : ""}</small></div>
+        <time>{formatDate(attempt.started_at)}</time>
+        <StatusPill status={attempt.status} />
+      </summary>
+      <div>
+        <p>输入快照 <code>sha256:{shortHash(attempt.input_snapshot?.sha256)}</code>{attempt.finished_at ? ` · 结束 ${formatDate(attempt.finished_at)}` : " · 尚未结束"}{attempt.adapter ? ` · ${attempt.adapter}${attempt.adapter_version ? ` ${attempt.adapter_version}` : ""}` : ""}</p>
+        <JsonBlock value={attempt.error_code ? attempt.error_details : attempt.output_summary} emptyLabel="此尝试还没有输出或错误证据。" />
+      </div>
+    </details>
+  ))}{hasMore && <button className="load-more" onClick={() => void onLoadMore()}>加载更多尝试</button>}</section>;
 }
 
 function ArtifactsView({artifacts, jobID, client, onError}: {artifacts: Artifact[]; jobID: string; client: ApiClient; onError: (reason: unknown) => void}) {

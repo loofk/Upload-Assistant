@@ -26,6 +26,7 @@ type JobService interface {
 	GetJob(context.Context, string) (workflow.Job, error)
 	ListJobs(context.Context, workflow.ListJobsFilter) (workflow.JobPage, error)
 	ListSteps(context.Context, string) ([]workflow.Step, error)
+	ListAttempts(context.Context, string, workflow.ListAttemptsFilter) (workflow.AttemptPage, error)
 	ListEvents(context.Context, string, int64, int) ([]workflow.Event, error)
 	ListArtifacts(context.Context, string) ([]workflow.Artifact, error)
 	GetArtifact(context.Context, string, string) (workflow.Artifact, error)
@@ -73,6 +74,7 @@ func registerJobRoutes(mux *http.ServeMux, service JobService, reader ArtifactCo
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}", api.get)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/summary", api.summary)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/steps", api.steps)
+	mux.HandleFunc("GET /api/v2/jobs/{job_id}/attempts", api.attempts)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/events", api.events)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts", api.artifacts)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts/{artifact_id}/content", api.artifactContent)
@@ -343,6 +345,49 @@ func (a jobsAPI) events(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a jobsAPI) attempts(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
+	id, ok := jobID(w, r)
+	if !ok {
+		return
+	}
+	limit, err := parseIntQuery(r, "limit", 100, 1, 500)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_limit", err.Error())
+		return
+	}
+	filter := workflow.ListAttemptsFilter{Limit: limit}
+	if cursor := strings.TrimSpace(r.URL.Query().Get("cursor")); cursor != "" {
+		position, number, err := decodeAttemptCursor(cursor)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "invalid_cursor", "cursor is invalid or malformed")
+			return
+		}
+		filter.AfterPosition, filter.AfterNumber = position, number
+	}
+	job, err := a.service.GetJob(r.Context(), id)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	page, err := a.service.ListAttempts(r.Context(), id, filter)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	nextCursor := ""
+	if page.HasMore && len(page.Attempts) > 0 {
+		nextCursor = encodeAttemptCursor(page.Attempts[len(page.Attempts)-1])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": job.Status, "job_id": id, "current_step": job.CurrentStep,
+		"attempts": redactAttempts(page.Attempts), "has_more": page.HasMore, "next_cursor": nextCursor,
+		"blockers": redactJSON(job.Blockers), "next_actions": redactJSON(job.NextActions),
+	})
+}
+
 func (a jobsAPI) artifacts(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireScope(w, r, "jobs:read"); !ok {
 		return
@@ -441,6 +486,33 @@ func jobOK(status workflow.JobStatus) bool {
 type jobCursor struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
+}
+
+type attemptCursor struct {
+	StepPosition int `json:"step_position"`
+	Number       int `json:"number"`
+}
+
+func encodeAttemptCursor(attempt workflow.Attempt) string {
+	body, _ := json.Marshal(attemptCursor{StepPosition: attempt.StepPosition, Number: attempt.Number})
+	return base64.RawURLEncoding.EncodeToString(body)
+}
+
+func decodeAttemptCursor(value string) (int, int, error) {
+	body, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(body) > 256 {
+		return 0, 0, errors.New("invalid attempt cursor encoding")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var cursor attemptCursor
+	if err := decoder.Decode(&cursor); err != nil || cursor.StepPosition <= 0 || cursor.Number <= 0 {
+		return 0, 0, errors.New("invalid attempt cursor value")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return 0, 0, errors.New("invalid attempt cursor document")
+	}
+	return cursor.StepPosition, cursor.Number, nil
 }
 
 func encodeJobCursor(job workflow.Job) string {

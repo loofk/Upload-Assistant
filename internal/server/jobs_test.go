@@ -26,6 +26,22 @@ type artifactJobService struct {
 	artifact workflow.Artifact
 }
 
+type attemptJobService struct {
+	JobService
+	job    workflow.Job
+	page   workflow.AttemptPage
+	filter workflow.ListAttemptsFilter
+}
+
+func (service *attemptJobService) GetJob(context.Context, string) (workflow.Job, error) {
+	return service.job, nil
+}
+
+func (service *attemptJobService) ListAttempts(_ context.Context, _ string, filter workflow.ListAttemptsFilter) (workflow.AttemptPage, error) {
+	service.filter = filter
+	return service.page, nil
+}
+
 func (service artifactJobService) GetArtifact(context.Context, string, string) (workflow.Artifact, error) {
 	return service.artifact, nil
 }
@@ -93,6 +109,57 @@ func TestListJobsRejectsMalformedCursor(t *testing.T) {
 	(jobsAPI{service: service}).list(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("malformed cursor status/body = %d/%s", response.Code, response.Body.String())
+	}
+}
+
+func TestListAttemptsUsesOpaqueCursorAndRedactsSnapshotsAndErrors(t *testing.T) {
+	jobID := "44444444-4444-4444-8444-444444444444"
+	service := &attemptJobService{
+		job: workflow.Job{ID: jobID, Status: workflow.JobBlocked, CurrentStep: "target_upload", Blockers: json.RawMessage(`[]`), NextActions: json.RawMessage(`[]`)},
+		page: workflow.AttemptPage{HasMore: true, Attempts: []workflow.Attempt{{
+			ID: "55555555-5555-4555-8555-555555555555", JobID: jobID,
+			StepID: "66666666-6666-4666-8666-666666666666", StepKey: "target_upload", StepPosition: 18,
+			Number: 2, Status: workflow.StepBlocked, InputSnapshot: json.RawMessage(`{"passkey":"input-secret"}`),
+			OutputSummary: json.RawMessage(`{"url":"https://example.invalid/result?token=output-secret"}`),
+			ErrorCode:     "remote_outcome_unknown", ErrorDetails: json.RawMessage(`{"cookie":"error-secret"}`), StartedAt: time.Now().UTC(),
+		}}},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/jobs/"+jobID+"/attempts?limit=1", nil)
+	request.SetPathValue("job_id", jobID)
+	request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{
+		UserID: "auditor", Role: "auditor", TokenScopes: []string{"jobs:read"},
+	}))
+	response := httptest.NewRecorder()
+	(jobsAPI{service: service}).attempts(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("attempt status/body = %d/%s", response.Code, response.Body.String())
+	}
+	if service.filter.Limit != 1 {
+		t.Fatalf("attempt filter = %#v", service.filter)
+	}
+	for _, secret := range []string{"input-secret", "output-secret", "error-secret"} {
+		if bytes.Contains(response.Body.Bytes(), []byte(secret)) {
+			t.Fatalf("attempt response exposed %q: %s", secret, response.Body.String())
+		}
+	}
+	var envelope struct {
+		Attempts   []workflow.Attempt `json:"attempts"`
+		HasMore    bool               `json:"has_more"`
+		NextCursor string             `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || len(envelope.Attempts) != 1 || !envelope.HasMore || envelope.NextCursor == "" {
+		t.Fatalf("attempt envelope/error = %#v/%v", envelope, err)
+	}
+	position, number, err := decodeAttemptCursor(envelope.NextCursor)
+	if err != nil || position != 18 || number != 2 {
+		t.Fatalf("attempt cursor/error = %d/%d/%v", position, number, err)
+	}
+	var snapshot struct {
+		Redacted bool   `json:"redacted"`
+		SHA256   string `json:"sha256"`
+	}
+	if err := json.Unmarshal(envelope.Attempts[0].InputSnapshot, &snapshot); err != nil || !snapshot.Redacted || len(snapshot.SHA256) != 64 {
+		t.Fatalf("attempt snapshot/error = %#v/%v", snapshot, err)
 	}
 }
 

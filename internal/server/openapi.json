@@ -215,6 +215,22 @@
         "responses": {"200": {"description": "Durable workflow steps", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "job_id", "steps"], "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}}}}}}}
       }
     },
+    "/api/v2/jobs/{job_id}/attempts": {
+      "get": {
+        "operationId": "listJobAttempts",
+        "description": "Lists durable step attempts in workflow order. Raw input snapshots are replaced with SHA-256 evidence and error/output details are recursively redacted.",
+        "parameters": [
+          {"$ref": "#/components/parameters/JobID"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+          {"name": "cursor", "in": "query", "description": "Opaque cursor returned by the previous page.", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Redacted step attempt audit history", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StepAttemptListEnvelope"}}}},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "404": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
     "/api/v2/jobs/{job_id}/events": {
       "get": {
         "operationId": "listJobEvents",
@@ -854,6 +870,28 @@
 		"properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string", "enum": ["retorrent", "daily_candidates"]}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
       },
       "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object", "description": "The raw durable snapshot is never returned. The API exposes only {redacted:true,sha256:<digest>}."}, "output_summary": {"type": "object", "description": "Recursively redacted step output evidence."}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
+      "StepAttempt": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "job_id", "step_id", "step_key", "step_position", "number", "status", "input_snapshot", "output_summary", "error_details", "started_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"},
+          "step_key": {"type": "string"}, "step_position": {"type": "integer", "minimum": 1}, "number": {"type": "integer", "minimum": 1},
+          "status": {"type": "string", "enum": ["running", "paused", "blocked", "failed", "complete", "cancelled"]},
+          "adapter": {"type": "string"}, "adapter_version": {"type": "string"},
+          "input_snapshot": {"type": "object", "additionalProperties": false, "required": ["redacted", "sha256"], "properties": {"redacted": {"type": "boolean", "const": true}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
+          "output_summary": {"description": "Recursively redacted output evidence."}, "error_code": {"type": "string"}, "error_details": {"description": "Recursively redacted stable failure or blocker details."},
+          "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "StepAttemptListEnvelope": {
+        "type": "object", "additionalProperties": false,
+        "required": ["ok", "status", "job_id", "attempts", "has_more", "next_cursor", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"},
+          "attempts": {"type": "array", "items": {"$ref": "#/components/schemas/StepAttempt"}}, "has_more": {"type": "boolean"}, "next_cursor": {"type": "string"},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
       "Event": {"type": "object", "required": ["id", "job_id", "sequence", "type", "actor_type", "payload", "hash", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "sequence": {"type": "integer"}, "type": {"type": "string"}, "actor_type": {"type": "string"}, "actor_id": {"type": "string"}, "payload": {"type": "object"}, "previous_hash": {"type": "string"}, "hash": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}},
       "AuditEvent": {
         "type": "object", "additionalProperties": false,

@@ -48,6 +48,20 @@ func redactSteps(steps []workflow.Step) []workflow.Step {
 	return result
 }
 
+func redactAttempts(attempts []workflow.Attempt) []workflow.Attempt {
+	result := make([]workflow.Attempt, len(attempts))
+	for index, attempt := range attempts {
+		digest := sha256.Sum256(attempt.InputSnapshot)
+		attempt.InputSnapshot = mustJSONRaw(map[string]any{
+			"redacted": true, "sha256": hex.EncodeToString(digest[:]),
+		})
+		attempt.OutputSummary = redactJSON(attempt.OutputSummary)
+		attempt.ErrorDetails = redactJSON(attempt.ErrorDetails)
+		result[index] = attempt
+	}
+	return result
+}
+
 func redactEvents(events []workflow.Event) []workflow.Event {
 	result := make([]workflow.Event, len(events))
 	for index, event := range events {
