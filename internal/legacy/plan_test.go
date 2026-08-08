@@ -99,6 +99,43 @@ func TestInspectDisablesContainerLoopbackDownloader(t *testing.T) {
 	}
 }
 
+func TestInspectMigratesSonarrAndRadarrWithoutExposingAPIKeys(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "DEFAULT": {
+    "use_sonarr": True, "sonarr_url": "https://arr.example/sonarr", "sonarr_api_key": "sonarr-private-key",
+    "sonarr_url_1": "http://127.0.0.1:8990", "sonarr_api_key_1": "sonarr-loopback-key",
+    "use_radarr": True, "radarr_url": "https://arr.example/radarr", "radarr_api_key": "radarr-private-key"
+  },
+  "DISCORD": {"use_discord": True, "discord_bot_token": "bot-private-token", "discord_channel_id": "123"}
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.mediaManagers) != 3 || plan.mediaManagers[0].input.Adapter != "sonarr" || plan.mediaManagers[0].input.Enabled == nil || !*plan.mediaManagers[0].input.Enabled {
+		t.Fatalf("media managers = %#v", plan.mediaManagers)
+	}
+	if plan.mediaManagers[1].input.Enabled == nil || *plan.mediaManagers[1].input.Enabled {
+		t.Fatalf("loopback Sonarr should be preserved disabled: %#v", plan.mediaManagers[1])
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(issue Issue) bool { return issue.Code == "legacy_discord_bot_requires_webhook" }) ||
+		!slices.ContainsFunc(plan.Warnings, func(issue Issue) bool {
+			return issue.Code == "container_loopback_requires_review" && issue.Resource == "sonarr-1"
+		}) {
+		t.Fatalf("warnings = %#v", plan.Warnings)
+	}
+	body, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"sonarr-private-key", "sonarr-loopback-key", "radarr-private-key", "bot-private-token"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("preview exposed secret: %s", body)
+		}
+	}
+}
+
 func TestInspectMigratesTransmissionWithoutExposingCredentials(t *testing.T) {
 	root := t.TempDir()
 	writeLegacyFixture(t, root, `config = {

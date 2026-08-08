@@ -24,6 +24,9 @@ func (s *Store) Create(ctx context.Context, input CreateInput, now time.Time) (S
 	if err != nil {
 		return Schedule{}, err
 	}
+	if err := s.validateNotificationChannels(ctx, input.Config.NotificationChannels); err != nil {
+		return Schedule{}, err
+	}
 	config, _ := json.Marshal(input.Config)
 	var nextRun any = next
 	if !input.Enabled {
@@ -102,6 +105,9 @@ func (s *Store) Update(ctx context.Context, id string, input UpdateInput, now ti
 	if err != nil {
 		return Schedule{}, err
 	}
+	if err := s.validateNotificationChannels(ctx, normalized.Config.NotificationChannels); err != nil {
+		return Schedule{}, err
+	}
 	configBody, _ := json.Marshal(normalized.Config)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -165,6 +171,19 @@ func normalizeCreate(input CreateInput, now time.Time) (CreateInput, time.Time, 
 	input.Timezone = strings.TrimSpace(input.Timezone)
 	input.Config.Source = strings.ToUpper(strings.TrimSpace(input.Config.Source))
 	input.Config.Target = strings.ToUpper(strings.TrimSpace(input.Config.Target))
+	seenChannels := map[string]struct{}{}
+	channels := make([]string, 0, len(input.Config.NotificationChannels))
+	for _, channel := range input.Config.NotificationChannels {
+		channel = strings.TrimSpace(channel)
+		if !safeScheduleResourceName.MatchString(channel) {
+			return input, time.Time{}, fmt.Errorf("%w: notification channel names must be safe resource names", ErrInvalid)
+		}
+		if _, exists := seenChannels[channel]; !exists {
+			seenChannels[channel] = struct{}{}
+			channels = append(channels, channel)
+		}
+	}
+	input.Config.NotificationChannels = channels
 	if input.CronExpression == "" {
 		input.CronExpression = "0 9 * * *"
 	}
@@ -197,4 +216,20 @@ func normalizeCreate(input CreateInput, now time.Time) (CreateInput, time.Time, 
 		return input, time.Time{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return input, next, nil
+}
+
+var safeScheduleResourceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+func (s *Store) validateNotificationChannels(ctx context.Context, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	var count int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM notification_channels WHERE enabled AND name = ANY($1)`, names).Scan(&count); err != nil {
+		return fmt.Errorf("validate schedule notification channels: %w", err)
+	}
+	if count != len(names) {
+		return fmt.Errorf("%w: every notification channel must exist and be enabled", ErrInvalid)
+	}
+	return nil
 }

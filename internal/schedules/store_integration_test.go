@@ -30,10 +30,15 @@ func TestStorePersistsScheduleRunAndInAppNotification(t *testing.T) {
 
 	store := NewStore(pool)
 	name := "candidate-schedule-" + uuid.NewString()
+	channelName := "discord-" + uuid.NewString()[:8]
+	var channelID string
+	if err := pool.QueryRow(ctx, `INSERT INTO notification_channels(name, adapter, enabled, config) VALUES ($1, 'discord_webhook', true, '{"timeout_seconds":15}') RETURNING id::text`, channelName).Scan(&channelID); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule, err := store.Create(ctx, CreateInput{
 		Name: name, CronExpression: "30 8 * * *", Timezone: "Asia/Shanghai", Enabled: true,
-		Config: DailyCandidateConfig{Source: "U2", Target: "MTEAM", TargetCount: 10, ScanLimit: 30, Page: 1},
+		Config: DailyCandidateConfig{Source: "U2", Target: "MTEAM", TargetCount: 10, ScanLimit: 30, Page: 1, NotificationChannels: []string{channelName}},
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +46,7 @@ func TestStorePersistsScheduleRunAndInAppNotification(t *testing.T) {
 	var jobID string
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM schedules WHERE id = $1", schedule.ID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM notification_channels WHERE id = $1", channelID)
 		if jobID != "" {
 			_, _ = pool.Exec(context.Background(), "DELETE FROM jobs WHERE id = $1", jobID)
 		}
@@ -85,7 +91,7 @@ func TestStorePersistsScheduleRunAndInAppNotification(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE jobs SET status = 'blocked', summary = '{"ok":false,"target_met":false}' WHERE id = $1`, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if count, err := store.PublishTerminalNotifications(ctx, 10); err != nil || count != 1 {
+	if count, err := store.PublishTerminalNotifications(ctx, 10); err != nil || count != 2 {
 		t.Fatalf("PublishTerminalNotifications() = %d/%v", count, err)
 	}
 	if count, err := store.PublishTerminalNotifications(ctx, 10); err != nil || count != 0 {
@@ -96,7 +102,7 @@ func TestStorePersistsScheduleRunAndInAppNotification(t *testing.T) {
 		       updated_at = now() + interval '1 second' WHERE id = $1`, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if count, err := store.PublishTerminalNotifications(ctx, 10); err != nil || count != 1 {
+	if count, err := store.PublishTerminalNotifications(ctx, 10); err != nil || count != 2 {
 		t.Fatalf("updated PublishTerminalNotifications() = %d/%v", count, err)
 	}
 	notifications, err := store.ListNotifications(ctx, 100)
@@ -104,17 +110,25 @@ func TestStorePersistsScheduleRunAndInAppNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := false
+	foundExternal := false
 	for _, notification := range notifications {
 		if notification.ScheduleRunID == run.ID {
 			var payload struct {
 				JobStatus string `json:"job_status"`
 			}
 			_ = json.Unmarshal(notification.Payload, &payload)
-			found = notification.Status == "sent" && notification.Channel == "in_app" && notification.JobID == job.ID && notification.Attempts == 2 && payload.JobStatus == "complete"
+			if notification.Channel == "in_app" {
+				found = notification.Status == "sent" && notification.JobID == job.ID && notification.Attempts == 2 && payload.JobStatus == "complete"
+			} else if notification.Channel == channelName {
+				foundExternal = notification.Status == "queued" && notification.NotificationChannelID == channelID && notification.Attempts == 0 && len(notification.PayloadSHA256) == 64 && payload.JobStatus == "complete"
+			}
 		}
 	}
 	if !found {
 		t.Fatalf("notification for run %s was not published: %#v", run.ID, notifications)
+	}
+	if !foundExternal {
+		t.Fatalf("external notification for run %s was not queued: %#v", run.ID, notifications)
 	}
 	disabled := false
 	updated, err := store.Update(ctx, schedule.ID, UpdateInput{Enabled: &disabled}, now)

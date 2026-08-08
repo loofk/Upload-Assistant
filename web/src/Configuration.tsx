@@ -1,14 +1,16 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from "react";
 import {ApiClient} from "./api";
-import type {Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
+import type {Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, MediaManager, NotificationChannel, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
 
-type ConfigTab = "downloaders" | "image-hosts" | "screenshots" | "rules" | "migration";
+type ConfigTab = "downloaders" | "image-hosts" | "notifications" | "media-managers" | "screenshots" | "rules" | "migration";
 
 export default function Configuration({client, onError}: {client: ApiClient; onError: (reason: unknown) => void}) {
   const [tab, setTab] = useState<ConfigTab>("downloaders");
   const [downloaders, setDownloaders] = useState<Downloader[]>([]);
 	const [downloaderAdapters, setDownloaderAdapters] = useState<DownloaderAdapterCapability[]>([]);
   const [imageHosts, setImageHosts] = useState<ImageHost[]>([]);
+  const [notificationChannels, setNotificationChannels] = useState<NotificationChannel[]>([]);
+  const [mediaManagers, setMediaManagers] = useState<MediaManager[]>([]);
   const [screenshots, setScreenshots] = useState<ScreenshotProfile[]>([]);
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,12 +18,14 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-		const [nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextScreenshots, nextSites] = await Promise.all([
-			client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listScreenshotProfiles(), client.listSites(),
+		const [nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextNotificationChannels, nextMediaManagers, nextScreenshots, nextSites] = await Promise.all([
+			client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listNotificationChannels(), client.listMediaManagers(), client.listScreenshotProfiles(), client.listSites(),
       ]);
       setDownloaders(nextDownloaders);
 		setDownloaderAdapters(nextDownloaderAdapters);
       setImageHosts(nextImageHosts);
+      setNotificationChannels(nextNotificationChannels);
+      setMediaManagers(nextMediaManagers);
       setScreenshots(nextScreenshots);
       setSites(nextSites);
     } catch (reason) {
@@ -39,12 +43,14 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
       <button className="secondary" onClick={() => void reload()} disabled={loading}>刷新配置</button>
     </header>
     <nav className="config-tabs">
-      {(["downloaders", "image-hosts", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
-        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
+      {(["downloaders", "image-hosts", "notifications", "media-managers", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
+        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "notifications" ? `通知 ${notificationChannels.length}` : value === "media-managers" ? `Sonarr/Radarr ${mediaManagers.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
       </button>)}
     </nav>
 		{tab === "downloaders" && <DownloadersPanel items={downloaders} adapters={downloaderAdapters} client={client} reload={reload} onError={onError} />}
     {tab === "image-hosts" && <ImageHostsPanel items={imageHosts} client={client} reload={reload} onError={onError} />}
+    {tab === "notifications" && <NotificationChannelsPanel items={notificationChannels} client={client} reload={reload} onError={onError} />}
+    {tab === "media-managers" && <MediaManagersPanel items={mediaManagers} client={client} reload={reload} onError={onError} />}
     {tab === "screenshots" && <ScreenshotsPanel items={screenshots} client={client} reload={reload} onError={onError} />}
     {tab === "rules" && <RulesPanel sites={sites} client={client} reloadSites={reload} onError={onError} />}
     {tab === "migration" && <LegacyMigrationPanel client={client} />}
@@ -161,6 +167,43 @@ function ImageHostsPanel({items, client, reload, onError}: {items: ImageHost[]; 
     <label className="full">API 地址<input type="url" required value={form.endpoint} onChange={(event) => setForm({...form, endpoint: event.target.value})} /></label>
     <label>优先级<input type="number" value={form.priority} onChange={(event) => setForm({...form, priority: Number(event.target.value)})} /></label>
     <label>API Key（留空则保留）<input type="password" autoComplete="new-password" value={form.apiKey} onChange={(event) => setForm({...form, apiKey: event.target.value})} /></label>
+  </ConfigForm></div>;
+}
+
+function NotificationChannelsPanel({items, client, reload, onError}: {items: NotificationChannel[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
+  const [form, setForm] = useState({name: "discord-main", enabled: true, webhookURL: ""});
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true);
+    try { await client.putNotificationChannel(form.name, form); setForm({...form, webhookURL: ""}); await reload(); }
+    catch (reason) { onError(reason); } finally { setBusy(false); }
+  };
+  return <div className="config-layout"><section><ConfigSectionTitle title="Discord 通知渠道" copy="Webhook URL 加密保存；只有调度显式选择此渠道时才会投递，失败按持久队列重试。" />
+    <div className="integration-grid">{items.map((item) => <IntegrationCard key={item.id} title={item.name} type={item.adapter} enabled={item.enabled} health={item.health_status} endpoint="encrypted webhook URL" credentials={item.credential_fields} details={[`超时 ${item.config.timeout_seconds ?? 15}s`, "禁止 mentions · 保存送达回执 hash"]} />)}{!items.length && <ConfigEmpty text="尚未配置通知渠道；每日候选仍会保留本地通知。" />}</div>
+  </section><ConfigForm title="添加或更新 Discord webhook" onSubmit={submit} busy={busy}>
+    <label>渠道名称<input required value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} /></label>
+    <label><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 启用投递</label>
+    <label className="full">Webhook URL（新建必填，更新留空保留）<input type="password" autoComplete="new-password" value={form.webhookURL} onChange={(event) => setForm({...form, webhookURL: event.target.value})} /></label>
+    <div className="safety-callout full"><strong>安全边界</strong><span>只发送候选摘要；不会提交候选、确认规则或上传种子。</span></div>
+  </ConfigForm></div>;
+}
+
+function MediaManagersPanel({items, client, reload, onError}: {items: MediaManager[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
+  const [form, setForm] = useState<{name: string; adapter: "sonarr" | "radarr"; enabled: boolean; endpoint: string; apiKey: string}>({name: "sonarr-main", adapter: "sonarr", enabled: true, endpoint: "http://host.docker.internal:8989", apiKey: ""});
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true);
+    try { await client.putMediaManager(form.name, form); setForm({...form, apiKey: ""}); await reload(); }
+    catch (reason) { onError(reason); } finally { setBusy(false); }
+  };
+  return <div className="config-layout"><section><ConfigSectionTitle title="Sonarr / Radarr" copy="每个实例独立 endpoint 与加密 API key；探测和路径匹配都是显式、只读、可审计调用。" />
+    <div className="integration-grid">{items.map((item) => <IntegrationCard key={item.id} title={item.name} type={item.adapter} enabled={item.enabled} health={item.health_status} endpoint={item.config.endpoint} credentials={item.credential_fields} details={["API v3 · X-Api-Key", "审计只保存查询/响应 hash"]} action={<button className="card-action" disabled={!item.enabled} onClick={async () => { try { await client.probeMediaManager(item.name); await reload(); } catch (reason) { onError(reason); } }}>显式探测</button>} />)}{!items.length && <ConfigEmpty text="尚未配置 Sonarr/Radarr。" />}</div>
+  </section><ConfigForm title="添加或更新媒体管理器" onSubmit={submit} busy={busy}>
+    <label>实例名称<input required value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} /></label>
+    <label>适配器<select value={form.adapter} onChange={(event) => { const adapter = event.target.value as "sonarr" | "radarr"; setForm({...form, adapter, endpoint: adapter === "sonarr" ? "http://host.docker.internal:8989" : "http://host.docker.internal:7878"}); }}><option value="sonarr">Sonarr</option><option value="radarr">Radarr</option></select></label>
+    <label><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 启用实例</label>
+    <label className="full">服务地址<input type="url" required value={form.endpoint} onChange={(event) => setForm({...form, endpoint: event.target.value})} /></label>
+    <label className="full">API Key（新建必填，更新留空保留）<input type="password" autoComplete="new-password" value={form.apiKey} onChange={(event) => setForm({...form, apiKey: event.target.value})} /></label>
   </ConfigForm></div>;
 }
 

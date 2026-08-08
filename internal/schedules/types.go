@@ -16,11 +16,12 @@ var (
 const KindDailyCandidates = "daily_candidates"
 
 type DailyCandidateConfig struct {
-	Source      string `json:"source"`
-	Target      string `json:"target"`
-	TargetCount int    `json:"target_count"`
-	ScanLimit   int    `json:"scan_limit"`
-	Page        int    `json:"page"`
+	Source               string   `json:"source"`
+	Target               string   `json:"target"`
+	TargetCount          int      `json:"target_count"`
+	ScanLimit            int      `json:"scan_limit"`
+	Page                 int      `json:"page"`
+	NotificationChannels []string `json:"notification_channels,omitempty"`
 }
 
 type Schedule struct {
@@ -82,15 +83,19 @@ type Run struct {
 }
 
 type Notification struct {
-	ID            string          `json:"id"`
-	ScheduleRunID string          `json:"schedule_run_id,omitempty"`
-	JobID         string          `json:"job_id,omitempty"`
-	Channel       string          `json:"channel"`
-	Status        string          `json:"status"`
-	Payload       json.RawMessage `json:"payload"`
-	Attempts      int             `json:"attempts"`
-	LastError     string          `json:"last_error,omitempty"`
-	ScheduledAt   time.Time       `json:"scheduled_at"`
-	SentAt        *time.Time      `json:"sent_at,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
+	ID                    string          `json:"id"`
+	ScheduleRunID         string          `json:"schedule_run_id,omitempty"`
+	JobID                 string          `json:"job_id,omitempty"`
+	NotificationChannelID string          `json:"notification_channel_id,omitempty"`
+	Channel               string          `json:"channel"`
+	Status                string          `json:"status"`
+	Payload               json.RawMessage `json:"payload"`
+	PayloadSHA256         string          `json:"payload_sha256,omitempty"`
+	RemoteReceipt         json.RawMessage `json:"remote_receipt,omitempty"`
+	Attempts              int             `json:"attempts"`
+	LastError             string          `json:"last_error,omitempty"`
+	ScheduledAt           time.Time       `json:"scheduled_at"`
+	SentAt                *time.Time      `json:"sent_at,omitempty"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }

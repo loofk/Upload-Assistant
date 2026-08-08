@@ -533,6 +533,13 @@ func (executor candidateSummaryExecutor) Execute(ctx context.Context, execution 
 	if !decodePrevious(frozen.PreviousSteps, "candidate_rank", &ranked) {
 		return nil, invalidSnapshotBlock(errors.New("candidate_rank output is missing"))
 	}
+	var evaluated struct {
+		EvaluatedCount int `json:"evaluated_count"`
+		BlockedCount   int `json:"blocked_count"`
+	}
+	if !decodePrevious(frozen.PreviousSteps, "candidate_evaluate", &evaluated) {
+		return nil, invalidSnapshotBlock(errors.New("candidate_evaluate output is missing"))
+	}
 	input, err := candidateInput(execution.Job.Input)
 	if err != nil {
 		return nil, candidateInputBlock(err)
@@ -551,7 +558,8 @@ func (executor candidateSummaryExecutor) Execute(ctx context.Context, execution 
 		"schedule_id": input.ScheduleID,
 		"date":        ranked.Date, "source": input.Source, "target": input.Target,
 		"target_count": ranked.TargetCount, "selected_count": ranked.SelectedCount,
-		"ready_count": ranked.ReadyCount, "target_met": ranked.TargetMet,
+		"evaluated_count": evaluated.EvaluatedCount, "ready_count": ranked.ReadyCount,
+		"blocked_count": evaluated.BlockedCount, "target_met": ranked.TargetMet,
 		"blockers": blockers, "next_actions": nextActions, "digest_file": ranked.DigestArtifact,
 		"generated_at": candidateNow(executor.dependencies),
 	}

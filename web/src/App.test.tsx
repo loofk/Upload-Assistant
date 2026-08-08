@@ -27,6 +27,8 @@ describe("App authentication boundary", () => {
         : path === "/api/v2/downloaders" ? {downloaders: []}
 				: path === "/api/v2/downloader-adapters" ? {adapters: [{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: [], operations: {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: true, tags: true, skip_checking: true}}]}
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
+        : path === "/api/v2/notification-channels" ? {notification_channels: []}
+        : path === "/api/v2/media-managers" ? {media_managers: []}
         : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
         : path === "/api/v2/sites" ? {sites: []}
         : {};
@@ -54,6 +56,8 @@ describe("App authentication boundary", () => {
 					{adapter: "deluge", display_name: "Deluge", runtime_supported: true, credential_fields: ["password"], operations, constraints: ["Web JSON-RPC only"]},
 				]}
 				: path === "/api/v2/image-hosts" ? {image_hosts: []}
+				: path === "/api/v2/notification-channels" ? {notification_channels: []}
+				: path === "/api/v2/media-managers" ? {media_managers: []}
 				: path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
 				: path === "/api/v2/sites" ? {sites: []} : {};
 			return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
@@ -101,6 +105,8 @@ describe("App authentication boundary", () => {
         : path === "/api/v2/downloaders" ? {downloaders: []}
 				: path === "/api/v2/downloader-adapters" ? {adapters: [{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: [], operations: {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: true, tags: true, skip_checking: true}}]}
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
+        : path === "/api/v2/notification-channels" ? {notification_channels: []}
+        : path === "/api/v2/media-managers" ? {media_managers: []}
         : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
         : path === "/api/v2/sites" ? {sites: []}
         : path === "/api/v2/migrations/legacy/preview" ? {

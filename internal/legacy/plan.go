@@ -101,16 +101,22 @@ type screenshotOperation struct {
 	input integrations.ScreenshotProfileInput
 }
 
+type mediaManagerOperation struct {
+	name  string
+	input integrations.MediaManagerInput
+}
+
 // Plan contains an intentionally redacted public preview and private write
 // operations. Secret-bearing fields are unexported so JSON and log encoders
 // cannot expose legacy credentials by accident.
 type Plan struct {
 	Preview
-	files       []sourceBlob
-	sites       []siteCredentialOperation
-	downloaders []downloaderOperation
-	imageHosts  []imageHostOperation
-	screenshots []screenshotOperation
+	files         []sourceBlob
+	sites         []siteCredentialOperation
+	downloaders   []downloaderOperation
+	imageHosts    []imageHostOperation
+	screenshots   []screenshotOperation
+	mediaManagers []mediaManagerOperation
 }
 
 type Fingerprinter interface {
@@ -319,6 +325,7 @@ func (plan *Plan) build(config map[string]any) error {
 	plan.buildDownloaders(defaults, clients)
 	plan.buildImageHosts(defaults)
 	plan.buildScreenshots(defaults)
+	plan.buildMediaManagers(defaults)
 	plan.reportUnsupported(defaults, config, trackers)
 	return nil
 }
@@ -713,6 +720,66 @@ func (plan *Plan) buildScreenshots(defaults map[string]any) {
 	plan.Resources = append(plan.Resources, ResourcePreview{Kind: "screenshot_profile", Name: "legacy-default", Enabled: true, Configuration: config})
 }
 
+func (plan *Plan) buildMediaManagers(defaults map[string]any) {
+	for _, adapter := range []string{"sonarr", "radarr"} {
+		useEnabled, _ := defaults["use_"+adapter].(bool)
+		for index := 0; index < 4; index++ {
+			suffix := ""
+			name := adapter
+			if index > 0 {
+				suffix = "_" + strconv.Itoa(index)
+				name = adapter + "-" + strconv.Itoa(index)
+			}
+			endpointValue := usefulString(defaults[adapter+"_url"+suffix])
+			apiKey := usefulString(defaults[adapter+"_api_key"+suffix])
+			if endpointValue == "" && apiKey == "" {
+				continue
+			}
+			if endpointValue == "" || apiKey == "" {
+				plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_media_manager_incomplete", Resource: name, Message: "旧媒体管理器的 endpoint 或 API key 不完整，已跳过。"})
+				continue
+			}
+			endpoint, loopback, err := safeLegacyServiceEndpoint(endpointValue)
+			if err != nil {
+				plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_media_manager_endpoint_invalid", Resource: name, Message: "旧媒体管理器地址无法安全转换，已跳过。"})
+				continue
+			}
+			enabled := useEnabled && !loopback
+			if loopback {
+				plan.Warnings = append(plan.Warnings, Issue{Code: "container_loopback_requires_review", Resource: name, Message: "旧媒体管理器地址指向 127.0.0.1/localhost，在容器中不是盒子宿主机；配置会保持禁用。"})
+			}
+			plan.mediaManagers = append(plan.mediaManagers, mediaManagerOperation{name: name, input: integrations.MediaManagerInput{
+				Adapter: adapter, Enabled: boolPointer(enabled), Config: integrations.EndpointConfig{Endpoint: endpoint, TimeoutSeconds: 15, Options: map[string]any{}},
+				Credentials: map[string]string{"api_key": apiKey},
+			}})
+			plan.Resources = append(plan.Resources, ResourcePreview{Kind: "media_manager", Name: name, Adapter: adapter, Enabled: enabled,
+				CredentialFields: []string{"api_key"}, Configuration: map[string]any{"endpoint": endpoint}})
+		}
+	}
+}
+
+func safeLegacyServiceEndpoint(value string) (string, bool, error) {
+	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(value), "/"))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", false, errors.New("unsafe service endpoint")
+	}
+	if decodedPath, err := url.PathUnescape(parsed.EscapedPath()); err != nil || (decodedPath != "" && filepath.Clean(decodedPath) != decodedPath) {
+		return "", false, errors.New("unsafe service endpoint path")
+	} else {
+		for _, segment := range strings.Split(decodedPath, "/") {
+			if segment == ".." || segment == "." || strings.ContainsAny(segment, "\x00\r\n") {
+				return "", false, errors.New("unsafe service endpoint path")
+			}
+		}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	loopback := host == "localhost"
+	if address := net.ParseIP(host); address != nil && address.IsLoopback() {
+		loopback = true
+	}
+	return parsed.String(), loopback, nil
+}
+
 func (plan *Plan) reportUnsupported(defaults, config, trackers map[string]any) {
 	for _, key := range []string{"tmdb_api", "btn_api"} {
 		if usefulString(defaults[key]) != "" {
@@ -722,10 +789,8 @@ func (plan *Plan) reportUnsupported(defaults, config, trackers map[string]any) {
 	if toneMap, ok := defaults["tone_map"].(bool); ok && toneMap {
 		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_tonemap_requires_manual_configuration", Resource: "legacy-default", Message: "旧 tone_map 设置不会自动映射，需按当前截图工具能力人工配置。"})
 	}
-	for _, section := range []string{"DISCORD", "SONARR", "RADARR"} {
-		if value, ok := config[section].(map[string]any); ok && hasUsefulValue(value) {
-			plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_integration_deferred", Resource: strings.ToLower(section), Message: "该集成尚无对应的 Go 配置资源，已仅保留在 30 天加密归档中。"})
-		}
+	if value, ok := config["DISCORD"].(map[string]any); ok && hasUsefulValue(value) {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_discord_bot_requires_webhook", Resource: "discord", Message: "旧 Discord bot token/频道不能安全转换为 incoming webhook；请在 Web 配置中心新建 webhook 渠道。"})
 	}
 	for site, raw := range trackers {
 		section, ok := raw.(map[string]any)

@@ -32,6 +32,7 @@ type ConfigurationWriter interface {
 	UpsertDownloader(context.Context, string, integrations.DownloaderInput, workflow.Actor) (integrations.Downloader, error)
 	UpsertImageHost(context.Context, string, integrations.ImageHostInput, workflow.Actor) (integrations.ImageHost, error)
 	CreateScreenshotProfile(context.Context, integrations.ScreenshotProfileInput, workflow.Actor) (integrations.ScreenshotProfile, error)
+	UpsertMediaManager(context.Context, string, integrations.MediaManagerInput, workflow.Actor) (integrations.MediaManager, error)
 }
 
 type ImportRequest struct {
@@ -219,6 +220,15 @@ func (service *Service) Import(ctx context.Context, request ImportRequest, actor
 		operation := operation
 		if !apply("screenshot_profile", operation.input.Name, func() (string, error) {
 			resource, err := service.writer.CreateScreenshotProfile(ctx, operation.input, actor)
+			return resource.ID, err
+		}) {
+			return service.Get(ctx, record.ID)
+		}
+	}
+	for _, operation := range plan.mediaManagers {
+		operation := operation
+		if !apply("media_manager", operation.name, func() (string, error) {
+			resource, err := service.writer.UpsertMediaManager(ctx, operation.name, operation.input, actor)
 			return resource.ID, err
 		}) {
 			return service.Get(ctx, record.ID)

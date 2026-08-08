@@ -114,6 +114,65 @@ type RuntimeImageHost struct {
 	Credentials    map[string]string `json:"-"`
 }
 
+type NotificationChannelConfig struct {
+	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
+	Options        map[string]any `json:"options,omitempty"`
+}
+
+type NotificationChannelInput struct {
+	Adapter     string                    `json:"adapter"`
+	Enabled     *bool                     `json:"enabled,omitempty"`
+	Config      NotificationChannelConfig `json:"config"`
+	Credentials map[string]string         `json:"credentials,omitempty"`
+}
+
+type NotificationChannel struct {
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Adapter          string          `json:"adapter"`
+	Enabled          bool            `json:"enabled"`
+	Config           json.RawMessage `json:"config"`
+	CredentialFields []string        `json:"credential_fields"`
+	HealthStatus     string          `json:"health_status"`
+	LastHealthCheck  *time.Time      `json:"last_health_check_at,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+type RuntimeNotificationChannel struct {
+	NotificationChannel
+	ChannelConfig       NotificationChannelConfig `json:"-"`
+	ConfigurationSHA256 string                    `json:"-"`
+	Credentials         map[string]string         `json:"-"`
+}
+
+type MediaManagerInput struct {
+	Adapter     string            `json:"adapter"`
+	Enabled     *bool             `json:"enabled,omitempty"`
+	Config      EndpointConfig    `json:"config"`
+	Credentials map[string]string `json:"credentials,omitempty"`
+}
+
+type MediaManager struct {
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Adapter          string          `json:"adapter"`
+	Enabled          bool            `json:"enabled"`
+	Config           json.RawMessage `json:"config"`
+	CredentialFields []string        `json:"credential_fields"`
+	HealthStatus     string          `json:"health_status"`
+	LastHealthCheck  *time.Time      `json:"last_health_check_at,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+type RuntimeMediaManager struct {
+	MediaManager
+	EndpointConfig      EndpointConfig    `json:"-"`
+	ConfigurationSHA256 string            `json:"-"`
+	Credentials         map[string]string `json:"-"`
+}
+
 type ScreenshotProfileInput struct {
 	Name    string         `json:"name"`
 	Enabled *bool          `json:"enabled,omitempty"`
@@ -244,6 +303,26 @@ func validateEndpointConfig(config EndpointConfig) ([]byte, error) {
 	body, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("%w: serialize endpoint config: %v", ErrValidation, err)
+	}
+	return body, nil
+}
+
+func validateNotificationChannelConfig(config NotificationChannelConfig) ([]byte, error) {
+	if config.TimeoutSeconds == 0 {
+		config.TimeoutSeconds = 15
+	}
+	if config.TimeoutSeconds < 1 || config.TimeoutSeconds > 60 {
+		return nil, fmt.Errorf("%w: timeout_seconds must be between 1 and 60", ErrValidation)
+	}
+	if containsSecretLikeKey(config.Options) {
+		return nil, fmt.Errorf("%w: secret-like options must be supplied through credentials", ErrValidation)
+	}
+	if config.Options == nil {
+		config.Options = map[string]any{}
+	}
+	body, err := json.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("%w: serialize notification channel config: %v", ErrValidation, err)
 	}
 	return body, nil
 }

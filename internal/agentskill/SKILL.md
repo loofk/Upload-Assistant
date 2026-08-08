@@ -21,10 +21,10 @@ Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use envir
 
 - List jobs or read one job before deciding whether to create work.
 - Create a retorrent job only from an explicit source URL and target site request. Use a fresh idempotency key for a new intent.
-- Create or read daily candidate jobs when the operator wants recommendations. Treat schedules and in-app notifications as discovery only.
+- Create or read daily candidate jobs when the operator wants recommendations. Treat schedules and every notification channel as discovery only.
 - Read status and summary for normal progress. Read events and verified artifacts for an audit.
 - Resume only with the values named by `blockers`, `next_actions`, and `resume_state`.
-- Change rules, downloaders, image hosts, screenshot profiles, or site credentials only when the operator explicitly asks.
+- Change rules, downloaders, image hosts, notification channels, Sonarr/Radarr instances, screenshot profiles, or site credentials only when the operator explicitly asks.
 - Preview or execute legacy configuration migration only when the operator explicitly asks.
 
 ## Run a Retorrent Workflow
@@ -43,7 +43,7 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 1. Create a one-off `daily_candidates` job or configure a daily schedule with the source, target, daily cron expression, and IANA timezone requested by the operator.
 2. Read the schedule's run history before diagnosing a missed trigger or retry; use its durable status, job link, attempt count, and safe error field.
 3. Read the candidate job summary and persisted candidate list. Require rule snapshot, source downloadability, required listing fields, metadata, and a clear target duplicate check before recommending an item.
-4. Read in-app notifications as local delivery evidence only. A notification never means the user approved a candidate.
+4. Read notification records as delivery evidence only. External delivery requires an existing enabled channel explicitly named in that schedule; `sent` requires a persisted remote receipt. A notification never means the user approved a candidate.
 5. Create a retorrent job from a selected candidate only when the operator requests it. The created job starts with no inferred rule acceptance and `confirm_upload=false`.
 6. Keep candidate submission, rule acceptance, and final live-upload confirmation as separate decisions.
 
@@ -57,6 +57,7 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 - Do not reveal cookies, passkeys, announce URLs, API keys, signed URLs, raw torrent bytes, or decrypted credentials.
 - Cancellation does not delete downloaded data or audit artifacts. Do not claim otherwise.
 - Do not run live tracker, downloader, or image-host probes merely to test connectivity without operator authorization.
+- Do not probe Sonarr/Radarr or deliver a test Discord message without operator authorization. A configured endpoint is not consent to contact it except when an explicitly configured schedule becomes terminal.
 - Never interpret a schedule firing, candidate rank, or notification as permission to submit a candidate or upload a torrent.
 
 ## Manage Rules and Configuration
@@ -64,6 +65,10 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 Rule changes follow an immutable review sequence: import Markdown as a draft, inspect the parsed policy and original text, have a human approve the exact fingerprint, then activate the approved revision. Missing, incomplete, unapproved, or stale rules must block automation.
 
 Credentials are write-only inputs. Confirm successful storage from redacted API responses; never try to read secrets back. Keep downloader path mappings explicit and validate them before running jobs.
+
+Discord uses an encrypted incoming `webhook_url`, not the legacy bot token. Select channel names explicitly in `DailyCandidateScheduleConfig.notification_channels`. Inspect `status`, `attempts`, `payload_sha256`, and `remote_receipt` in `/api/v2/notifications`; retry state never authorizes candidate submission or upload.
+
+Sonarr and Radarr are independent read-only metadata helpers. Configure each v3 base endpoint and encrypted `api_key`, explicitly probe it before relying on it, then use lookup with Sonarr `tvdb_id` or `path` plus `title`, or Radarr `tmdb_id` or exact `path`. Treat `matched=false` as a normal miss and continue with other metadata sources. Audit records intentionally store query/response hashes and normalized IDs instead of paths or raw responses.
 
 Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported`, every `operations` flag, and every `constraints` entry. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission, rTorrent, and Deluge report `skip_checking=false`; do not request or simulate that behavior. Deluge uses its Web JSON-RPC endpoint and Web password, requires the Web session to be connected to a daemon, and reports `category=false` and `tags=false`; set `apply_labels=false` explicitly and leave category/tags empty for both source and target downloader controls, never silently discard them or substitute native daemon RPC credentials. For rTorrent, treat an ineffective named-throttle response as a blocker and never claim the requested limit was enforced.
 
@@ -73,7 +78,7 @@ Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapte
 2. Show the operator the exact `source_fingerprint`, resource list, disabled resources, blockers, and warnings. Credential values are intentionally absent.
 3. Do not infer consent from a successful preview. Call `POST /api/v2/migrations/legacy` only after the operator explicitly approves that exact fingerprint; send `confirm_import=true`.
 4. If the fingerprint changed, stop and preview again. Never reuse an older approval.
-5. Treat migration as configuration writes only. It performs no tracker, downloader, or image-host probes and grants no permission for live workflow actions.
+5. Treat migration as configuration writes only. It performs no tracker, downloader, image-host, notification, Sonarr, or Radarr probes and grants no permission for live workflow actions. Sonarr/Radarr API settings may migrate; legacy Discord bot credentials cannot become a webhook and require manual replacement.
 6. Read import history for the applied resource IDs and 30-day encrypted archive state. Never request, decrypt, expose, or claim access to archive plaintext.
 7. Original legacy files are never deleted by migration. Archive expiry removes only the encrypted snapshot and preserves the redacted audit report.
 

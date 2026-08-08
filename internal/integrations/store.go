@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -694,6 +695,368 @@ func (s *Store) AuditImageHostAction(ctx context.Context, name, action string, d
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *Store) UpsertNotificationChannel(ctx context.Context, name string, input NotificationChannelInput, actor workflow.Actor) (NotificationChannel, error) {
+	name = strings.TrimSpace(name)
+	input.Adapter = strings.ToLower(strings.TrimSpace(input.Adapter))
+	if err := validateResourceName("notification channel", name); err != nil {
+		return NotificationChannel{}, err
+	}
+	if input.Adapter != "discord_webhook" {
+		return NotificationChannel{}, fmt.Errorf("%w: unsupported notification adapter %q", ErrValidation, input.Adapter)
+	}
+	config, err := validateNotificationChannelConfig(input.Config)
+	if err != nil {
+		return NotificationChannel{}, err
+	}
+	fields, payload, err := validateCredentials(input.Credentials)
+	if err != nil {
+		return NotificationChannel{}, err
+	}
+	if len(fields) > 0 && !slices.Equal(fields, []string{"webhook_url"}) {
+		return NotificationChannel{}, fmt.Errorf("%w: discord_webhook only accepts webhook_url credentials", ErrValidation)
+	}
+	if value := strings.TrimSpace(input.Credentials["webhook_url"]); value != "" {
+		if err := validateSecretHTTPURL(value); err != nil {
+			return NotificationChannel{}, fmt.Errorf("%w: invalid Discord webhook URL", ErrValidation)
+		}
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	if enabled && len(fields) == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification_channels WHERE name = $1 AND adapter = $2 AND secret_id IS NOT NULL)`, name, input.Adapter).Scan(&exists); err != nil {
+			return NotificationChannel{}, fmt.Errorf("check notification credentials: %w", err)
+		}
+		if !exists {
+			return NotificationChannel{}, fmt.Errorf("%w: enabled discord_webhook requires webhook_url", ErrValidation)
+		}
+	}
+	var newSecretID any
+	if payload != nil {
+		secretID, err := s.secrets.Put(ctx, "notification_channels."+name+".credentials", payload, actor.ID)
+		if err != nil {
+			return NotificationChannel{}, err
+		}
+		newSecretID = secretID
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return NotificationChannel{}, fmt.Errorf("begin notification channel transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var item NotificationChannel
+	var secretID string
+	var healthChecked pgtype.Timestamptz
+	err = tx.QueryRow(ctx, `
+		INSERT INTO notification_channels(name, adapter, enabled, config, secret_id)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (name) DO UPDATE SET
+			adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled, config = EXCLUDED.config,
+			secret_id = CASE WHEN notification_channels.adapter IS DISTINCT FROM EXCLUDED.adapter
+			                 THEN EXCLUDED.secret_id ELSE COALESCE(EXCLUDED.secret_id, notification_channels.secret_id) END,
+			updated_at = now()
+		RETURNING id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
+		          health_status, last_health_check_at, created_at, updated_at`,
+		name, input.Adapter, enabled, config, newSecretID,
+	).Scan(&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+		&item.HealthStatus, &healthChecked, &item.CreatedAt, &item.UpdatedAt)
+	if err != nil {
+		return NotificationChannel{}, fmt.Errorf("upsert notification channel: %w", err)
+	}
+	item.LastHealthCheck = timePointer(healthChecked)
+	if err := audit(ctx, tx, actor, "notification_channel.upsert", "notification_channel", item.ID, map[string]any{
+		"name": name, "adapter": input.Adapter, "enabled": enabled, "credential_fields": fields,
+	}); err != nil {
+		return NotificationChannel{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return NotificationChannel{}, fmt.Errorf("commit notification channel: %w", err)
+	}
+	if newSecretID == nil {
+		item.CredentialFields, err = s.loadCredentialFields(ctx, secretID, "notification_channels."+name+".credentials")
+	} else {
+		item.CredentialFields = fields
+	}
+	return item, err
+}
+
+func (s *Store) ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
+		       health_status, last_health_check_at, created_at, updated_at
+		FROM notification_channels ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list notification channels: %w", err)
+	}
+	defer rows.Close()
+	result := make([]NotificationChannel, 0)
+	for rows.Next() {
+		var item NotificationChannel
+		var secretID string
+		var checked pgtype.Timestamptz
+		if err := rows.Scan(&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+			&item.HealthStatus, &checked, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan notification channel: %w", err)
+		}
+		item.LastHealthCheck = timePointer(checked)
+		item.CredentialFields, err = s.loadCredentialFields(ctx, secretID, "notification_channels."+item.Name+".credentials")
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetRuntimeNotificationChannel(ctx context.Context, name string) (RuntimeNotificationChannel, error) {
+	var runtime RuntimeNotificationChannel
+	var secretID string
+	var checked pgtype.Timestamptz
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		       last_health_check_at, created_at, updated_at
+		FROM notification_channels WHERE name = $1`, strings.TrimSpace(name)).Scan(
+		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.Config, &secretID,
+		&runtime.HealthStatus, &checked, &runtime.CreatedAt, &runtime.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeNotificationChannel{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeNotificationChannel{}, fmt.Errorf("load runtime notification channel: %w", err)
+	}
+	if !runtime.Enabled {
+		return RuntimeNotificationChannel{}, fmt.Errorf("%w: notification channel is disabled", ErrValidation)
+	}
+	runtime.LastHealthCheck = timePointer(checked)
+	if err := json.Unmarshal(runtime.Config, &runtime.ChannelConfig); err != nil {
+		return RuntimeNotificationChannel{}, fmt.Errorf("decode runtime notification channel config: %w", err)
+	}
+	runtime.Credentials = map[string]string{}
+	if secretID != "" {
+		plaintext, err := s.secrets.Get(ctx, secretID, "notification_channels."+runtime.Name+".credentials")
+		if err != nil {
+			return RuntimeNotificationChannel{}, err
+		}
+		if err := json.Unmarshal(plaintext, &runtime.Credentials); err != nil {
+			return RuntimeNotificationChannel{}, fmt.Errorf("decode runtime notification credentials: %w", err)
+		}
+	}
+	if err := validateSecretHTTPURL(runtime.Credentials["webhook_url"]); err != nil {
+		return RuntimeNotificationChannel{}, fmt.Errorf("%w: stored Discord webhook URL is invalid", ErrValidation)
+	}
+	runtime.ConfigurationSHA256 = integrationConfigurationSHA(runtime.ID, runtime.Adapter, runtime.Config, secretID, runtime.UpdatedAt)
+	return runtime, nil
+}
+
+func (s *Store) UpsertMediaManager(ctx context.Context, name string, input MediaManagerInput, actor workflow.Actor) (MediaManager, error) {
+	name = strings.TrimSpace(name)
+	input.Adapter = strings.ToLower(strings.TrimSpace(input.Adapter))
+	if err := validateResourceName("media manager", name); err != nil {
+		return MediaManager{}, err
+	}
+	if input.Adapter != "sonarr" && input.Adapter != "radarr" {
+		return MediaManager{}, fmt.Errorf("%w: media manager adapter must be sonarr or radarr", ErrValidation)
+	}
+	config, err := validateEndpointConfig(input.Config)
+	if err != nil {
+		return MediaManager{}, err
+	}
+	fields, payload, err := validateCredentials(input.Credentials)
+	if err != nil {
+		return MediaManager{}, err
+	}
+	if len(fields) > 0 && !slices.Equal(fields, []string{"api_key"}) {
+		return MediaManager{}, fmt.Errorf("%w: media managers only accept api_key credentials", ErrValidation)
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	if enabled && len(fields) == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM media_managers WHERE name = $1 AND adapter = $2 AND secret_id IS NOT NULL)`, name, input.Adapter).Scan(&exists); err != nil {
+			return MediaManager{}, fmt.Errorf("check media manager credentials: %w", err)
+		}
+		if !exists {
+			return MediaManager{}, fmt.Errorf("%w: enabled media manager requires api_key", ErrValidation)
+		}
+	}
+	var newSecretID any
+	if payload != nil {
+		secretID, err := s.secrets.Put(ctx, "media_managers."+name+".credentials", payload, actor.ID)
+		if err != nil {
+			return MediaManager{}, err
+		}
+		newSecretID = secretID
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return MediaManager{}, fmt.Errorf("begin media manager transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var item MediaManager
+	var secretID string
+	var checked pgtype.Timestamptz
+	err = tx.QueryRow(ctx, `
+		INSERT INTO media_managers(name, adapter, enabled, config, secret_id)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (name) DO UPDATE SET adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled,
+			config = EXCLUDED.config,
+			secret_id = CASE WHEN media_managers.adapter IS DISTINCT FROM EXCLUDED.adapter
+			                 THEN EXCLUDED.secret_id ELSE COALESCE(EXCLUDED.secret_id, media_managers.secret_id) END,
+			updated_at = now()
+		RETURNING id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		          last_health_check_at, created_at, updated_at`,
+		name, input.Adapter, enabled, config, newSecretID,
+	).Scan(&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+		&item.HealthStatus, &checked, &item.CreatedAt, &item.UpdatedAt)
+	if err != nil {
+		return MediaManager{}, fmt.Errorf("upsert media manager: %w", err)
+	}
+	item.LastHealthCheck = timePointer(checked)
+	if err := audit(ctx, tx, actor, "media_manager.upsert", "media_manager", item.ID, map[string]any{
+		"name": name, "adapter": input.Adapter, "enabled": enabled, "credential_fields": fields,
+	}); err != nil {
+		return MediaManager{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return MediaManager{}, fmt.Errorf("commit media manager: %w", err)
+	}
+	if newSecretID == nil {
+		item.CredentialFields, err = s.loadCredentialFields(ctx, secretID, "media_managers."+name+".credentials")
+	} else {
+		item.CredentialFields = fields
+	}
+	return item, err
+}
+
+func (s *Store) ListMediaManagers(ctx context.Context) ([]MediaManager, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		       last_health_check_at, created_at, updated_at FROM media_managers ORDER BY adapter, name`)
+	if err != nil {
+		return nil, fmt.Errorf("list media managers: %w", err)
+	}
+	defer rows.Close()
+	result := make([]MediaManager, 0)
+	for rows.Next() {
+		var item MediaManager
+		var secretID string
+		var checked pgtype.Timestamptz
+		if err := rows.Scan(&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+			&item.HealthStatus, &checked, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan media manager: %w", err)
+		}
+		item.LastHealthCheck = timePointer(checked)
+		item.CredentialFields, err = s.loadCredentialFields(ctx, secretID, "media_managers."+item.Name+".credentials")
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetRuntimeMediaManager(ctx context.Context, name string) (RuntimeMediaManager, error) {
+	var runtime RuntimeMediaManager
+	var secretID string
+	var checked pgtype.Timestamptz
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''), health_status,
+		       last_health_check_at, created_at, updated_at FROM media_managers WHERE name = $1`, strings.TrimSpace(name)).Scan(
+		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.Config, &secretID,
+		&runtime.HealthStatus, &checked, &runtime.CreatedAt, &runtime.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeMediaManager{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeMediaManager{}, fmt.Errorf("load runtime media manager: %w", err)
+	}
+	if !runtime.Enabled {
+		return RuntimeMediaManager{}, fmt.Errorf("%w: media manager is disabled", ErrValidation)
+	}
+	runtime.LastHealthCheck = timePointer(checked)
+	if err := json.Unmarshal(runtime.Config, &runtime.EndpointConfig); err != nil {
+		return RuntimeMediaManager{}, fmt.Errorf("decode runtime media manager config: %w", err)
+	}
+	runtime.Credentials = map[string]string{}
+	if secretID != "" {
+		plaintext, err := s.secrets.Get(ctx, secretID, "media_managers."+runtime.Name+".credentials")
+		if err != nil {
+			return RuntimeMediaManager{}, err
+		}
+		if err := json.Unmarshal(plaintext, &runtime.Credentials); err != nil {
+			return RuntimeMediaManager{}, fmt.Errorf("decode runtime media manager credentials: %w", err)
+		}
+	}
+	if strings.TrimSpace(runtime.Credentials["api_key"]) == "" {
+		return RuntimeMediaManager{}, fmt.Errorf("%w: media manager api_key is missing", ErrValidation)
+	}
+	runtime.ConfigurationSHA256 = integrationConfigurationSHA(runtime.ID, runtime.Adapter, runtime.Config, secretID, runtime.UpdatedAt)
+	return runtime, nil
+}
+
+func (s *Store) RecordMediaManagerHealth(ctx context.Context, name, status string, details map[string]any, actor workflow.Actor) error {
+	if status != "ready" && status != "failed" && status != "unknown" {
+		return fmt.Errorf("%w: invalid media manager health status", ErrValidation)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin media manager health update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var id string
+	if err := tx.QueryRow(ctx, `UPDATE media_managers SET health_status = $2, last_health_check_at = now(), updated_at = now() WHERE name = $1 RETURNING id::text`, name, status).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("update media manager health: %w", err)
+	}
+	payload := copyMap(details)
+	payload["status"] = status
+	if err := audit(ctx, tx, actor, "media_manager.health", "media_manager", id, payload); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) AuditMediaManagerAction(ctx context.Context, name, action string, details map[string]any, actor workflow.Actor) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin media manager action audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM media_managers WHERE name = $1 FOR UPDATE`, name).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock media manager for action audit: %w", err)
+	}
+	if err := audit(ctx, tx, actor, "media_manager."+action, "media_manager", id, copyMap(details)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func validateSecretHTTPURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ErrValidation
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || strings.Contains(parsed.EscapedPath(), "..") {
+		return ErrValidation
+	}
+	return nil
+}
+
+func integrationConfigurationSHA(id, adapter string, config []byte, secretID string, updatedAt time.Time) string {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(id + "\x00" + adapter + "\x00" + secretID + "\x00" + updatedAt.UTC().Format(time.RFC3339Nano) + "\x00"))
+	_, _ = hash.Write(config)
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func copyMap(input map[string]any) map[string]any {

@@ -123,7 +123,7 @@
       "get": {
         "operationId": "listNotifications",
         "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}}],
-        "responses": {"200": {"description": "Redacted in-app daily candidate notifications", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+        "responses": {"200": {"description": "Redacted in-app and external delivery audit", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/api/v2/jobs": {
@@ -301,6 +301,24 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageHostInput"}}}},
         "responses": {"200": {"description": "Image host configured", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}}
       }
+    },
+    "/api/v2/notification-channels": {
+      "get": {"operationId": "listNotificationChannels", "responses": {"200": {"description": "Notification channels with credential field names only", "content": {"application/json": {"schema": {"type": "object"}}}}}}
+    },
+    "/api/v2/notification-channels/{name}": {
+      "put": {"operationId": "putNotificationChannel", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationChannelInput"}}}}, "responses": {"200": {"description": "Notification channel configured"}, "400": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/media-managers": {
+      "get": {"operationId": "listMediaManagers", "responses": {"200": {"description": "Sonarr and Radarr instances with credential field names only", "content": {"application/json": {"schema": {"type": "object"}}}}}}
+    },
+    "/api/v2/media-managers/{name}": {
+      "put": {"operationId": "putMediaManager", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaManagerInput"}}}}, "responses": {"200": {"description": "Media manager configured"}, "400": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/media-managers/{name}/probe": {
+      "post": {"operationId": "probeMediaManager", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "responses": {"200": {"description": "Authenticated read-only system status evidence"}, "502": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/media-managers/{name}/lookup": {
+      "post": {"operationId": "lookupMediaManagerMetadata", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaManagerLookupRequest"}}}}, "responses": {"200": {"description": "Normalized metadata and hash evidence"}, "400": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/screenshot-profiles": {
       "get": {"operationId": "listScreenshotProfiles", "responses": {"200": {"description": "Immutable screenshot profile revisions", "content": {"application/json": {"schema": {"type": "object"}}}}}},
@@ -568,7 +586,8 @@
           "source": {"type": "string"}, "target": {"type": "string"},
           "target_count": {"type": "integer", "minimum": 1, "maximum": 25, "default": 10},
           "scan_limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 30},
-          "page": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1}
+          "page": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1},
+          "notification_channels": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}, "description": "Existing enabled channels explicitly selected for this schedule."}
         }
       },
       "DailyCandidateSchedule": {
@@ -645,8 +664,8 @@
         "type": "object", "required": ["id", "channel", "status", "payload", "attempts", "scheduled_at", "created_at"],
         "properties": {
           "id": {"type": "string", "format": "uuid"}, "schedule_run_id": {"type": "string", "format": "uuid"},
-          "job_id": {"type": "string", "format": "uuid"}, "channel": {"type": "string", "const": "in_app"},
-          "status": {"type": "string"}, "payload": {"type": "object"}, "attempts": {"type": "integer"},
+          "job_id": {"type": "string", "format": "uuid"}, "notification_channel_id": {"type": "string", "format": "uuid"}, "channel": {"type": "string"},
+          "status": {"type": "string", "enum": ["queued", "sending", "sent", "failed", "cancelled"]}, "payload": {"type": "object"}, "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "remote_receipt": {"type": "object"}, "attempts": {"type": "integer"},
           "last_error": {"type": "string"}, "scheduled_at": {"type": "string", "format": "date-time"},
           "sent_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}
         }
@@ -765,6 +784,10 @@
       "AddTorrentRequest": {"type": "object", "additionalProperties": false, "required": ["torrent_base64"], "properties": {"torrent_base64": {"type": "string", "contentEncoding": "base64", "writeOnly": true}, "save_path": {"type": "string"}, "category": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "apply_labels": {"type": "boolean", "default": true, "description": "Must be explicitly false, with empty category/tags, when adapter capabilities do not support labels."}, "skip_checking": {"type": "boolean"}, "paused": {"type": "boolean"}, "upload_limit": {"type": "integer", "minimum": 0}, "download_limit": {"type": "integer", "minimum": 0}}},
       "SetTorrentLimitsRequest": {"type": "object", "additionalProperties": false, "required": ["download_limit", "upload_limit"], "properties": {"download_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}, "upload_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}}},
       "ImageHostInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string"}, "enabled": {"type": "boolean", "default": true}, "priority": {"type": "integer", "default": 100}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}}},
+      "NotificationChannelConfig": {"type": "object", "additionalProperties": false, "properties": {"timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 15}, "options": {"type": "object", "description": "Non-secret adapter options only.", "additionalProperties": true}}},
+      "NotificationChannelInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "const": "discord_webhook"}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/NotificationChannelConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"webhook_url": {"type": "string", "format": "uri", "writeOnly": true}}}}},
+      "MediaManagerInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["sonarr", "radarr"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"api_key": {"type": "string", "writeOnly": true}}}}},
+      "MediaManagerLookupRequest": {"type": "object", "additionalProperties": false, "properties": {"tvdb_id": {"type": "integer", "minimum": 1}, "tmdb_id": {"type": "integer", "minimum": 1}, "path": {"type": "string"}, "title": {"type": "string"}}},
       "ScreenshotConfig": {
         "type": "object", "additionalProperties": false,
         "properties": {

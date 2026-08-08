@@ -102,6 +102,7 @@ func (runner *Runner) createJob(ctx context.Context, run Run, now time.Time) err
 		"schedule_id": run.ScheduleID, "source": run.Config.Source, "target": run.Config.Target,
 		"target_count": run.Config.TargetCount, "scan_limit": run.Config.ScanLimit,
 		"page": run.Config.Page, "date": date,
+		"notification_channels": run.Config.NotificationChannels,
 	})
 	job, err := runner.jobs.CreateJob(ctx, workflow.CreateJobInput{
 		Kind: "daily_candidates", ExecutionMode: workflow.ExecutionAuto, Input: input,

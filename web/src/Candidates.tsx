@@ -18,6 +18,7 @@ export default function Candidates({client, onJobCreated, onError}: {
   const [scheduleName, setScheduleName] = useState("u2-mteam-daily");
   const [scheduleTime, setScheduleTime] = useState("09:00");
   const [timezone, setTimezone] = useState("Asia/Shanghai");
+  const [scheduleChannels, setScheduleChannels] = useState("");
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState("");
 
@@ -61,6 +62,7 @@ export default function Candidates({client, onJobCreated, onError}: {
       await client.createDailyCandidateSchedule({
         name: scheduleName, source, target, timezone,
         cronExpression: `${minute} ${hour} * * *`, targetCount: 10, scanLimit: 30,
+        notificationChannels: scheduleChannels.split(",").map((value) => value.trim()).filter(Boolean),
       });
       await load();
     } catch (reason) {
@@ -132,15 +134,16 @@ export default function Candidates({client, onJobCreated, onError}: {
 
     <section className="candidate-automation">
       <form onSubmit={(event) => void createSchedule(event)}>
-        <div><p className="eyebrow">DURABLE SCHEDULE</p><h2>每日自动扫描</h2><span>仅创建候选任务和本地通知，不会提交候选或上传种子。</span></div>
+        <div><p className="eyebrow">DURABLE SCHEDULE</p><h2>每日自动扫描</h2><span>仅创建候选任务和已选通知，不会提交候选或上传种子。</span></div>
         <label>名称<input value={scheduleName} maxLength={100} onChange={(event) => setScheduleName(event.target.value)} required /></label>
         <label>每天时间<input type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} required /></label>
         <label>时区<input value={timezone} onChange={(event) => setTimezone(event.target.value)} required /></label>
+        <label>外部通知渠道（逗号分隔，可空）<input value={scheduleChannels} onChange={(event) => setScheduleChannels(event.target.value)} placeholder="discord-main" /></label>
         <button className="secondary" disabled={busy}>保存调度</button>
       </form>
       <div className="schedule-list">
         {schedules.map((schedule) => <article key={schedule.id}>
-          <div><strong>{schedule.name}</strong><span>{schedule.config.source} → {schedule.config.target} · {schedule.cron_expression} · {schedule.timezone}</span></div>
+          <div><strong>{schedule.name}</strong><span>{schedule.config.source} → {schedule.config.target} · {schedule.cron_expression} · {schedule.timezone} · 通知 {(schedule.config.notification_channels ?? []).join(", ") || "仅本地"}</span></div>
           <span>下次 {schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString("zh-CN") : "未计划"}</span>
           <div className="schedule-actions"><button className="ghost compact" disabled={busy} onClick={() => void loadRuns(schedule)}>运行记录</button><button className="ghost compact" disabled={busy} onClick={() => void toggleSchedule(schedule)}>{schedule.enabled ? "停用" : "启用"}</button></div>
         </article>)}
@@ -151,9 +154,9 @@ export default function Candidates({client, onJobCreated, onError}: {
         </div>}
       </div>
       <div className="candidate-notifications">
-        <h3>本地通知</h3>
+        <h3>通知与投递审计</h3>
         {notifications.slice(0, 5).map((notification) => <article key={notification.id}>
-          <span>{notificationLabel(notification)}</span><code>{notification.job_id?.slice(0, 8) || "无任务"}</code>
+          <span>{notificationLabel(notification)} · {notification.channel} · {notification.status}</span><code>{notification.job_id?.slice(0, 8) || "无任务"}</code>
           <time>{new Date(notification.created_at).toLocaleString("zh-CN")}</time>
         </article>)}
         {notifications.length === 0 && <p>暂无已完成的调度通知。</p>}

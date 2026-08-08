@@ -19,19 +19,20 @@ type DatabaseChecker interface {
 }
 
 type Dependencies struct {
-	Database     DatabaseChecker
-	Jobs         JobService
-	Auth         TokenAuthenticator
-	Rules        RuleService
-	Integrations IntegrationService
-	Downloaders  DownloaderService
-	Artifacts    ArtifactContentReader
-	Candidates   CandidateService
-	Schedules    ScheduleService
-	Legacy       LegacyMigrationService
-	DataDir      string
-	Logger       *slog.Logger
-	Build        buildinfo.Info
+	Database      DatabaseChecker
+	Jobs          JobService
+	Auth          TokenAuthenticator
+	Rules         RuleService
+	Integrations  IntegrationService
+	Downloaders   DownloaderService
+	Artifacts     ArtifactContentReader
+	Candidates    CandidateService
+	Schedules     ScheduleService
+	Legacy        LegacyMigrationService
+	MediaManagers MediaManagerService
+	DataDir       string
+	Logger        *slog.Logger
+	Build         buildinfo.Info
 }
 
 type healthResponse struct {
@@ -101,6 +102,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.Legacy != nil {
 		registerLegacyMigrationRoutes(mux, deps.Legacy)
+	}
+	if deps.MediaManagers != nil {
+		registerMediaManagerRoutes(mux, deps.MediaManagers)
 	}
 	return requestLogger(deps.Logger, securityHeaders(authenticate(deps.Auth, mux)))
 }

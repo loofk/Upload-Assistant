@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloader_path_mappings WHERE downloader_id IN (SELECT id FROM downloaders WHERE name = ANY($1))", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "rtorrent-" + nameSuffix, "switch-" + nameSuffix, "deluge-" + nameSuffix})
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloaders WHERE name = ANY($1)", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "rtorrent-" + nameSuffix, "switch-" + nameSuffix, "deluge-" + nameSuffix})
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM image_hosts WHERE name = $1", "imgbb-"+nameSuffix)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM notification_channels WHERE name = $1", "discord-"+nameSuffix)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM media_managers WHERE name = $1", "sonarr-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM screenshot_profiles WHERE name = $1", "default-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM site_credentials WHERE name = $1", "cookie-"+nameSuffix)
 		for _, secretID := range secretIDs {
@@ -224,6 +228,48 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	notificationChannel, err := store.UpsertNotificationChannel(ctx, "discord-"+nameSuffix, NotificationChannelInput{
+		Adapter: "discord_webhook", Enabled: &enabled,
+		Config:      NotificationChannelConfig{TimeoutSeconds: 15},
+		Credentials: map[string]string{"webhook_url": "https://discord.com/api/webhooks/123456/encrypted-token"},
+	}, actor)
+	if err != nil || len(notificationChannel.CredentialFields) != 1 {
+		t.Fatalf("UpsertNotificationChannel() channel/error = %#v/%v", notificationChannel, err)
+	}
+	runtimeChannel, err := store.GetRuntimeNotificationChannel(ctx, notificationChannel.Name)
+	if err != nil || runtimeChannel.Credentials["webhook_url"] != "https://discord.com/api/webhooks/123456/encrypted-token" || len(runtimeChannel.ConfigurationSHA256) != 64 {
+		t.Fatalf("GetRuntimeNotificationChannel() runtime/error = %#v/%v", runtimeChannel, err)
+	}
+	channels, err := store.ListNotificationChannels(ctx)
+	if err != nil || !slices.ContainsFunc(channels, func(item NotificationChannel) bool {
+		return item.ID == notificationChannel.ID && len(item.CredentialFields) == 1
+	}) {
+		t.Fatalf("ListNotificationChannels() = %#v/%v", channels, err)
+	}
+
+	mediaManager, err := store.UpsertMediaManager(ctx, "sonarr-"+nameSuffix, MediaManagerInput{
+		Adapter: "sonarr", Enabled: &enabled,
+		Config:      EndpointConfig{Endpoint: "http://host.docker.internal:8989"},
+		Credentials: map[string]string{"api_key": "encrypted-sonarr-key"},
+	}, actor)
+	if err != nil || len(mediaManager.CredentialFields) != 1 {
+		t.Fatalf("UpsertMediaManager() manager/error = %#v/%v", mediaManager, err)
+	}
+	runtimeMediaManager, err := store.GetRuntimeMediaManager(ctx, mediaManager.Name)
+	if err != nil || runtimeMediaManager.Credentials["api_key"] != "encrypted-sonarr-key" || len(runtimeMediaManager.ConfigurationSHA256) != 64 {
+		t.Fatalf("GetRuntimeMediaManager() runtime/error = %#v/%v", runtimeMediaManager, err)
+	}
+	if err := store.RecordMediaManagerHealth(ctx, mediaManager.Name, "ready", map[string]any{"version": "fixture", "response_sha256": strings.Repeat("a", 64)}, actor); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AuditMediaManagerAction(ctx, mediaManager.Name, "lookup", map[string]any{"query_sha256": strings.Repeat("b", 64)}, actor); err != nil {
+		t.Fatal(err)
+	}
+	mediaManagers, err := store.ListMediaManagers(ctx)
+	if err != nil || !slices.ContainsFunc(mediaManagers, func(item MediaManager) bool { return item.ID == mediaManager.ID && item.HealthStatus == "ready" }) {
+		t.Fatalf("ListMediaManagers() = %#v/%v", mediaManagers, err)
+	}
+
 	first, err := store.CreateScreenshotProfile(ctx, ScreenshotProfileInput{
 		Name: "default-" + nameSuffix, Enabled: &enabled,
 		Config: map[string]any{"count": 6, "format": "png", "comparison": false},
@@ -246,7 +292,9 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	rows, err := pool.Query(ctx, `
 		SELECT secret_id::text FROM site_credentials WHERE id = $1
 		UNION ALL SELECT secret_id::text FROM downloaders WHERE id = $2
-		UNION ALL SELECT secret_id::text FROM image_hosts WHERE id = $3`, credential.ID, downloader.ID, imageHost.ID)
+		UNION ALL SELECT secret_id::text FROM image_hosts WHERE id = $3
+		UNION ALL SELECT secret_id::text FROM notification_channels WHERE id = $4
+		UNION ALL SELECT secret_id::text FROM media_managers WHERE id = $5`, credential.ID, downloader.ID, imageHost.ID, notificationChannel.ID, mediaManager.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +306,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		secretIDs = append(secretIDs, secretID)
 	}
 	rows.Close()
-	if len(secretIDs) != 4 {
-		t.Fatalf("encrypted secret count = %d, want 4", len(secretIDs))
+	if len(secretIDs) != 6 {
+		t.Fatalf("encrypted secret count = %d, want 6", len(secretIDs))
 	}
 }
 

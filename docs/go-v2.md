@@ -45,9 +45,17 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 - `GET /api/v2/candidates/daily` 读取按日期持久化的候选、排序、推荐理由、风险、阻塞、metadata 和目标站查重证据。
 - `POST /api/v2/candidates/{candidate_id}/retorrent-job` 只创建安全的未确认转种 job；它不会推断 `accept_rules`，并固定以 `confirm_upload=false` 开始。
 - `GET/POST /api/v2/schedules/daily-candidates` 与 `PATCH /api/v2/schedules/daily-candidates/{schedule_id}` 管理 PostgreSQL 持久的每日扫描计划；`GET .../{schedule_id}/runs` 可审计每次触发、租约、重试次数和关联 job。当前 cron 明确限定为 `分 时 * * *`，避免接受服务无法可靠解释的表达式。
-- `GET /api/v2/notifications` 读取任务终态后生成的脱敏本地通知。调度、排名和通知均不代表用户批准候选，也不会自动创建正式转种任务或上传种子。
+- `GET /api/v2/notifications` 读取脱敏的本地/外部投递状态、尝试次数、payload SHA-256 和远端回执 hash。调度、排名和通知均不代表用户批准候选，也不会自动创建正式转种任务或上传种子。
+- `GET/PUT /api/v2/notification-channels` 独立管理 Discord incoming webhook。Webhook URL 进入加密 secret；每日调度只有在 `config.notification_channels` 显式列出已启用渠道后才投递。
 
-常驻调度器与 Web 本地通知已可用；外部 webhook、Discord 等主动推送渠道仍属于后续能力。在外部渠道完成并有交付证据前，不应把“已主动推送到第三方渠道”报告为完成。
+Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最多 8 次指数退避、崩溃后接管和 `wait=true` 送达回执。消息禁用 mentions，只含候选摘要与本地任务 ID。`sent` 只表示通知被 Discord 接收，不表示候选获批或种子已上传。
+
+## Sonarr / Radarr
+
+- `GET/PUT /api/v2/media-managers` 独立管理多个 Sonarr/Radarr v3 实例；API key 加密且只回显字段名。
+- `POST /api/v2/media-managers/{name}/probe` 是显式、只读的 `/api/v3/system/status` 探测，保存版本、配置 hash 和响应 hash。
+- `POST /api/v2/media-managers/{name}/lookup` 复刻 legacy 的只读补元数据语义：Sonarr 接受 TVDB ID 或 path+title，Radarr 接受 TMDb ID 或精确 path。审计只保存 query/response SHA-256 与规范化 ID，不保存 API key、原始响应或本地路径。
+- HTTP 重定向被禁止，响应体有大小上限，失败只持久化稳定错误码。当前它们是显式 metadata helper，不会向 Sonarr/Radarr 添加、删除、重命名或刷新媒体。
 
 ## 远程下载器
 
@@ -63,9 +71,10 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 
 - `GET /api/v2/migrations/legacy/preview` 使用非执行字面量解析器读取旧配置，只返回主密钥 HMAC fingerprint、文件大小、资源名称、credential 字段名、禁用原因和 warnings。它不会公开可用于猜测弱密码的普通内容 hash。
 - `POST /api/v2/migrations/legacy` 必须同时提交刚刚人工核对的 `source_fingerprint` 与 `confirm_import=true`。预览后任意源文件变化都会使指纹失效。
-- 迁移只写入 PostgreSQL 配置和加密 secrets，不探测站点、下载器或图床，不代表同意站规，也不授权 live 上传。
+- 迁移只写入 PostgreSQL 配置和加密 secrets，不探测站点、下载器、图床、Discord、Sonarr 或 Radarr，不代表同意站规，也不授权 live 上传。
 - 原文件始终保持不变。源配置与 allowlist cookie 会作为主密钥加密的快照保留 30 天；API 只显示归档 hash、大小和到期状态，不提供归档明文。到期仅删除密文快照，脱敏迁移报告和审计事件继续保留。
-- 旧站点限速不会静默覆盖已审批规则，容器中的 `127.0.0.1/localhost` 下载器会保持禁用，QUI proxy 和尚未实现的集成会明确列入 warnings。
+- 旧 Sonarr/Radarr v3 endpoint 与 API key 可迁移，容器中的 `127.0.0.1/localhost` 实例会保持禁用。旧 Discord bot token/频道不能无歧义转换为 incoming webhook，只返回 `legacy_discord_bot_requires_webhook` warning，要求在 Web 中人工新建渠道。
+- 旧站点限速不会静默覆盖已审批规则，容器中的 `127.0.0.1/localhost` 下载器会保持禁用，QUI proxy 和未实现字段会明确列入 warnings。
 
 同样的操作可以在 Web「配置 → 旧配置迁移」完成。重复提交同一已完成指纹会返回原迁移记录，不会重复执行资源写入。
 

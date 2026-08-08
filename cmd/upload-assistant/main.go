@@ -27,6 +27,8 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/legacy"
 	"github.com/loofk/upload-assistant/v2/internal/media"
+	"github.com/loofk/upload-assistant/v2/internal/mediamanagers"
+	"github.com/loofk/upload-assistant/v2/internal/notifications"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/schedules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
@@ -128,6 +130,7 @@ func serve(args []string) error {
 	}
 	secretStore := security.NewSecretStore(pool, keyring)
 	integrationStore := integrations.NewStore(pool, secretStore)
+	mediaManager := mediamanagers.NewManager(integrationStore, nil)
 	legacyService, err := legacy.NewService(pool, secretStore, integrationStore, cfg.LegacyDir, logger)
 	if err != nil {
 		return fmt.Errorf("initialize legacy migration service: %w", err)
@@ -201,22 +204,26 @@ func serve(args []string) error {
 	go jobRunner.Run(ctx)
 	dailyScheduler := schedules.NewRunner(scheduleStore, jobService, workerID+"-scheduler", logger)
 	go dailyScheduler.Run(ctx)
+	notificationStore := notifications.NewStore(pool, integrationStore)
+	notificationDispatcher := notifications.NewDispatcher(notificationStore, workerID+"-notifications", nil, logger)
+	go notificationDispatcher.Run(ctx)
 	go runLegacyArchiveCleanup(ctx, legacyService, logger)
 
 	handler := server.New(server.Dependencies{
-		Database:     pool,
-		Jobs:         jobService,
-		Auth:         authStore,
-		Rules:        ruleStore,
-		Integrations: integrationStore,
-		Downloaders:  downloaderManager,
-		Artifacts:    artifactStore,
-		Candidates:   candidateStore,
-		Schedules:    scheduleStore,
-		Legacy:       legacyService,
-		DataDir:      cfg.DataDir,
-		Logger:       logger,
-		Build:        buildinfo.Current(),
+		Database:      pool,
+		Jobs:          jobService,
+		Auth:          authStore,
+		Rules:         ruleStore,
+		Integrations:  integrationStore,
+		Downloaders:   downloaderManager,
+		Artifacts:     artifactStore,
+		Candidates:    candidateStore,
+		Schedules:     scheduleStore,
+		Legacy:        legacyService,
+		MediaManagers: mediaManager,
+		DataDir:       cfg.DataDir,
+		Logger:        logger,
+		Build:         buildinfo.Current(),
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

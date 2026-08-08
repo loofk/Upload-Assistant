@@ -171,6 +171,7 @@ func (api scheduleAPI) notifications(w http.ResponseWriter, r *http.Request) {
 	}
 	for index := range items {
 		items[index].Payload = redactJSON(items[index].Payload)
+		items[index].RemoteReceipt = redactJSON(items[index].RemoteReceipt)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "status": "ready", "count": len(items), "notifications": items,

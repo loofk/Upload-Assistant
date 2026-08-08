@@ -197,6 +197,32 @@ export interface ImageHost {
   updated_at: string;
 }
 
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  adapter: "discord_webhook";
+  enabled: boolean;
+  config: {timeout_seconds?: number; options?: Record<string, JsonValue>};
+  credential_fields: string[];
+  health_status: string;
+  last_health_check_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaManager {
+  id: string;
+  name: string;
+  adapter: "sonarr" | "radarr";
+  enabled: boolean;
+  config: EndpointConfig;
+  credential_fields: string[];
+  health_status: string;
+  last_health_check_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ScreenshotProfile {
   id: string;
   name: string;
@@ -312,6 +338,7 @@ export interface DailyCandidateScheduleConfig {
   target_count: number;
   scan_limit: number;
   page: number;
+  notification_channels?: string[];
 }
 
 export interface DailyCandidateSchedule {
@@ -369,13 +396,17 @@ export interface Notification {
   id: string;
   schedule_run_id?: string;
   job_id?: string;
-  channel: "in_app";
+  notification_channel_id?: string;
+  channel: string;
   status: string;
   payload: Record<string, JsonValue>;
+  payload_sha256?: string;
+  remote_receipt?: Record<string, JsonValue>;
   attempts: number;
   scheduled_at: string;
   sent_at?: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface NotificationListEnvelope {

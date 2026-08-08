@@ -8,6 +8,8 @@ import type {
   Downloader,
 	DownloaderAdapterCapability,
   ImageHost,
+	MediaManager,
+	NotificationChannel,
   JobEnvelope,
   JobListEnvelope,
   JobStatus,
@@ -82,13 +84,13 @@ export class ApiClient {
 
   async createDailyCandidateSchedule(input: {
     name: string; source: string; target: string; cronExpression: string; timezone: string;
-    targetCount?: number; scanLimit?: number;
+    targetCount?: number; scanLimit?: number; notificationChannels?: string[];
   }): Promise<{ok: true; status: "ready"; schedule_id: string; schedule: DailyCandidateSchedule}> {
     return this.request("/api/v2/schedules/daily-candidates", {
       method: "POST",
       body: JSON.stringify({
         name: input.name, cron_expression: input.cronExpression, timezone: input.timezone, enabled: true,
-        config: {source: input.source.toUpperCase(), target: input.target.toUpperCase(), target_count: input.targetCount ?? 10, scan_limit: input.scanLimit ?? 30, page: 1},
+        config: {source: input.source.toUpperCase(), target: input.target.toUpperCase(), target_count: input.targetCount ?? 10, scan_limit: input.scanLimit ?? 30, page: 1, notification_channels: input.notificationChannels ?? []},
       }),
     });
   }
@@ -203,6 +205,34 @@ export class ApiClient {
   async listImageHosts(): Promise<ImageHost[]> {
     const response = await this.request<{image_hosts: ImageHost[]}>("/api/v2/image-hosts");
     return response.image_hosts;
+  }
+
+  async listNotificationChannels(): Promise<NotificationChannel[]> {
+    const response = await this.request<{notification_channels: NotificationChannel[]}>("/api/v2/notification-channels");
+    return response.notification_channels;
+  }
+
+  async putNotificationChannel(name: string, input: {enabled: boolean; webhookURL: string}): Promise<void> {
+    await this.request(`/api/v2/notification-channels/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({adapter: "discord_webhook", enabled: input.enabled, config: {timeout_seconds: 15, options: {}}, credentials: input.webhookURL ? {webhook_url: input.webhookURL} : {}}),
+    });
+  }
+
+  async listMediaManagers(): Promise<MediaManager[]> {
+    const response = await this.request<{media_managers: MediaManager[]}>("/api/v2/media-managers");
+    return response.media_managers;
+  }
+
+  async putMediaManager(name: string, input: {adapter: "sonarr" | "radarr"; enabled: boolean; endpoint: string; apiKey: string}): Promise<void> {
+    await this.request(`/api/v2/media-managers/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({adapter: input.adapter, enabled: input.enabled, config: {endpoint: input.endpoint, timeout_seconds: 15, options: {}}, credentials: input.apiKey ? {api_key: input.apiKey} : {}}),
+    });
+  }
+
+  async probeMediaManager(name: string): Promise<JsonValue> {
+    return this.request(`/api/v2/media-managers/${encodeURIComponent(name)}/probe`, {method: "POST"});
   }
 
   async putImageHost(name: string, input: {adapter: string; endpoint: string; apiKey: string; priority: number}): Promise<void> {

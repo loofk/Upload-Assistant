@@ -78,6 +78,7 @@ describe("ApiClient safety defaults", () => {
 	expect(schedulePath).toBe("/api/v2/schedules/daily-candidates");
 	const scheduleBody = JSON.parse(String(scheduleInit.body));
 	expect(scheduleBody).toMatchObject({cron_expression: "0 9 * * *", timezone: "Asia/Shanghai", config: {source: "U2", target: "MTEAM", target_count: 10}});
+	expect(scheduleBody.config.notification_channels).toEqual([]);
 	expect(JSON.stringify(scheduleBody)).not.toContain("confirm_upload");
   });
 

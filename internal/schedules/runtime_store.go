@@ -2,6 +2,8 @@ package schedules
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -191,6 +193,7 @@ func (s *Store) PublishTerminalNotifications(ctx context.Context, limit int) (in
 		JOIN schedules schedule ON schedule.id = sr.schedule_id
 		JOIN jobs job ON job.id = sr.job_id
 		LEFT JOIN notifications notification ON notification.schedule_run_id = sr.id
+		  AND notification.notification_channel_id IS NULL
 		WHERE sr.status = 'created' AND job.status IN ('complete', 'blocked', 'failed')
 		  AND (notification.id IS NULL OR job.updated_at > notification.sent_at)
 		ORDER BY sr.updated_at, sr.id LIMIT $1`, limit)
@@ -222,16 +225,38 @@ func (s *Store) PublishTerminalNotifications(ctx context.Context, limit int) (in
 			"job_summary":    map[string]any{"method": "GET", "path": "/api/v2/jobs/" + value.jobID + "/summary"},
 			"safety":         map[string]any{"submits_candidates": false, "uploads_torrents": false, "requires_user_approval": true},
 		})
+		payloadHash := sha256.Sum256(payload)
+		payloadSHA256 := hex.EncodeToString(payloadHash[:])
 		result, err := s.pool.Exec(ctx, `
-			INSERT INTO notifications(schedule_run_id, job_id, channel, status, payload, attempts, scheduled_at, sent_at)
-			VALUES ($1, $2, 'in_app', 'sent', $3, 1, now(), now())
-			ON CONFLICT (schedule_run_id) WHERE schedule_run_id IS NOT NULL
+			INSERT INTO notifications(schedule_run_id, job_id, channel, status, payload, payload_sha256, attempts, scheduled_at, sent_at)
+			VALUES ($1, $2, 'in_app', 'sent', $3, $4, 1, now(), now())
+			ON CONFLICT (schedule_run_id) WHERE schedule_run_id IS NOT NULL AND notification_channel_id IS NULL
 			DO UPDATE SET job_id = EXCLUDED.job_id, status = 'sent', payload = EXCLUDED.payload,
-			              attempts = notifications.attempts + 1, last_error = NULL, sent_at = now()`, value.runID, value.jobID, payload)
+			              payload_sha256 = EXCLUDED.payload_sha256, attempts = notifications.attempts + 1,
+			              last_error = NULL, sent_at = now(), updated_at = now()`, value.runID, value.jobID, payload, payloadSHA256)
 		if err != nil {
 			return published, fmt.Errorf("publish in-app schedule notification: %w", err)
 		}
 		published += int(result.RowsAffected())
+		externalResult, err := s.pool.Exec(ctx, `
+			INSERT INTO notifications(schedule_run_id, job_id, notification_channel_id, channel, status,
+			                          payload, payload_sha256, attempts, scheduled_at)
+			SELECT $1, $2, channel.id, channel.name, 'queued', $3, $4, 0, now()
+			FROM schedules schedule
+			JOIN notification_channels channel
+			  ON channel.enabled AND channel.name IN (SELECT jsonb_array_elements_text(schedule.config->'notification_channels'))
+			WHERE schedule.id = $5 AND jsonb_typeof(schedule.config->'notification_channels') = 'array'
+			ON CONFLICT (schedule_run_id, notification_channel_id)
+			  WHERE schedule_run_id IS NOT NULL AND notification_channel_id IS NOT NULL
+			DO UPDATE SET job_id = EXCLUDED.job_id, channel = EXCLUDED.channel, status = 'queued',
+			              payload = EXCLUDED.payload, payload_sha256 = EXCLUDED.payload_sha256, attempts = 0,
+			              last_error = NULL, sent_at = NULL, remote_receipt = '{}', scheduled_at = now(),
+			              lease_owner = NULL, lease_expires_at = NULL, updated_at = now()`,
+			value.runID, value.jobID, payload, payloadSHA256, value.scheduleID)
+		if err != nil {
+			return published, fmt.Errorf("enqueue external schedule notifications: %w", err)
+		}
+		published += int(externalResult.RowsAffected())
 	}
 	return published, nil
 }
@@ -242,8 +267,10 @@ func (s *Store) ListNotifications(ctx context.Context, limit int) ([]Notificatio
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, COALESCE(schedule_run_id::text, ''), COALESCE(job_id::text, ''),
-		       channel, status, payload, attempts, COALESCE(last_error, ''), scheduled_at, sent_at, created_at
-		FROM notifications WHERE channel = 'in_app'
+		       COALESCE(notification_channel_id::text, ''), channel, status, payload,
+		       COALESCE(payload_sha256, ''), remote_receipt, attempts, COALESCE(last_error, ''),
+		       scheduled_at, sent_at, created_at, updated_at
+		FROM notifications
 		ORDER BY created_at DESC, id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list in-app notifications: %w", err)
@@ -253,9 +280,10 @@ func (s *Store) ListNotifications(ctx context.Context, limit int) ([]Notificatio
 	for rows.Next() {
 		var notification Notification
 		if err := rows.Scan(
-			&notification.ID, &notification.ScheduleRunID, &notification.JobID, &notification.Channel,
-			&notification.Status, &notification.Payload, &notification.Attempts, &notification.LastError,
-			&notification.ScheduledAt, &notification.SentAt, &notification.CreatedAt,
+			&notification.ID, &notification.ScheduleRunID, &notification.JobID, &notification.NotificationChannelID,
+			&notification.Channel, &notification.Status, &notification.Payload, &notification.PayloadSHA256,
+			&notification.RemoteReceipt, &notification.Attempts, &notification.LastError,
+			&notification.ScheduledAt, &notification.SentAt, &notification.CreatedAt, &notification.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan in-app notification: %w", err)
 		}
