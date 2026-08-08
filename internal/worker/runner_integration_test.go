@@ -161,7 +161,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithDownloader(downloader, artifactStore, allowedContentRoot),
 		WithMetadata(artifactStore),
 		WithMediaInfo(&fakeMediaInspector{result: media.Inspection{
-			Tool: "mediainfo", Version: "fixture", Document: json.RawMessage(`{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`), DurationMS: 1,
+			Tool: "mediainfo", Version: "fixture", Format: "json", Document: []byte(`{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`), DurationMS: 1,
 		}}, artifactStore),
 		WithScreenshots(
 			fakeScreenshotProfiles{profile: integrations.RuntimeScreenshotProfile{

@@ -127,6 +127,11 @@ if [[ "$container_identity" != "1000:1000:600" ]]; then
   echo "unexpected service identity or master-key permissions: $container_identity" >&2
   exit 1
 fi
+media_toolchain="$(compose exec -T upload-assistant sh -ec '/usr/local/bin/BDInfo -v >/dev/null; mediainfo --Version >/dev/null; ffmpeg -version >/dev/null 2>&1; ffprobe -version >/dev/null 2>&1; /usr/local/bin/mkbrr version >/dev/null; printf ready')"
+if [[ "$media_toolchain" != "ready" ]]; then
+  echo "native media toolchain is incomplete" >&2
+  exit 1
+fi
 service_container_id="$(compose ps -q upload-assistant)"
 postgres_container_id="$(compose ps -q postgres)"
 if ! docker inspect "$service_container_id" | jq -e '.[0].HostConfig.ReadonlyRootfs == true and (.[0].HostConfig.CapDrop | index("ALL")) != null and any(.[0].HostConfig.SecurityOpt[]; startswith("no-new-privileges"))' >/dev/null; then
@@ -196,6 +201,7 @@ jq -n \
       no_new_privileges: "ready",
       postgres_not_published: "ready",
       master_key_permissions: "ready",
+      media_toolchain: "ready",
       openapi: "ready",
       tools: "ready",
       agent_skill: "ready",

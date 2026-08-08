@@ -29,7 +29,8 @@ type TargetMediaEvidence struct {
 	Kind     string                 `json:"kind"`
 	Tool     string                 `json:"tool"`
 	Version  string                 `json:"version"`
-	Document json.RawMessage        `json:"document"`
+	Format   string                 `json:"format"`
+	Document string                 `json:"document"`
 	Artifact TargetArtifactEvidence `json:"artifact"`
 }
 

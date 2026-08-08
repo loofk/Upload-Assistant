@@ -470,6 +470,7 @@ func validateSummaryBindings(bindings summaryBindings, artifacts map[string]work
 	}
 	if bindings.SourceAdd.DownloaderName == "" || bindings.SourceAdd.Adapter == "" || bindings.SourceAdd.DownloaderName != bindings.Content.DownloaderName ||
 		!bindings.Content.Resolved || bindings.Content.FileCount <= 0 || bindings.Content.TotalSize <= 0 ||
+		(bindings.MediaInfo.Kind != "mediainfo" && bindings.MediaInfo.Kind != "bdinfo") ||
 		!bindings.Package.Prepared || bindings.Package.Target != bindings.Target || !bindings.Duplicate.Checked ||
 		bindings.Duplicate.Status != "clean" || bindings.Duplicate.Duplicate || bindings.Duplicate.Target != bindings.Target {
 		return fmt.Errorf("content, target package, or duplicate gate evidence is incomplete")
@@ -502,7 +503,7 @@ func validateSummaryBindings(bindings summaryBindings, artifacts map[string]work
 		{bindings.SourceTorrent.ArtifactID, bindings.SourceTorrent.SHA256, "source_torrent"},
 		{bindings.Content.ArtifactID, bindings.Content.SHA256, "content_manifest"},
 		{bindings.Metadata.ArtifactID, bindings.Metadata.SHA256, "metadata"},
-		{bindings.MediaInfo.ArtifactID, bindings.MediaInfo.SHA256, "mediainfo"},
+		{bindings.MediaInfo.ArtifactID, bindings.MediaInfo.SHA256, bindings.MediaInfo.Kind},
 		{bindings.Package.ArtifactID, bindings.Package.SHA256, "target_package"},
 		{bindings.Duplicate.ArtifactID, bindings.Duplicate.SHA256, "duplicate_check"},
 		{bindings.TargetTorrent.ArtifactID, bindings.TargetTorrent.SHA256, "target_torrent"},

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
@@ -157,6 +158,7 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 		Kind                string `json:"kind"`
 		Tool                string `json:"tool"`
 		Version             string `json:"version"`
+		DocumentFormat      string `json:"document_format"`
 		ArtifactID          string `json:"artifact_id"`
 		ArtifactSHA256      string `json:"artifact_sha256"`
 		ArtifactStoragePath string `json:"artifact_storage_path"`
@@ -168,8 +170,10 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 		ArtifactID: mediaOutput.ArtifactID, StoragePath: mediaOutput.ArtifactStoragePath,
 		SHA256: mediaOutput.ArtifactSHA256,
 	}, maxMediaEvidenceArtifact)
-	if err != nil || !json.Valid(mediaBody) {
-		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("MediaInfo artifact verification failed")
+	if err != nil || (mediaOutput.Kind == "mediainfo" && !json.Valid(mediaBody)) ||
+		(mediaOutput.Kind == "bdinfo" && (!utf8.Valid(mediaBody) || bytes.IndexByte(mediaBody, 0) >= 0 || len(bytes.TrimSpace(mediaBody)) == 0)) ||
+		(mediaOutput.Kind != "mediainfo" && mediaOutput.Kind != "bdinfo") {
+		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("media inspection artifact verification failed")
 	}
 
 	var imageOutput struct {
@@ -221,7 +225,7 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 		},
 		Media: sites.TargetMediaEvidence{
 			Kind: mediaOutput.Kind, Tool: mediaOutput.Tool, Version: mediaOutput.Version,
-			Document: append(json.RawMessage(nil), mediaBody...), Artifact: sites.TargetArtifactEvidence{
+			Format: mediaOutput.DocumentFormat, Document: string(mediaBody), Artifact: sites.TargetArtifactEvidence{
 				ArtifactID: mediaOutput.ArtifactID, StoragePath: mediaOutput.ArtifactStoragePath, SHA256: mediaOutput.ArtifactSHA256,
 			},
 		},

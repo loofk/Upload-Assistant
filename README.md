@@ -7,7 +7,7 @@ Upload Assistant 是面向中文 PT 圈的本地转种、发种与每日候选�
 ## 当前能力
 
 - `/api/v2` 任务 API：`queued/running/paused/blocked/failed/complete/cancelled`，支持逐步暂停、恢复、重试与幂等创建。
-- U2/CHD → MTEAM 参考闭环：源站识别/拉种、远程下载器、MediaInfo/截图、imgbb/PTPimg、目标查重/上传、新种下载/注入、做种核验与最终 summary。
+- U2/CHD → MTEAM 参考闭环：源站识别/拉种、远程下载器、MediaInfo/BDInfo/截图、imgbb/PTPimg、目标查重/上传、新种下载/注入、做种核验与最终 summary。
 - PostgreSQL 持久调度：每日候选、排名、风险/阻塞、通知、运行历史与崩溃后租约接管。
 - 独立集成配置：qBittorrent、Transmission、rTorrent、Deluge Web、imgbb、PTPimg、截图策略、Discord webhook、Sonarr 和 Radarr。
 - Markdown 站点规则：结构化 front matter、原始规则文本、不可变版本、fingerprint、人工审批和激活。
@@ -102,8 +102,8 @@ UA_POSTGRES_PASSWORD=compose-config-fixture make go-compose-config
 make verify-go-v2-local
 ```
 
-`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、健康检查、安全响应头、鉴权、OpenAPI、38 个 AI 工具、Agent Skill、中文 Web、CLI、迁移、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
+`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、38 个 AI 工具、Agent Skill、中文 Web、CLI、迁移、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
 
-本地与 CI 测试只使用 fixture、`httptest` 和隔离 PostgreSQL，不联系真实 Tracker、下载器或图床。真实 U2→MTEAM、CHD→MTEAM、qBittorrent、MediaInfo/截图/mkbrr 与 imgbb/PTPimg 闭环必须由操作者提供合法账号、资源和显式授权后执行；在此之前必须保持为外部验证阻塞，不能伪造完成。
+本地与 CI 测试只使用 fixture、`httptest` 和隔离 PostgreSQL，不联系真实 Tracker、下载器或图床。真实 U2→MTEAM、CHD→MTEAM、qBittorrent、MediaInfo/BDInfo/截图/mkbrr 与 imgbb/PTPimg 闭环必须由操作者提供合法账号、资源和显式授权后执行；在此之前必须保持为外部验证阻塞，不能伪造完成。
 
 更完整的运维、规则、下载器、迁移和审计说明见 [docs/go-v2.md](docs/go-v2.md)。

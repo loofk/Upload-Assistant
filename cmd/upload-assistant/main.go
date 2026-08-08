@@ -166,7 +166,7 @@ func serve(args []string) error {
 		return fmt.Errorf("initialize rule store: %w", err)
 	}
 	liveReadiness := readiness.NewService(ruleStore, integrationStore, readiness.Runtime{
-		MediaInfoBinary: cfg.MediaInfoBinary, FFmpegBinary: cfg.FFmpegBinary,
+		MediaInfoBinary: cfg.MediaInfoBinary, BDInfoBinary: cfg.BDInfoBinary, FFmpegBinary: cfg.FFmpegBinary,
 		FFprobeBinary: cfg.FFprobeBinary, MkbrrBinary: cfg.MkbrrBinary, DownloadsDir: "/downloads",
 	})
 	artifactStore, err := artifacts.NewLocalStore(cfg.DataDir)
@@ -207,7 +207,11 @@ func serve(args []string) error {
 		worker.WithSourceAdapters(sourceRegistry, artifactStore),
 		worker.WithDownloader(downloaderManager, artifactStore),
 		worker.WithMetadata(artifactStore),
-		worker.WithMediaInfo(media.NewMediaInfo(cfg.MediaInfoBinary, 2*time.Minute), artifactStore),
+		worker.WithMediaInspection(
+			media.NewMediaInfo(cfg.MediaInfoBinary, 2*time.Minute),
+			media.NewBDInfo(cfg.BDInfoBinary, filepath.Join(cfg.DataDir, "tmp"), 15*time.Minute),
+			artifactStore,
+		),
 		worker.WithScreenshots(
 			integrationStore,
 			media.NewFFmpegScreenshots(cfg.FFmpegBinary, cfg.FFprobeBinary, 5*time.Minute),

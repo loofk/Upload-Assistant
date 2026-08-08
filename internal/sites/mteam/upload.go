@@ -166,8 +166,9 @@ func validateUploadRequest(request sites.TargetUploadRequest) (map[string]string
 		inspection.TotalSizeBytes != request.Package.Content.TotalSizeBytes {
 		return nil, torrentmeta.Inspection{}, fmt.Errorf("target torrent payload does not match package content evidence")
 	}
-	if !json.Valid(request.Package.MediaInfo) || len(request.Package.MediaInfo) == 0 || len(request.Package.MediaInfo) > maxUploadMediaInfoBytes {
-		return nil, torrentmeta.Inspection{}, fmt.Errorf("MTEAM package MediaInfo is invalid or too large")
+	mediaInfo, err := decodeMediaEvidence(request.Package.MediaInfo)
+	if err != nil {
+		return nil, torrentmeta.Inspection{}, fmt.Errorf("MTEAM package media evidence is invalid or too large")
 	}
 	description := strings.TrimSpace(request.Package.Description)
 	if description == "" || len(description) > maxUploadDescriptionBytes {
@@ -197,7 +198,7 @@ func validateUploadRequest(request sites.TargetUploadRequest) (map[string]string
 		"name": name, "smallDescr": smallDescription, "descr": request.Package.Description,
 		"category": strconv.FormatInt(category, 10), "standard": strconv.FormatInt(standard, 10),
 		"anonymous": strconv.FormatBool(anonymous), "dmmCode": "", "tags": "", "aids": "",
-		"mediainfo": string(request.Package.MediaInfo),
+		"mediainfo": mediaInfo,
 	}
 	for _, key := range []string{"imdb", "douban"} {
 		if value, exists := request.Package.FormFields[key]; exists {
@@ -209,6 +210,30 @@ func validateUploadRequest(request sites.TargetUploadRequest) (map[string]string
 		}
 	}
 	return fields, inspection, nil
+}
+
+func decodeMediaEvidence(raw json.RawMessage) (string, error) {
+	body := bytes.TrimSpace(raw)
+	if len(body) == 0 || len(body) > maxUploadMediaInfoBytes || !json.Valid(body) {
+		return "", fmt.Errorf("media evidence envelope is invalid")
+	}
+	text := ""
+	if body[0] == '"' {
+		if err := json.Unmarshal(body, &text); err != nil {
+			return "", fmt.Errorf("decode media evidence text: %w", err)
+		}
+	} else if body[0] == '{' {
+		// Compatibility with packages persisted before media evidence was
+		// normalized to a JSON string.
+		text = string(body)
+	} else {
+		return "", fmt.Errorf("media evidence must be text or a legacy JSON object")
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || len(text) > maxUploadMediaInfoBytes || strings.IndexByte(text, 0) >= 0 || !utf8.ValidString(text) {
+		return "", fmt.Errorf("media evidence text is invalid")
+	}
+	return text, nil
 }
 
 func buildUploadBody(fields map[string]string, torrent []byte) ([]byte, string, error) {

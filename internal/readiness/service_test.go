@@ -112,7 +112,7 @@ func TestCheckReportsConfigurationReadyWithoutAuthorizingLiveUpload(t *testing.T
 
 func TestCheckReturnsActionableBlockersWithoutExternalCalls(t *testing.T) {
 	report, err := NewService(fakeRules{}, fakeIntegrations{}, Runtime{
-		MediaInfoBinary: "/missing/mediainfo", FFmpegBinary: "/missing/ffmpeg",
+		MediaInfoBinary: "/missing/mediainfo", BDInfoBinary: "/missing/bdinfo", FFmpegBinary: "/missing/ffmpeg",
 		FFprobeBinary: "/missing/ffprobe", MkbrrBinary: "/missing/mkbrr", DownloadsDir: "/missing/downloads",
 	}).Check(context.Background(), Input{Source: "CHD", Target: "MTEAM", Downloader: "box", TargetDownloader: "seedbox", ImageHost: "ptpimg", ScreenshotProfile: "six"})
 	if err != nil {
@@ -142,8 +142,8 @@ func TestCheckRejectsUnsupportedReferenceFlowAndUnsafeNames(t *testing.T) {
 func testRuntime(t *testing.T) Runtime {
 	t.Helper()
 	directory := t.TempDir()
-	binaries := make([]string, 4)
-	for index, name := range []string{"mediainfo", "ffmpeg", "ffprobe", "mkbrr"} {
+	binaries := make([]string, 5)
+	for index, name := range []string{"mediainfo", "bdinfo", "ffmpeg", "ffprobe", "mkbrr"} {
 		path := filepath.Join(directory, name)
 		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
 			t.Fatal(err)
@@ -154,7 +154,7 @@ func testRuntime(t *testing.T) Runtime {
 	if err := os.Mkdir(downloads, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	return Runtime{MediaInfoBinary: binaries[0], FFmpegBinary: binaries[1], FFprobeBinary: binaries[2], MkbrrBinary: binaries[3], DownloadsDir: downloads}
+	return Runtime{MediaInfoBinary: binaries[0], BDInfoBinary: binaries[1], FFmpegBinary: binaries[2], FFprobeBinary: binaries[3], MkbrrBinary: binaries[4], DownloadsDir: downloads}
 }
 
 func mustJSON(value any) json.RawMessage {

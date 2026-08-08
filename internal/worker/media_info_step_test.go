@@ -33,10 +33,10 @@ func TestMediaInfoStepSelectsLargestCandidateAndStoresArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	inspector := &fakeMediaInspector{result: media.Inspection{
-		Tool: "mediainfo", Version: "fixture", Document: json.RawMessage(`{"media":{"track":[]}}`), DurationMS: 5,
+		Tool: "mediainfo", Version: "fixture", Format: "json", Document: []byte(`{"media":{"track":[]}}`), DurationMS: 5,
 	}}
 	recorder := &fakeArtifactRecorder{}
-	executor := mediaInfoExecutor{inspector: inspector, artifacts: mustArtifactStore(t), recorder: recorder}
+	executor := mediaInfoExecutor{mediaInspector: inspector, artifacts: mustArtifactStore(t), recorder: recorder}
 	output, err := executor.Execute(context.Background(), mediaInfoExecution(directory, []string{small, large}))
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestMediaInfoStepSelectsLargestCandidateAndStoresArtifact(t *testing.T) {
 	}
 }
 
-func TestMediaInfoStepRequiresBDInfoForDiscStructure(t *testing.T) {
+func TestMediaInfoStepUsesBDInfoForBlurayStructure(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "BDMV", "STREAM")
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		t.Fatal(err)
@@ -62,11 +62,36 @@ func TestMediaInfoStepRequiresBDInfoForDiscStructure(t *testing.T) {
 	if err := os.WriteFile(stream, []byte("disc"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	executor := mediaInfoExecutor{inspector: &fakeMediaInspector{}, artifacts: mustArtifactStore(t), recorder: &fakeArtifactRecorder{}}
-	_, err := executor.Execute(context.Background(), mediaInfoExecution(filepath.Dir(filepath.Dir(directory)), []string{stream}))
+	discInspector := &fakeMediaInspector{result: media.Inspection{Tool: "bdinfo", Version: "fixture", Format: "text", Document: []byte("DISC INFO:\nVideo: 1080p")}}
+	recorder := &fakeArtifactRecorder{}
+	executor := mediaInfoExecutor{mediaInspector: &fakeMediaInspector{}, discInspector: discInspector, artifacts: mustArtifactStore(t), recorder: recorder}
+	output, err := executor.Execute(context.Background(), mediaInfoExecution(filepath.Dir(filepath.Dir(directory)), []string{stream}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Kind         string `json:"kind"`
+		SelectedPath string `json:"selected_path"`
+	}
+	if json.Unmarshal(output, &result) != nil || result.Kind != "bdinfo" || result.SelectedPath != filepath.Dir(filepath.Dir(directory)) || recorder.recorded.Kind != "bdinfo" {
+		t.Fatalf("BDInfo output/artifact = %s/%#v", output, recorder.recorded)
+	}
+}
+
+func TestMediaInfoStepBlocksDVDWithoutSubstitution(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	video := filepath.Join(directory, "VTS_01_1.VOB")
+	if err := os.WriteFile(video, []byte("dvd"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	executor := mediaInfoExecutor{mediaInspector: &fakeMediaInspector{}, artifacts: mustArtifactStore(t), recorder: &fakeArtifactRecorder{}}
+	_, err := executor.Execute(context.Background(), mediaInfoExecution(filepath.Dir(directory), []string{video}))
 	blocked := requireBlockError(t, err)
-	if blocked.Blockers[0].Code != "bdinfo_adapter_required" {
-		t.Fatalf("disc blocker = %#v", blocked)
+	if blocked.Blockers[0].Code != "dvdinfo_adapter_required" {
+		t.Fatalf("DVD blocker = %#v", blocked)
 	}
 }
 

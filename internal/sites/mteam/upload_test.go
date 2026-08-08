@@ -31,9 +31,14 @@ func TestClientUploadsBoundMTeamMultipartAndAuditsIntentResult(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = r.MultipartForm.RemoveAll() })
+		expectedMedia, err := decodeMediaEvidence(request.Package.MediaInfo)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if r.FormValue("name") != "Fixture 2026 1080p BluRay" || r.FormValue("category") != "419" ||
 			r.FormValue("standard") != "1" || r.FormValue("anonymous") != "false" ||
-			r.FormValue("descr") != request.Package.Description || r.FormValue("imdb") != "https://www.imdb.com/title/tt1234567/" {
+			r.FormValue("descr") != request.Package.Description || r.FormValue("mediainfo") != expectedMedia ||
+			r.FormValue("imdb") != "https://www.imdb.com/title/tt1234567/" {
 			t.Fatalf("multipart fields = %#v", r.MultipartForm.Value)
 		}
 		file, header, err := r.FormFile("file")
@@ -84,6 +89,22 @@ func TestClientUploadTreatsSuccessWithoutIDAsUnknownOutcome(t *testing.T) {
 	code, _, _ := sites.ErrorDetails(err)
 	if code != "target_upload_outcome_unknown" || len(store.actions) != 2 || store.actions[1] != "target.upload_outcome" {
 		t.Fatalf("unknown outcome code/actions/error = %q/%#v/%v", code, store.actions, err)
+	}
+}
+
+func TestDecodeMediaEvidenceAcceptsCurrentTextAndLegacyJSONObject(t *testing.T) {
+	current, err := decodeMediaEvidence(json.RawMessage(`"DISC INFO:\nVideo: 1080p"`))
+	if err != nil || current != "DISC INFO:\nVideo: 1080p" {
+		t.Fatalf("current media evidence = %q/%v", current, err)
+	}
+	legacy, err := decodeMediaEvidence(json.RawMessage(`{"media":{"track":[]}}`))
+	if err != nil || legacy != `{"media":{"track":[]}}` {
+		t.Fatalf("legacy media evidence = %q/%v", legacy, err)
+	}
+	for _, invalid := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(`"\u0000"`)} {
+		if _, err := decodeMediaEvidence(invalid); err == nil {
+			t.Fatalf("invalid media evidence accepted: %s", invalid)
+		}
 	}
 }
 

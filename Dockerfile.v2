@@ -26,6 +26,20 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 
 FROM ghcr.io/autobrr/mkbrr:v1.23.0@sha256:41cbe35d5d2faf09efb5e3ec3846b258b13f68851baaf0ae8465176f627bf1b6 AS mkbrr
 
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim@sha256:e2f26f26169fd10d6f1b426e01c97397717b32e9d5ab4ee4a7d5497ed9403007 AS bdinfo-builder
+
+WORKDIR /src
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL --retry 3 \
+        https://github.com/tetrahydroc/BDInfoCLI/archive/764f3a1d591e492ad13aa884e770f9b447bdde0b.tar.gz \
+        -o /tmp/bdinfo.tar.gz \
+    && echo "6f50c226db160d22a25950ae63e4efa4a70cc01e8ab8178a903c07400efd6eb1  /tmp/bdinfo.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/bdinfo.tar.gz --strip-components=1 \
+    && dotnet publish BDInfo/BDInfo.csproj -c Release -r linux-x64 --self-contained true \
+        -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o /out \
+    && install -m 0644 LICENSE /out/LICENSE-BDInfoCLI
+
 FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,6 +57,8 @@ RUN groupadd --gid 1000 upload-assistant \
 
 COPY --from=go-builder /out/upload-assistant /usr/local/bin/upload-assistant
 COPY --from=mkbrr /usr/local/bin/mkbrr /usr/local/bin/mkbrr
+COPY --from=bdinfo-builder /out/BDInfo /usr/local/bin/BDInfo
+COPY --from=bdinfo-builder /out/LICENSE-BDInfoCLI /usr/share/licenses/bdinfo/LICENSE
 
 USER 1000:1000
 EXPOSE 8080

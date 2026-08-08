@@ -29,6 +29,7 @@ type Config struct {
 	DatabaseMaxLife  time.Duration
 	MasterKeyFile    string
 	MediaInfoBinary  string
+	BDInfoBinary     string
 	FFmpegBinary     string
 	FFprobeBinary    string
 	MkbrrBinary      string
@@ -53,6 +54,7 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		DatabaseMaxIdle:  5 * time.Minute,
 		DatabaseMaxLife:  30 * time.Minute,
 		MediaInfoBinary:  envOrDefault(lookup, "UA_MEDIAINFO_BIN", "mediainfo"),
+		BDInfoBinary:     envOrDefault(lookup, "UA_BDINFO_BIN", "BDInfo"),
 		FFmpegBinary:     envOrDefault(lookup, "UA_FFMPEG_BIN", "ffmpeg"),
 		FFprobeBinary:    envOrDefault(lookup, "UA_FFPROBE_BIN", "ffprobe"),
 		MkbrrBinary:      envOrDefault(lookup, "UA_MKBRR_BIN", "mkbrr"),
@@ -75,6 +77,7 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		binary   string
 	}{
 		{variable: "UA_MEDIAINFO_BIN", binary: cfg.MediaInfoBinary},
+		{variable: "UA_BDINFO_BIN", binary: cfg.BDInfoBinary},
 		{variable: "UA_FFMPEG_BIN", binary: cfg.FFmpegBinary},
 		{variable: "UA_FFPROBE_BIN", binary: cfg.FFprobeBinary},
 		{variable: "UA_MKBRR_BIN", binary: cfg.MkbrrBinary},

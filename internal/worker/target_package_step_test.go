@@ -86,6 +86,48 @@ func TestTargetPackageStepRejectsTamperedMediaArtifact(t *testing.T) {
 	}
 }
 
+func TestTargetPackageStepAcceptsVerifiedBDInfoArtifact(t *testing.T) {
+	store := mustArtifactStore(t)
+	execution := targetPackageExecution(t, store, "U2", map[string]any{})
+	report := []byte("DISC INFO:\nDisc Title: Fixture\nVideo: MPEG-4 AVC Video / 1080p / 23.976 fps")
+	file, err := store.Write(context.Background(), artifacts.Scope{
+		JobID: "job-id", StepID: "media-step", AttemptID: "bdinfo-attempt",
+	}, "bdinfo.txt", bytes.NewReader(report))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	mediaOutput := snapshot["previous_steps"].(map[string]any)["media_info"].(map[string]any)
+	mediaOutput["kind"] = "bdinfo"
+	mediaOutput["tool"] = "bdinfo"
+	mediaOutput["document_format"] = "text"
+	mediaOutput["artifact_sha256"] = file.SHA256
+	mediaOutput["artifact_storage_path"] = file.RelativePath
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+
+	recorder := &fakeArtifactRecorder{}
+	if _, err := (targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: recorder}).Execute(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Open(recorder.recorded.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stored.Close()
+	var prepared sites.PreparedTargetPackage
+	var mediaText string
+	if err := json.NewDecoder(stored).Decode(&prepared); err != nil {
+		t.Fatal(err)
+	}
+	decodeErr := json.Unmarshal(prepared.MediaInfo, &mediaText)
+	if decodeErr != nil || mediaText != string(report) || !strings.Contains(prepared.Description, "[b]BDInfo[/b]") {
+		t.Fatalf("stored BDInfo package/error = %#v/%v", prepared, decodeErr)
+	}
+}
+
 func targetPackageRegistry(t *testing.T) *sites.TargetPackageRegistry {
 	t.Helper()
 	registry, err := sites.NewTargetPackageRegistry(mteam.NewPackageAdapter())

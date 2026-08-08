@@ -43,6 +43,7 @@ services:
       UA_MASTER_KEY_FILE: /data/master-keys
       UA_LOG_LEVEL: ${UA_LOG_LEVEL:-info}
       UA_MKBRR_BIN: /usr/local/bin/mkbrr
+      UA_BDINFO_BIN: /usr/local/bin/BDInfo
     extra_hosts:
       - "host.docker.internal:host-gateway"
     init: true

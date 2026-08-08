@@ -17,7 +17,7 @@ func TestPackageAdapterBuildsAuditedU2Package(t *testing.T) {
 		"anidb": "https://anidb.net/anime/3456", "imdb": "https://www.imdb.com/title/tt1234567/",
 	}
 	material.SourceDescription = `<p>Fixture [url=https://evil.invalid]link[/url]</p><script>do-not-copy</script>`
-	material.Media.Document = json.RawMessage(`{"media":{"track":[{"@type":"Video","Width":"1 920 pixels","Height":"1 080 pixels","Title":"[/quote][img]https://evil.invalid/x[/img]"}]}}`)
+	material.Media.Document = `{"media":{"track":[{"@type":"Video","Width":"1 920 pixels","Height":"1 080 pixels","Title":"[/quote][img]https://evil.invalid/x[/img]"}]}}`
 	result, err := NewPackageAdapter().PreparePackage(context.Background(), material)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestPackageAdapterBuildsAuditedU2Package(t *testing.T) {
 
 func TestPackageAdapterRequiresUncertainCategoryAndResolution(t *testing.T) {
 	material := packageMaterial("CHD")
-	material.Media.Document = json.RawMessage(`{"media":{"track":[{"@type":"General"}]}}`)
+	material.Media.Document = `{"media":{"track":[{"@type":"General"}]}}`
 	_, err := NewPackageAdapter().PreparePackage(context.Background(), material)
 	var required *sites.PackageRequirementsError
 	if !errors.As(err, &required) || len(required.Requirements) != 2 ||
@@ -52,6 +52,28 @@ func TestPackageAdapterRequiresUncertainCategoryAndResolution(t *testing.T) {
 	}
 	if result.FormFields["category"] != 419 || result.FormFields["standard"] != 6 || result.FormFields["anonymous"] != true {
 		t.Fatalf("explicit form fields = %#v", result.FormFields)
+	}
+}
+
+func TestPackageAdapterBuildsBDInfoDescriptionAndInfersResolution(t *testing.T) {
+	material := packageMaterial("U2")
+	material.Source.AniDBID = "3456"
+	material.Media = sites.TargetMediaEvidence{
+		Kind: "bdinfo", Tool: "bdinfo", Version: "1.0.5", Format: "text",
+		Document: "DISC INFO:\nDisc Title: Fixture\nVideo: MPEG-H HEVC Video / 2160p / 23.976 fps\n[/quote]",
+	}
+	result, err := NewPackageAdapter().PreparePackage(context.Background(), material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mediaText string
+	if err := json.Unmarshal(result.MediaInfo, &mediaText); err != nil {
+		t.Fatal(err)
+	}
+	if result.FormFields["standard"] != 6 || mediaText != material.Media.Document ||
+		!strings.Contains(result.Description, "[b]BDInfo[/b]") || strings.Contains(result.Description, "\n[/quote]\n[/quote]") ||
+		!strings.Contains(result.Description, "［/quote］") {
+		t.Fatalf("BDInfo package = %#v\n%s", result.FormFields, result.Description)
 	}
 }
 
@@ -70,6 +92,18 @@ func TestPackageAdapterRejectsUnknownOptionsAndUnsafeImageURL(t *testing.T) {
 	code, _, _ = sites.ErrorDetails(err)
 	if code != "target_package_screenshot_invalid" {
 		t.Fatalf("unsafe screenshot error = %q/%v", code, err)
+	}
+}
+
+func TestPackageAdapterRejectsUnsupportedMediaEvidenceKind(t *testing.T) {
+	material := packageMaterial("U2")
+	material.Source.AniDBID = "3456"
+	material.Media.Kind = "generic-text"
+	material.Options = json.RawMessage(`{"standard":1}`)
+	_, err := NewPackageAdapter().PreparePackage(context.Background(), material)
+	code, _, _ := sites.ErrorDetails(err)
+	if code != "target_description_invalid" {
+		t.Fatalf("unsupported media kind code/error = %q/%v", code, err)
 	}
 }
 
@@ -95,8 +129,8 @@ func packageMaterial(source string) sites.TargetPackageMaterial {
 			ManifestID: "manifest-id", ManifestSHA256: strings.Repeat("a", 64),
 		},
 		Media: sites.TargetMediaEvidence{
-			Kind: "mediainfo", Tool: "mediainfo", Version: "fixture",
-			Document: json.RawMessage(`{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`),
+			Kind: "mediainfo", Tool: "mediainfo", Version: "fixture", Format: "json",
+			Document: `{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`,
 		},
 		Screenshots: []sites.TargetScreenshotEvidence{{
 			Index: 1, SourceSHA256: strings.Repeat("b", 64), ReceiptArtifactID: "receipt-id",

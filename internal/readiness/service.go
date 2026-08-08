@@ -34,6 +34,7 @@ type IntegrationProvider interface {
 
 type Runtime struct {
 	MediaInfoBinary string
+	BDInfoBinary    string
 	FFmpegBinary    string
 	FFprobeBinary   string
 	MkbrrBinary     string
@@ -150,6 +151,7 @@ func (service *Service) Check(ctx context.Context, input Input) (Report, error) 
 		return Report{}, err
 	}
 	service.checkBinary(&report, "mediainfo_binary", service.runtime.MediaInfoBinary)
+	service.checkBinary(&report, "bdinfo_binary", service.runtime.BDInfoBinary)
 	service.checkBinary(&report, "ffmpeg_binary", service.runtime.FFmpegBinary)
 	service.checkBinary(&report, "ffprobe_binary", service.runtime.FFprobeBinary)
 	service.checkBinary(&report, "mkbrr_binary", service.runtime.MkbrrBinary)

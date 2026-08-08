@@ -101,9 +101,9 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 			return sites.PreparedTargetPackage{}, sites.NewAdapterError("target_package_options_invalid", "MTEAM standard must be one of 1, 2, 3, 5, 6, or 7", false, nil)
 		}
 		decisions = append(decisions, sites.TargetDecision{Field: "standard", Value: standard, Derivation: "explicit_input"})
-	} else if inferred, evidence := inferStandard(material.Media.Document); inferred > 0 {
+	} else if inferred, evidence := inferStandard(material.Media.Kind, material.Media.Document); inferred > 0 {
 		standard = inferred
-		decisions = append(decisions, sites.TargetDecision{Field: "standard", Value: standard, Derivation: "mediainfo", Evidence: evidence})
+		decisions = append(decisions, sites.TargetDecision{Field: "standard", Value: standard, Derivation: strings.ToLower(material.Media.Kind), Evidence: evidence})
 	} else {
 		requirements = append(requirements, sites.PackageRequirement{
 			Code: "target_standard_required", Field: "target_package.standard",
@@ -159,10 +159,14 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 	if len(material.Screenshots) < 3 {
 		warnings = append(warnings, "fewer than three uploaded screenshots are available")
 	}
+	mediaPayload, err := json.Marshal(material.Media.Document)
+	if err != nil {
+		return sites.PreparedTargetPackage{}, sites.NewAdapterError("target_media_evidence_invalid", "media evidence could not be serialized", false, err)
+	}
 	return sites.PreparedTargetPackage{
 		SchemaVersion: 1, Target: "MTEAM", Adapter: "mteam_api", Source: material.Source,
 		MetadataLinks: cloneStringMap(material.Links), FormFields: fields,
-		Description: description, MediaInfo: append(json.RawMessage(nil), material.Media.Document...),
+		Description: description, MediaInfo: mediaPayload,
 		Content: material.Content, Evidence: material.Evidence, Decisions: decisions, Warnings: warnings,
 		ManualReviewRequired: true, GeneratedAt: time.Now().UTC(),
 	}, nil
@@ -205,13 +209,16 @@ func validStandard(value int) bool {
 	}
 }
 
-func inferStandard(document json.RawMessage) (int, string) {
+func inferStandard(kind, document string) (int, string) {
+	if strings.EqualFold(strings.TrimSpace(kind), "bdinfo") {
+		return inferBDInfoStandard(document)
+	}
 	var envelope struct {
 		Media struct {
 			Track json.RawMessage `json:"track"`
 		} `json:"media"`
 	}
-	if json.Unmarshal(document, &envelope) != nil {
+	if json.Unmarshal([]byte(document), &envelope) != nil {
 		return 0, ""
 	}
 	var tracks []map[string]any
@@ -249,6 +256,37 @@ func inferStandard(document json.RawMessage) (int, string) {
 	return 0, ""
 }
 
+var bdinfoVideoResolutionPattern = regexp.MustCompile(`(?i)^\s*Video:\s*.*\b(4320|2160|1080|720)([pi])\b`)
+
+func inferBDInfoStandard(document string) (int, string) {
+	bestHeight, bestScan, bestLine := 0, "", ""
+	for _, line := range strings.Split(document, "\n") {
+		match := bdinfoVideoResolutionPattern.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+		height, _ := strconv.Atoi(match[1])
+		if height > bestHeight || (height == bestHeight && strings.EqualFold(match[2], "p")) {
+			bestHeight, bestScan, bestLine = height, strings.ToLower(match[2]), strings.TrimSpace(line)
+		}
+	}
+	evidence := safeBBCodeText(bestLine)
+	switch {
+	case bestHeight >= 4320:
+		return 7, evidence
+	case bestHeight >= 2160:
+		return 6, evidence
+	case bestHeight >= 1080 && bestScan == "i":
+		return 2, evidence
+	case bestHeight >= 1080:
+		return 1, evidence
+	case bestHeight >= 720:
+		return 3, evidence
+	default:
+		return 0, ""
+	}
+}
+
 var digitsPattern = regexp.MustCompile(`[0-9]+`)
 
 func numericValue(value any) int {
@@ -272,9 +310,9 @@ func stringValue(value any) string {
 }
 
 func buildDescription(material sites.TargetPackageMaterial, title string) (string, error) {
-	mediaText, err := safePrettyJSON(material.Media.Document)
+	mediaText, err := formatMediaEvidence(material.Media)
 	if err != nil {
-		return "", fmt.Errorf("format MediaInfo: %w", err)
+		return "", fmt.Errorf("format media evidence: %w", err)
 	}
 	lines := []string{"[b]资源信息[/b]", "", "标题：" + safeBBCodeText(title)}
 	linkKeys := make([]string, 0, len(material.Links))
@@ -293,7 +331,11 @@ func buildDescription(material sites.TargetPackageMaterial, title string) (strin
 	if sourceText := htmlToPlainText(material.SourceDescription); sourceText != "" {
 		lines = append(lines, "", "[b]原站简介（已文本化）[/b]", safeBBCodeText(sourceText))
 	}
-	lines = append(lines, "", "[b]MediaInfo[/b]", "[quote]", mediaText, "[/quote]")
+	mediaLabel := "MediaInfo"
+	if strings.EqualFold(material.Media.Kind, "bdinfo") {
+		mediaLabel = "BDInfo"
+	}
+	lines = append(lines, "", "[b]"+mediaLabel+"[/b]", "[quote]", mediaText, "[/quote]")
 	if len(material.Screenshots) > 0 {
 		lines = append(lines, "", "[b]截图[/b]")
 		for _, screenshot := range material.Screenshots {
@@ -312,7 +354,22 @@ func buildDescription(material sites.TargetPackageMaterial, title string) (strin
 	return description, nil
 }
 
-func safePrettyJSON(body json.RawMessage) (string, error) {
+func formatMediaEvidence(media sites.TargetMediaEvidence) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(media.Kind)) {
+	case "bdinfo":
+		text := safeBBCodeText(media.Document)
+		if text == "" {
+			return "", fmt.Errorf("BDInfo report is empty")
+		}
+		return text, nil
+	case "mediainfo":
+		return safePrettyJSON([]byte(media.Document))
+	default:
+		return "", fmt.Errorf("unsupported media evidence kind %q", media.Kind)
+	}
+}
+
+func safePrettyJSON(body []byte) (string, error) {
 	var value any
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()

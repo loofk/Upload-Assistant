@@ -34,6 +34,7 @@ func TestDefaultComposeIsCanonicalGoV2Deployment(t *testing.T) {
 		"Dockerfile.v2", "platform: linux/amd64", "127.0.0.1:${UA_HTTP_PORT:-8080}:8080",
 		"${UA_POSTGRES_PASSWORD:?", "read_only: true", "no-new-privileges:true", "cap_drop:",
 		"/legacy:ro", "/downloads:rw", "UA_MASTER_KEY_FILE: /data/master-keys",
+		"UA_BDINFO_BIN: /usr/local/bin/BDInfo",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("canonical Compose is missing %q", required)
@@ -68,6 +69,16 @@ func TestPublishedImagesUseOnlyGoV2AMD64Runtime(t *testing.T) {
 	dockerfile := string(readFile(t, filepath.Join(root, "Dockerfile.v2")))
 	if strings.Contains(strings.ToLower(dockerfile), "python") || !strings.Contains(dockerfile, "ENTRYPOINT [\"/usr/local/bin/upload-assistant\"]") {
 		t.Fatal("Dockerfile.v2 must contain only the native Go service runtime")
+	}
+	for _, required := range []string{
+		"BDInfoCLI/archive/764f3a1d591e492ad13aa884e770f9b447bdde0b.tar.gz",
+		"6f50c226db160d22a25950ae63e4efa4a70cc01e8ab8178a903c07400efd6eb1  /tmp/bdinfo.tar.gz\" | sha256sum -c -",
+		"COPY --from=bdinfo-builder /out/BDInfo /usr/local/bin/BDInfo",
+		"LICENSE-BDInfoCLI",
+	} {
+		if !strings.Contains(dockerfile, required) {
+			t.Errorf("Dockerfile.v2 is missing pinned BDInfo runtime contract %q", required)
+		}
 	}
 }
 

@@ -29,6 +29,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	if cfg.MediaInfoBinary != "mediainfo" {
 		t.Fatalf("MediaInfoBinary = %q", cfg.MediaInfoBinary)
 	}
+	if cfg.BDInfoBinary != "BDInfo" {
+		t.Fatalf("BDInfoBinary = %q", cfg.BDInfoBinary)
+	}
 	if cfg.MkbrrBinary != "mkbrr" {
 		t.Fatalf("MkbrrBinary = %q", cfg.MkbrrBinary)
 	}

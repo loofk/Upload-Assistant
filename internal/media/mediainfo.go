@@ -20,11 +20,14 @@ const (
 )
 
 type Inspection struct {
-	Tool       string          `json:"tool"`
-	Version    string          `json:"version"`
-	InputPath  string          `json:"input_path"`
-	Document   json.RawMessage `json:"document"`
-	DurationMS int64           `json:"duration_ms"`
+	Tool       string `json:"tool"`
+	Version    string `json:"version"`
+	InputPath  string `json:"input_path"`
+	Format     string `json:"format"`
+	MIMEType   string `json:"mime_type"`
+	Filename   string `json:"filename"`
+	Document   []byte `json:"-"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 type MediaInfo struct {
@@ -92,7 +95,8 @@ func (inspector *MediaInfo) Inspect(ctx context.Context, inputPath string) (Insp
 	}
 	return Inspection{
 		Tool: "mediainfo", Version: version, InputPath: inputPath,
-		Document:   append(json.RawMessage(nil), buffer.Bytes()...),
+		Format: "json", MIMEType: "application/json", Filename: "mediainfo.json",
+		Document:   append([]byte(nil), buffer.Bytes()...),
 		DurationMS: time.Since(started).Milliseconds(),
 	}, nil
 }
