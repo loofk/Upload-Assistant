@@ -189,6 +189,7 @@ func serve(args []string) error {
 		Rules:        ruleStore,
 		Integrations: integrationStore,
 		Downloaders:  downloaderManager,
+		Artifacts:    artifactStore,
 		DataDir:      cfg.DataDir,
 		Logger:       logger,
 		Build:        buildinfo.Current(),

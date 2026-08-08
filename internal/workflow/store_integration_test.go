@@ -138,6 +138,13 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	if err != nil || len(artifacts) != 1 {
 		t.Fatalf("ListArtifacts() count/error = %d/%v", len(artifacts), err)
 	}
+	loadedArtifact, err := store.GetArtifact(ctx, job.ID, artifact.ID)
+	if err != nil || loadedArtifact.ID != artifact.ID || loadedArtifact.SHA256 != artifact.SHA256 {
+		t.Fatalf("GetArtifact() artifact/error = %#v/%v", loadedArtifact, err)
+	}
+	if _, err := store.GetArtifact(ctx, "00000000-0000-4000-8000-000000000000", artifact.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-job GetArtifact() error = %v, want ErrNotFound", err)
+	}
 	job, err = store.CompleteStep(
 		ctx, job.ID, "integration-worker", attempt.ID,
 		json.RawMessage(`{"tracker":"U2","torrent_id":"60635"}`),

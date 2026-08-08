@@ -25,6 +25,7 @@ type Dependencies struct {
 	Rules        RuleService
 	Integrations IntegrationService
 	Downloaders  DownloaderService
+	Artifacts    ArtifactContentReader
 	DataDir      string
 	Logger       *slog.Logger
 	Build        buildinfo.Info
@@ -77,7 +78,7 @@ func New(deps Dependencies) http.Handler {
 		})
 	})
 	if deps.Jobs != nil {
-		registerJobRoutes(mux, deps.Jobs)
+		registerJobRoutes(mux, deps.Jobs, deps.Artifacts)
 	}
 	if deps.Rules != nil {
 		registerRuleRoutes(mux, deps.Rules)

@@ -366,6 +366,27 @@ func (s *Store) ListArtifacts(ctx context.Context, jobID string) ([]Artifact, er
 	return artifacts, nil
 }
 
+func (s *Store) GetArtifact(ctx context.Context, jobID, artifactID string) (Artifact, error) {
+	var artifact Artifact
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, job_id::text, COALESCE(job_step_id::text, ''), COALESCE(attempt_id::text, ''),
+		       kind, storage_backend, storage_path, filename, COALESCE(mime_type, ''),
+		       size_bytes, sha256, metadata, expires_at, created_at
+		FROM artifacts WHERE job_id = $1 AND id = $2`, jobID, artifactID).Scan(
+		&artifact.ID, &artifact.JobID, &artifact.StepID, &artifact.AttemptID,
+		&artifact.Kind, &artifact.StorageBackend, &artifact.StoragePath, &artifact.Filename,
+		&artifact.MIMEType, &artifact.SizeBytes, &artifact.SHA256, &artifact.Metadata,
+		&artifact.ExpiresAt, &artifact.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Artifact{}, ErrNotFound
+	}
+	if err != nil {
+		return Artifact{}, fmt.Errorf("get artifact: %w", err)
+	}
+	return artifact, nil
+}
+
 func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Duration, actor Actor) (Job, error) {
 	if owner == "" {
 		return Job{}, fmt.Errorf("lease owner is required")

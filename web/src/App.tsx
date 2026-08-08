@@ -15,6 +15,12 @@ import type {
 const tokenKey = "ua.v2.api-token";
 const activeStatuses = new Set<JobStatus>(["queued", "running"]);
 const terminalStatuses = new Set<JobStatus>(["complete", "cancelled"]);
+const downloadableArtifactKinds = new Set([
+  "content_manifest", "metadata", "mediainfo", "bdinfo", "screenshot", "image_upload_receipt",
+  "target_package", "duplicate_check", "target_torrent_receipt", "preupload_duplicate_check",
+  "target_upload_receipt", "target_torrent_download_receipt", "target_injection_receipt",
+  "target_seed_observation", "job_summary",
+]);
 const statusLabels: Record<JobStatus, string> = {
   draft: "草稿",
   queued: "排队中",
@@ -326,7 +332,7 @@ function JobDetail({
       </nav>
 
       {tab === "steps" && <StepsView steps={detail.steps} />}
-      {tab === "artifacts" && <ArtifactsView artifacts={detail.artifacts} />}
+      {tab === "artifacts" && <ArtifactsView artifacts={detail.artifacts} jobID={detail.job_id} client={client} onError={onError} />}
       {tab === "events" && <EventsView events={events} />}
       {tab === "summary" && <SummaryView summary={detail.summary} status={detail.status} />}
     </article>
@@ -357,10 +363,27 @@ function StepsView({steps}: {steps: Step[]}) {
   ))}</section>;
 }
 
-function ArtifactsView({artifacts}: {artifacts: Artifact[]}) {
+function ArtifactsView({artifacts, jobID, client, onError}: {artifacts: Artifact[]; jobID: string; client: ApiClient; onError: (reason: unknown) => void}) {
+  const [downloading, setDownloading] = useState("");
+  const download = async (artifact: Artifact) => {
+    setDownloading(artifact.id);
+    try {
+      const blob = await client.downloadArtifact(jobID, artifact.id);
+      const objectURL = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectURL;
+      anchor.download = artifact.filename;
+      anchor.click();
+      URL.revokeObjectURL(objectURL);
+    } catch (reason) {
+      onError(reason);
+    } finally {
+      setDownloading("");
+    }
+  };
   if (!artifacts.length) return <Empty text="尚未登记 artifact。每个外部边界完成后都会在这里留下 SHA-256 证据。" />;
-  return <section className="table-wrap"><table><thead><tr><th>类型 / 文件</th><th>大小</th><th>SHA-256</th><th>登记时间</th></tr></thead><tbody>{artifacts.map((artifact) => (
-    <tr key={artifact.id}><td><strong>{artifact.kind}</strong><small>{artifact.filename}</small></td><td>{formatBytes(artifact.size_bytes)}</td><td><code title={artifact.sha256}>{shortHash(artifact.sha256)}</code></td><td>{formatDate(artifact.created_at)}</td></tr>
+  return <section className="table-wrap"><table><thead><tr><th>类型 / 文件</th><th>大小</th><th>SHA-256</th><th>登记时间</th><th>内容</th></tr></thead><tbody>{artifacts.map((artifact) => (
+    <tr key={artifact.id}><td><strong>{artifact.kind}</strong><small>{artifact.filename}</small></td><td>{formatBytes(artifact.size_bytes)}</td><td><code title={artifact.sha256}>{shortHash(artifact.sha256)}</code></td><td>{formatDate(artifact.created_at)}</td><td>{downloadableArtifactKinds.has(artifact.kind) ? <button className="artifact-download" disabled={downloading === artifact.id} onClick={() => void download(artifact)}>{downloading === artifact.id ? "校验中…" : "校验并下载"}</button> : <span className="restricted-content">敏感内容受限</span>}</td></tr>
   ))}</tbody></table></section>;
 }
 

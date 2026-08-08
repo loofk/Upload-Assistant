@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,13 +28,19 @@ type JobService interface {
 	ListSteps(context.Context, string) ([]workflow.Step, error)
 	ListEvents(context.Context, string, int64, int) ([]workflow.Event, error)
 	ListArtifacts(context.Context, string) ([]workflow.Artifact, error)
+	GetArtifact(context.Context, string, string) (workflow.Artifact, error)
 	PauseJob(context.Context, string, workflow.Actor) (workflow.Job, error)
 	ResumeJob(context.Context, string, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	CancelJob(context.Context, string, workflow.Actor) (workflow.Job, error)
 }
 
+type ArtifactContentReader interface {
+	Read(context.Context, string, int64) ([]byte, error)
+}
+
 type jobsAPI struct {
 	service JobService
+	reader  ArtifactContentReader
 }
 
 type createJobRequest struct {
@@ -56,8 +66,8 @@ type jobEnvelope struct {
 	Job         workflow.Job       `json:"job"`
 }
 
-func registerJobRoutes(mux *http.ServeMux, service JobService) {
-	api := jobsAPI{service: service}
+func registerJobRoutes(mux *http.ServeMux, service JobService, reader ArtifactContentReader) {
+	api := jobsAPI{service: service, reader: reader}
 	mux.HandleFunc("POST /api/v2/jobs", api.create)
 	mux.HandleFunc("GET /api/v2/jobs", api.list)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}", api.get)
@@ -65,9 +75,82 @@ func registerJobRoutes(mux *http.ServeMux, service JobService) {
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/steps", api.steps)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/events", api.events)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts", api.artifacts)
+	mux.HandleFunc("GET /api/v2/jobs/{job_id}/artifacts/{artifact_id}/content", api.artifactContent)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/pause", api.pause)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/resume", api.resume)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/cancel", api.cancel)
+}
+
+const maxArtifactContentBytes = 64 << 20
+
+var downloadableArtifactKinds = map[string]struct{}{
+	"content_manifest": {}, "metadata": {}, "mediainfo": {}, "bdinfo": {}, "screenshot": {},
+	"image_upload_receipt": {}, "target_package": {}, "duplicate_check": {},
+	"target_torrent_receipt": {}, "preupload_duplicate_check": {}, "target_upload_receipt": {},
+	"target_torrent_download_receipt": {}, "target_injection_receipt": {},
+	"target_seed_observation": {}, "job_summary": {},
+}
+
+func (a jobsAPI) artifactContent(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "jobs:read")
+	if !ok {
+		return
+	}
+	if !principal.HasScope("audit:read") {
+		writeProblem(w, http.StatusForbidden, "permission_denied", "the API token does not grant audit:read")
+		return
+	}
+	jobID, ok := jobID(w, r)
+	if !ok {
+		return
+	}
+	artifactID := r.PathValue("artifact_id")
+	if _, err := uuid.Parse(artifactID); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_artifact_id", "artifact_id must be a UUID")
+		return
+	}
+	artifact, err := a.service.GetArtifact(r.Context(), jobID, artifactID)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	if _, allowed := downloadableArtifactKinds[artifact.Kind]; !allowed {
+		writeProblem(w, http.StatusForbidden, "artifact_content_restricted", "raw torrent and secret-bearing artifact content cannot be downloaded through the API")
+		return
+	}
+	if !artifact.ExpiresAt.IsZero() && time.Now().UTC().After(artifact.ExpiresAt) {
+		writeProblem(w, http.StatusGone, "artifact_content_expired", "artifact retention has expired")
+		return
+	}
+	if artifact.StorageBackend != "local" || artifact.SizeBytes < 0 || artifact.SizeBytes > maxArtifactContentBytes || a.reader == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "artifact_content_unavailable", "artifact content is unavailable through this service instance")
+		return
+	}
+	body, err := a.reader.Read(r.Context(), artifact.StoragePath, maxArtifactContentBytes)
+	if err != nil {
+		writeProblem(w, http.StatusGone, "artifact_content_unavailable", "artifact content is missing, expired, or unreadable")
+		return
+	}
+	digest := sha256.Sum256(body)
+	computedSHA := hex.EncodeToString(digest[:])
+	if int64(len(body)) != artifact.SizeBytes || !strings.EqualFold(computedSHA, artifact.SHA256) {
+		writeProblem(w, http.StatusConflict, "artifact_integrity_failed", "artifact content no longer matches its immutable size and SHA-256 evidence")
+		return
+	}
+	contentType := artifact.MIMEType
+	if !(strings.HasPrefix(contentType, "image/") || contentType == "application/json" || strings.HasPrefix(contentType, "text/plain")) {
+		contentType = "application/octet-stream"
+	}
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": artifact.Filename})
+	if disposition == "" {
+		disposition = "attachment"
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Disposition", disposition)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Digest", "sha-256=:"+base64.StdEncoding.EncodeToString(digest[:])+":")
+	w.Header().Set("ETag", `"`+computedSHA+`"`)
+	http.ServeContent(w, r, artifact.Filename, artifact.CreatedAt, bytes.NewReader(body))
 }
 
 func (a jobsAPI) list(w http.ResponseWriter, r *http.Request) {

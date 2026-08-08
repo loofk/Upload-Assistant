@@ -75,6 +75,7 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	requiredPaths := []string{
 		"/openapi.json", "/api/v2/tools", "/api/v2/jobs",
 		"/api/v2/jobs/{job_id}", "/api/v2/jobs/{job_id}/summary",
+		"/api/v2/jobs/{job_id}/artifacts/{artifact_id}/content",
 		"/api/v2/jobs/{job_id}/resume", "/api/v2/sites/{site_code}/rules/active",
 		"/api/v2/site-rules/{revision_id}/approve",
 	}
@@ -101,8 +102,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 16 {
-		t.Fatalf("tool count = %d, want 16", len(tools))
+	if len(tools) != 17 {
+		t.Fatalf("tool count = %d, want 17", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {

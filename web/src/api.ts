@@ -82,23 +82,34 @@ export class ApiClient {
     });
   }
 
+  async downloadArtifact(jobID: string, artifactID: string): Promise<Blob> {
+    const response = await fetch(`/api/v2/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifactID)}/content`, {
+      headers: {Authorization: `Bearer ${this.token}`, Accept: "application/octet-stream"},
+      credentials: "same-origin",
+    });
+    if (!response.ok) await this.throwResponseError(response);
+    return response.blob();
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.token}`);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
     const response = await fetch(path, {...init, headers, credentials: "same-origin"});
-    if (!response.ok) {
-      let problem: ProblemBody = {};
-      try {
-        problem = (await response.json()) as ProblemBody;
-      } catch {
-        // Keep a bounded generic error when a proxy returns non-JSON.
-      }
-      const code = problem.error?.code ?? problem.blockers?.[0]?.code ?? "request_failed";
-      const detail = problem.error?.detail ?? problem.blockers?.[0]?.message ?? `请求失败（HTTP ${response.status}）`;
-      throw new ApiError(response.status, code, detail);
-    }
+    if (!response.ok) await this.throwResponseError(response);
     return (await response.json()) as T;
+  }
+
+  private async throwResponseError(response: Response): Promise<never> {
+    let problem: ProblemBody = {};
+    try {
+      problem = (await response.json()) as ProblemBody;
+    } catch {
+      // Keep a bounded generic error when a proxy returns non-JSON.
+    }
+    const code = problem.error?.code ?? problem.blockers?.[0]?.code ?? "request_failed";
+    const detail = problem.error?.detail ?? problem.blockers?.[0]?.message ?? `请求失败（HTTP ${response.status}）`;
+    throw new ApiError(response.status, code, detail);
   }
 }

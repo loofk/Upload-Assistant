@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -105,11 +106,56 @@ func (s *LocalStore) Open(relativePath string) (*os.File, error) {
 		return nil, fmt.Errorf("invalid artifact path")
 	}
 	path := filepath.Join(s.root, cleaned)
-	file, err := os.Open(path)
+	resolvedRoot, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve artifact root: %w", err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve artifact path: %w", err)
+	}
+	relativeToRoot, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || relativeToRoot == ".." || strings.HasPrefix(relativeToRoot, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("artifact path escapes the configured root")
+	}
+	file, err := os.Open(resolvedPath)
 	if err != nil {
 		return nil, fmt.Errorf("open artifact: %w", err)
 	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("artifact is not a regular file")
+	}
 	return file, nil
+}
+
+func (s *LocalStore) Read(ctx context.Context, relativePath string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("artifact read limit must be positive")
+	}
+	file, err := s.Open(relativePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect artifact: %w", err)
+	}
+	if info.Size() < 0 || info.Size() > maxBytes {
+		return nil, fmt.Errorf("artifact exceeds the read limit")
+	}
+	var destination bytes.Buffer
+	limited := io.LimitReader(file, maxBytes+1)
+	size, err := copyContext(ctx, &destination, limited)
+	if err != nil {
+		return nil, fmt.Errorf("read artifact: %w", err)
+	}
+	if size > maxBytes || size != info.Size() {
+		return nil, fmt.Errorf("artifact size changed while reading")
+	}
+	return destination.Bytes(), nil
 }
 
 func validateScope(scope Scope) error {

@@ -3,7 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,6 +19,25 @@ type listJobService struct {
 	JobService
 	page   workflow.JobPage
 	filter workflow.ListJobsFilter
+}
+
+type artifactJobService struct {
+	JobService
+	artifact workflow.Artifact
+}
+
+func (service artifactJobService) GetArtifact(context.Context, string, string) (workflow.Artifact, error) {
+	return service.artifact, nil
+}
+
+type artifactReader struct {
+	body  []byte
+	calls int
+}
+
+func (reader *artifactReader) Read(context.Context, string, int64) ([]byte, error) {
+	reader.calls++
+	return append([]byte(nil), reader.body...), nil
 }
 
 func (service *listJobService) ListJobs(_ context.Context, filter workflow.ListJobsFilter) (workflow.JobPage, error) {
@@ -72,5 +93,49 @@ func TestListJobsRejectsMalformedCursor(t *testing.T) {
 	(jobsAPI{service: service}).list(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("malformed cursor status/body = %d/%s", response.Code, response.Body.String())
+	}
+}
+
+func TestArtifactContentVerifiesEvidenceBeforeDownload(t *testing.T) {
+	body := []byte(`{"ok":true,"status":"complete"}`)
+	digest := sha256.Sum256(body)
+	service := artifactJobService{artifact: workflow.Artifact{
+		ID: "55555555-5555-4555-8555-555555555555", JobID: "44444444-4444-4444-8444-444444444444",
+		Kind: "job_summary", StorageBackend: "local", StoragePath: "safe/summary.json", Filename: "summary.json",
+		MIMEType: "application/json", SizeBytes: int64(len(body)), SHA256: fmt.Sprintf("%x", digest), CreatedAt: time.Now().UTC(),
+	}}
+	reader := &artifactReader{body: body}
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/jobs/44444444-4444-4444-8444-444444444444/artifacts/55555555-5555-4555-8555-555555555555/content", nil)
+	request.SetPathValue("job_id", service.artifact.JobID)
+	request.SetPathValue("artifact_id", service.artifact.ID)
+	request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{
+		UserID: "auditor", Role: "auditor", TokenScopes: []string{"jobs:read", "audit:read"},
+	}))
+	response := httptest.NewRecorder()
+	(jobsAPI{service: service, reader: reader}).artifactContent(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != string(body) || reader.calls != 1 {
+		t.Fatalf("artifact content response/calls = %d/%s/%d", response.Code, response.Body.String(), reader.calls)
+	}
+	if response.Header().Get("Content-Disposition") == "" || response.Header().Get("Digest") == "" || response.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("artifact content headers = %#v", response.Header())
+	}
+}
+
+func TestArtifactContentRejectsSecretBearingTorrent(t *testing.T) {
+	service := artifactJobService{artifact: workflow.Artifact{
+		ID: "55555555-5555-4555-8555-555555555555", JobID: "44444444-4444-4444-8444-444444444444",
+		Kind: "source_torrent", StorageBackend: "local", StoragePath: "source.torrent", Filename: "source.torrent",
+	}}
+	reader := &artifactReader{body: []byte("announce-passkey")}
+	request := httptest.NewRequest(http.MethodGet, "/content", nil)
+	request.SetPathValue("job_id", service.artifact.JobID)
+	request.SetPathValue("artifact_id", service.artifact.ID)
+	request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{
+		UserID: "auditor", Role: "auditor", TokenScopes: []string{"jobs:read", "audit:read"},
+	}))
+	response := httptest.NewRecorder()
+	(jobsAPI{service: service, reader: reader}).artifactContent(response, request)
+	if response.Code != http.StatusForbidden || reader.calls != 0 || bytes.Contains(response.Body.Bytes(), []byte("announce-passkey")) {
+		t.Fatalf("restricted artifact response/calls = %d/%s/%d", response.Code, response.Body.String(), reader.calls)
 	}
 }

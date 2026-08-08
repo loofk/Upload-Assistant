@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -39,6 +41,32 @@ func TestLocalStoreWriteOpenAndDeduplicate(t *testing.T) {
 	got, err := io.ReadAll(file)
 	if err != nil || string(got) != content {
 		t.Fatalf("artifact content/error = %q/%v", got, err)
+	}
+	bounded, err := store.Read(context.Background(), written.RelativePath, 1024)
+	if err != nil || string(bounded) != content {
+		t.Fatalf("Read() content/error = %q/%v", bounded, err)
+	}
+	if _, err := store.Read(context.Background(), written.RelativePath, 2); err == nil {
+		t.Fatal("Read() oversized artifact error = nil")
+	}
+}
+
+func TestLocalStoreRejectsSymlinkEscape(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := NewLocalStore(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dataDir, "artifacts", "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Open("link"); err == nil {
+		t.Fatal("Open() symlink escape error = nil")
 	}
 }
 

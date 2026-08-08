@@ -111,6 +111,18 @@
         "responses": {"200": {"description": "Artifact evidence", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "job_id", "artifacts"], "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}}}}}}
       }
     },
+    "/api/v2/jobs/{job_id}/artifacts/{artifact_id}/content": {
+      "get": {
+        "operationId": "downloadArtifactEvidence",
+        "description": "Downloads only non-secret evidence kinds after size and SHA-256 verification. Source, generated, and downloaded torrent payloads are always denied.",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}, {"$ref": "#/components/parameters/ArtifactID"}],
+        "responses": {
+          "200": {"description": "Integrity-verified evidence content", "headers": {"Digest": {"schema": {"type": "string"}}, "ETag": {"schema": {"type": "string"}}}, "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/Problem"}, "403": {"$ref": "#/components/responses/Problem"},
+          "404": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}, "410": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
     "/api/v2/jobs/{job_id}/pause": {
       "post": {"operationId": "pauseJob", "parameters": [{"$ref": "#/components/parameters/JobID"}], "responses": {"200": {"description": "Job paused", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
     },
@@ -217,6 +229,7 @@
     },
     "parameters": {
       "JobID": {"name": "job_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "ArtifactID": {"name": "artifact_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "RevisionID": {"name": "revision_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "SiteCode": {"name": "site_code", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Z0-9_-]+$"}},
       "ResourceName": {"name": "name", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},

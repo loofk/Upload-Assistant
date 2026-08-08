@@ -44,6 +44,10 @@ func (s *Service) ListArtifacts(ctx context.Context, id string) ([]Artifact, err
 	return s.store.ListArtifacts(ctx, id)
 }
 
+func (s *Service) GetArtifact(ctx context.Context, jobID, artifactID string) (Artifact, error) {
+	return s.store.GetArtifact(ctx, jobID, artifactID)
+}
+
 func (s *Service) PauseJob(ctx context.Context, id string, actor Actor) (Job, error) {
 	return s.store.PauseJob(ctx, id, actor)
 }
