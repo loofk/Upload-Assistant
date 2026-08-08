@@ -179,11 +179,14 @@ type SiteCredential struct {
 // are decrypted at the last possible moment and must never be serialized into an
 // API response, log record, workflow snapshot, or audit payload.
 type RuntimeSite struct {
-	Code        string            `json:"-"`
-	Name        string            `json:"-"`
-	Adapter     string            `json:"-"`
-	Config      json.RawMessage   `json:"-"`
-	Credentials map[string]string `json:"-"`
+	ID                  string            `json:"-"`
+	Code                string            `json:"-"`
+	Name                string            `json:"-"`
+	Adapter             string            `json:"-"`
+	Config              json.RawMessage   `json:"-"`
+	ConfigurationSHA256 string            `json:"-"`
+	UpdatedAt           time.Time         `json:"-"`
+	Credentials         map[string]string `json:"-"`
 }
 
 func validateResourceName(kind, name string) error {

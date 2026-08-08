@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := fakeSourceProvider{
-		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", AniDBID: "3456", RetrievedAt: time.Now().UTC()},
+		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", IMDbID: "tt1234567", AniDBID: "3456", RetrievedAt: time.Now().UTC()},
 		download: sites.DownloadedTorrent{
 			Bytes: metainfo, Filename: "U2-60635.torrent", ContentType: "application/x-bittorrent",
 			SizeBytes: int64(len(metainfo)), SHA256: sha256String(metainfo), Hashes: hashes,
@@ -119,6 +120,10 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 			Result: imagehosts.UploadResult{URL: "https://i.ibb.co/fixture/image.png", ViewerURL: "https://ibb.co/fixture"},
 		},
 	}
+	targetDuplicates := &fakeTargetDuplicateChecker{result: mteam.DuplicateEvidence{
+		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("a", 64),
+		Query: mteam.DuplicateQuery{IMDbID: "tt1234567"}, Candidates: []mteam.DuplicateCandidate{}, CheckedAt: time.Unix(1, 0).UTC(),
+	}}
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithRuleProvider(fakeRuleProvider{revision: rule}),
@@ -147,6 +152,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		),
 		WithImageHosts(imageHost, artifactStore),
 		WithTargetPackages(mustTargetPackageRegistry(t), artifactStore),
+		WithTargetDuplicateChecks(targetDuplicates, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -261,6 +267,17 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 7 || storedArtifacts[6].Kind != "target_package" {
 		t.Fatalf("target-package artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target duplicate-check RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_rules" {
+		t.Fatalf("target-duplicate job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 8 || storedArtifacts[7].Kind != "duplicate_check" {
+		t.Fatalf("target-duplicate artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {

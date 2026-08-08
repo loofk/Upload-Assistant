@@ -74,8 +74,26 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		t.Fatal("site credential was not listed")
 	}
 	runtimeSite, err := store.GetRuntimeSite(ctx, "U2")
-	if err != nil || runtimeSite.Adapter != "nexusphp" || runtimeSite.Credentials["cookie-"+nameSuffix] != "uid=encrypted-cookie" {
+	if err != nil || runtimeSite.Adapter != "nexusphp" || runtimeSite.Credentials["cookie-"+nameSuffix] != "uid=encrypted-cookie" ||
+		runtimeSite.ID == "" || len(runtimeSite.ConfigurationSHA256) != 64 {
 		t.Fatalf("GetRuntimeSite() runtime/error = %#v/%v", runtimeSite, err)
+	}
+	var retiredSiteSecretID string
+	if err := pool.QueryRow(ctx, "SELECT secret_id::text FROM site_credentials WHERE id = $1", credential.ID).Scan(&retiredSiteSecretID); err != nil {
+		t.Fatal(err)
+	}
+	secretIDs = append(secretIDs, retiredSiteSecretID)
+	rotatedCredential, err := store.PutSiteCredential(ctx, "U2", "cookie-"+nameSuffix, "uid=rotated-cookie", actor)
+	if err != nil || rotatedCredential.ID != credential.ID {
+		t.Fatalf("rotated PutSiteCredential() credential/error = %#v/%v", rotatedCredential, err)
+	}
+	rotatedRuntimeSite, err := store.GetRuntimeSite(ctx, "U2")
+	if err != nil || rotatedRuntimeSite.Credentials["cookie-"+nameSuffix] != "uid=rotated-cookie" ||
+		rotatedRuntimeSite.ConfigurationSHA256 == runtimeSite.ConfigurationSHA256 {
+		t.Fatalf("rotated GetRuntimeSite() runtime/error = %#v/%v", rotatedRuntimeSite, err)
+	}
+	if err := store.AuditSiteAction(ctx, "U2", "source.inspect", map[string]any{"torrent_id": "fixture"}, actor); err != nil {
+		t.Fatal(err)
 	}
 
 	enabled := true
@@ -174,8 +192,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		secretIDs = append(secretIDs, secretID)
 	}
 	rows.Close()
-	if len(secretIDs) != 3 {
-		t.Fatalf("encrypted secret count = %d, want 3", len(secretIDs))
+	if len(secretIDs) != 4 {
+		t.Fatalf("encrypted secret count = %d, want 4", len(secretIDs))
 	}
 }
 

@@ -2,6 +2,8 @@ package integrations
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,9 +141,9 @@ func (s *Store) GetRuntimeSite(ctx context.Context, siteCode string) (RuntimeSit
 	var runtime RuntimeSite
 	var enabled bool
 	err := s.pool.QueryRow(ctx, `
-		SELECT code, name, adapter, enabled, config
+		SELECT id::text, code, name, adapter, enabled, config, updated_at
 		FROM sites WHERE code = $1`, siteCode).Scan(
-		&runtime.Code, &runtime.Name, &runtime.Adapter, &enabled, &runtime.Config,
+		&runtime.ID, &runtime.Code, &runtime.Name, &runtime.Adapter, &enabled, &runtime.Config, &runtime.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RuntimeSite{}, ErrNotFound
@@ -154,7 +156,7 @@ func (s *Store) GetRuntimeSite(ctx context.Context, siteCode string) (RuntimeSit
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT sc.name, sc.secret_id::text
+		SELECT sc.name, sc.secret_id::text, sc.updated_at
 		FROM site_credentials sc
 		JOIN sites s ON s.id = sc.site_id
 		WHERE s.code = $1 AND sc.enabled = true
@@ -164,11 +166,16 @@ func (s *Store) GetRuntimeSite(ctx context.Context, siteCode string) (RuntimeSit
 	}
 	defer rows.Close()
 	runtime.Credentials = map[string]string{}
+	configurationHash := sha256.New()
+	_, _ = configurationHash.Write([]byte(runtime.ID + "\x00" + runtime.Code + "\x00" + runtime.Adapter + "\x00" + runtime.UpdatedAt.UTC().Format(time.RFC3339Nano) + "\x00"))
+	_, _ = configurationHash.Write(runtime.Config)
 	for rows.Next() {
 		var name, secretID string
-		if err := rows.Scan(&name, &secretID); err != nil {
+		var credentialUpdatedAt time.Time
+		if err := rows.Scan(&name, &secretID, &credentialUpdatedAt); err != nil {
 			return RuntimeSite{}, fmt.Errorf("scan runtime site credential: %w", err)
 		}
+		_, _ = configurationHash.Write([]byte("\x00" + name + "\x00" + secretID + "\x00" + credentialUpdatedAt.UTC().Format(time.RFC3339Nano)))
 		plaintext, err := s.secrets.Get(ctx, secretID, "sites."+siteCode+"."+name)
 		if err != nil {
 			return RuntimeSite{}, fmt.Errorf("decrypt runtime site credential %s: %w", name, err)
@@ -178,7 +185,27 @@ func (s *Store) GetRuntimeSite(ctx context.Context, siteCode string) (RuntimeSit
 	if err := rows.Err(); err != nil {
 		return RuntimeSite{}, fmt.Errorf("iterate runtime site credentials: %w", err)
 	}
+	runtime.ConfigurationSHA256 = hex.EncodeToString(configurationHash.Sum(nil))
 	return runtime, nil
+}
+
+func (s *Store) AuditSiteAction(ctx context.Context, siteCode, action string, details map[string]any, actor workflow.Actor) error {
+	siteCode = strings.ToUpper(strings.TrimSpace(siteCode))
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin site action audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var siteID string
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM sites WHERE code = $1 FOR UPDATE", siteCode).Scan(&siteID); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock site for action audit: %w", err)
+	}
+	if err := audit(ctx, tx, actor, "site."+action, "site", siteID, copyMap(details)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) UpsertDownloader(ctx context.Context, name string, input DownloaderInput, actor workflow.Actor) (Downloader, error) {

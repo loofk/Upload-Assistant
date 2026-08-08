@@ -117,6 +117,7 @@ func serve(args []string) error {
 	integrationStore := integrations.NewStore(pool, secretStore)
 	downloaderManager := downloaders.NewManager(integrationStore)
 	imageHostManager := imagehosts.NewManager(integrationStore, nil)
+	mteamClient := mteam.NewClient(integrationStore, nil)
 	ruleStore, err := rules.NewStore(pool, cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
@@ -132,6 +133,10 @@ func serve(args []string) error {
 	targetPackageRegistry, err := sites.NewTargetPackageRegistry(mteam.NewPackageAdapter())
 	if err != nil {
 		return fmt.Errorf("initialize target package adapters: %w", err)
+	}
+	targetDuplicateRegistry, err := sites.NewTargetDuplicateRegistry(mteamClient)
+	if err != nil {
+		return fmt.Errorf("initialize target duplicate adapters: %w", err)
 	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
@@ -149,6 +154,7 @@ func serve(args []string) error {
 		),
 		worker.WithImageHosts(imageHostManager, artifactStore),
 		worker.WithTargetPackages(targetPackageRegistry, artifactStore),
+		worker.WithTargetDuplicateChecks(targetDuplicateRegistry, artifactStore),
 	)
 	go jobRunner.Run(ctx)
 

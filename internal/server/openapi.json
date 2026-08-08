@@ -260,6 +260,7 @@
           "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
           "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
           "target_package": {"$ref": "#/components/schemas/MTeamPackageOptions"},
+          "target_duplicate_check": {"$ref": "#/components/schemas/TargetDuplicateCheckOptions"},
           "confirm_upload": {"type": "boolean", "default": false, "description": "A later live target upload gate requires an explicit true value; it is never inferred."}
         },
         "additionalProperties": true
@@ -298,6 +299,13 @@
           "category_evidence": {"type": "string", "maxLength": 500, "description": "Human-readable reason or current category-page evidence for an explicit category."},
           "standard": {"type": "integer", "enum": [1, 2, 3, 5, 6, 7], "description": "MTEAM resolution id; normally derived from MediaInfo."},
           "anonymous": {"type": "boolean", "default": false}
+        }
+      },
+      "TargetDuplicateCheckOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "imdb_id": {"type": "string", "pattern": "^tt[0-9]{5,12}$", "description": "Explicit reviewed identity only when the immutable target package has no IMDb link. A conflicting value is blocked and cannot replace package identity."}
         }
       },
       "CreateJobRequest": {
