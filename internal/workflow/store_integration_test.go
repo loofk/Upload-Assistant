@@ -53,6 +53,20 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	if job.Status != JobQueued || job.CurrentStep != "source_parse" {
 		t.Fatalf("created job status/current = %s/%s", job.Status, job.CurrentStep)
 	}
+	page, err := store.ListJobs(ctx, ListJobsFilter{Status: JobQueued, Kind: "retorrent", Limit: 100})
+	if err != nil {
+		t.Fatalf("ListJobs() error = %v", err)
+	}
+	foundJob := false
+	for _, listed := range page.Jobs {
+		if listed.ID == job.ID {
+			foundJob = true
+			break
+		}
+	}
+	if !foundJob {
+		t.Fatalf("ListJobs() did not include newly created job %s", job.ID)
+	}
 
 	replayed, err := store.CreateJob(ctx, workflowID, definition, input)
 	if err != nil {

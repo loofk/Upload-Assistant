@@ -67,6 +67,19 @@ type Job struct {
 	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
 }
 
+type ListJobsFilter struct {
+	Status          JobStatus
+	Kind            string
+	Limit           int
+	BeforeCreatedAt *time.Time
+	BeforeID        string
+}
+
+type JobPage struct {
+	Jobs    []Job
+	HasMore bool
+}
+
 type Step struct {
 	ID            string          `json:"id"`
 	JobID         string          `json:"job_id"`

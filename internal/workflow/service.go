@@ -24,6 +24,10 @@ func (s *Service) GetJob(ctx context.Context, id string) (Job, error) {
 	return s.store.GetJob(ctx, id)
 }
 
+func (s *Service) ListJobs(ctx context.Context, filter ListJobsFilter) (JobPage, error) {
+	return s.store.ListJobs(ctx, filter)
+}
+
 func (s *Service) ListSteps(ctx context.Context, id string) ([]Step, error) {
 	return s.store.ListSteps(ctx, id)
 }

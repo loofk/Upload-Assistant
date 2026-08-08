@@ -160,6 +160,52 @@ func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
 	return scanJob(s.pool.QueryRow(ctx, jobSelect+" WHERE id = $1", id))
 }
 
+func (s *Store) ListJobs(ctx context.Context, filter ListJobsFilter) (JobPage, error) {
+	if filter.Limit <= 0 || filter.Limit > 100 {
+		filter.Limit = 25
+	}
+	query := jobSelect + " WHERE true"
+	arguments := make([]any, 0, 5)
+	if filter.Status != "" {
+		arguments = append(arguments, filter.Status)
+		query += fmt.Sprintf(" AND status = $%d", len(arguments))
+	}
+	if filter.Kind != "" {
+		arguments = append(arguments, filter.Kind)
+		query += fmt.Sprintf(" AND kind = $%d", len(arguments))
+	}
+	if filter.BeforeCreatedAt != nil || filter.BeforeID != "" {
+		if filter.BeforeCreatedAt == nil || filter.BeforeID == "" {
+			return JobPage{}, errors.New("job list cursor requires both created_at and id")
+		}
+		arguments = append(arguments, *filter.BeforeCreatedAt, filter.BeforeID)
+		query += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d::uuid)", len(arguments)-1, len(arguments))
+	}
+	arguments = append(arguments, filter.Limit+1)
+	query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(arguments))
+	rows, err := s.pool.Query(ctx, query, arguments...)
+	if err != nil {
+		return JobPage{}, fmt.Errorf("list jobs: %w", err)
+	}
+	defer rows.Close()
+	jobs := make([]Job, 0, filter.Limit+1)
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return JobPage{}, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return JobPage{}, fmt.Errorf("iterate jobs: %w", err)
+	}
+	hasMore := len(jobs) > filter.Limit
+	if hasMore {
+		jobs = jobs[:filter.Limit]
+	}
+	return JobPage{Jobs: jobs, HasMore: hasMore}, nil
+}
+
 func (s *Store) ListSteps(ctx context.Context, jobID string) ([]Step, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, job_id::text, step_key, position, status, required,

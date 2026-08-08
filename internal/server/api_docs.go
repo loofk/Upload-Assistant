@@ -53,6 +53,7 @@ func toolDefinitions() []toolDefinition {
 	}
 	jobID := object(map[string]any{"job_id": stringProperty("UUID of the durable job.")}, "job_id")
 	return []toolDefinition{
+		{Name: "list_jobs", Description: "List recent durable jobs with optional status filtering and an opaque stable cursor.", Method: "GET", Path: "/api/v2/jobs", RequiredScopes: []string{"jobs:read"}, SafetyLevel: "read_only", InputSchema: object(map[string]any{"status": map[string]any{"type": "string", "enum": []string{"draft", "queued", "running", "paused", "blocked", "failed", "complete", "cancelled"}}, "kind": map[string]any{"type": "string", "const": "retorrent"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100}, "cursor": stringProperty("Opaque cursor returned by the previous page.")})},
 		{
 			Name: "create_retorrent_job", Description: "Create an auditable retorrent workflow and return job_id immediately. Every source, rule, duplicate, material, upload, target-torrent, qBittorrent injection, seeding, and summary boundary persists separate evidence; live upload requires explicit accept_rules and confirm_upload gates.",
 			Method: "POST", Path: "/api/v2/jobs", RequiredScopes: []string{"jobs:write"}, SafetyLevel: "controlled_write",

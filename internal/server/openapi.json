@@ -46,6 +46,20 @@
       }
     },
     "/api/v2/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "parameters": [
+          {"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/JobStatus"}},
+          {"name": "kind", "in": "query", "schema": {"type": "string", "const": "retorrent"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Recent durable jobs", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobListEnvelope"}}}},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "401": {"$ref": "#/components/responses/Problem"}
+        }
+      },
       "post": {
         "operationId": "createRetorrentJob",
         "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
@@ -368,6 +382,17 @@
         "type": "object",
         "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "job"],
         "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "job": {"$ref": "#/components/schemas/Job"}}
+      },
+      "JobListEnvelope": {
+        "type": "object", "additionalProperties": false,
+        "required": ["ok", "status", "jobs", "has_more", "next_cursor", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true}, "status": {"type": "string", "const": "ready"},
+          "jobs": {"type": "array", "items": {"$ref": "#/components/schemas/Job"}},
+          "has_more": {"type": "boolean"}, "next_cursor": {"type": "string"},
+          "blockers": {"type": "array", "maxItems": 0, "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
       },
       "JobSummaryEnvelope": {
         "type": "object",

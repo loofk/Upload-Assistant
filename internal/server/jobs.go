@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/loofk/upload-assistant/v2/internal/security"
@@ -18,6 +20,7 @@ import (
 type JobService interface {
 	CreateJob(context.Context, workflow.CreateJobInput) (workflow.Job, error)
 	GetJob(context.Context, string) (workflow.Job, error)
+	ListJobs(context.Context, workflow.ListJobsFilter) (workflow.JobPage, error)
 	ListSteps(context.Context, string) ([]workflow.Step, error)
 	ListEvents(context.Context, string, int64, int) ([]workflow.Event, error)
 	ListArtifacts(context.Context, string) ([]workflow.Artifact, error)
@@ -56,6 +59,7 @@ type jobEnvelope struct {
 func registerJobRoutes(mux *http.ServeMux, service JobService) {
 	api := jobsAPI{service: service}
 	mux.HandleFunc("POST /api/v2/jobs", api.create)
+	mux.HandleFunc("GET /api/v2/jobs", api.list)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}", api.get)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/summary", api.summary)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/steps", api.steps)
@@ -64,6 +68,50 @@ func registerJobRoutes(mux *http.ServeMux, service JobService) {
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/pause", api.pause)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/resume", api.resume)
 	mux.HandleFunc("POST /api/v2/jobs/{job_id}/cancel", api.cancel)
+}
+
+func (a jobsAPI) list(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
+	limit, err := parseIntQuery(r, "limit", 25, 1, 100)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_limit", err.Error())
+		return
+	}
+	status := workflow.JobStatus(strings.TrimSpace(r.URL.Query().Get("status")))
+	if status != "" && !validJobStatus(status) {
+		writeProblem(w, http.StatusBadRequest, "invalid_status", "status is not a supported job state")
+		return
+	}
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	if kind != "" && kind != "retorrent" {
+		writeProblem(w, http.StatusBadRequest, "invalid_kind", "only retorrent jobs are available in this build")
+		return
+	}
+	filter := workflow.ListJobsFilter{Status: status, Kind: kind, Limit: limit}
+	if cursor := strings.TrimSpace(r.URL.Query().Get("cursor")); cursor != "" {
+		createdAt, id, err := decodeJobCursor(cursor)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "invalid_cursor", "cursor is invalid or malformed")
+			return
+		}
+		filter.BeforeCreatedAt, filter.BeforeID = &createdAt, id
+	}
+	page, err := a.service.ListJobs(r.Context(), filter)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	nextCursor := ""
+	if page.HasMore && len(page.Jobs) > 0 {
+		nextCursor = encodeJobCursor(page.Jobs[len(page.Jobs)-1])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": "ready", "jobs": page.Jobs,
+		"has_more": page.HasMore, "next_cursor": nextCursor,
+		"blockers": []any{}, "next_actions": []any{},
+	})
 }
 
 func (a jobsAPI) summary(w http.ResponseWriter, r *http.Request) {
@@ -303,6 +351,46 @@ func envelopeFor(job workflow.Job) jobEnvelope {
 
 func jobOK(status workflow.JobStatus) bool {
 	return status != workflow.JobBlocked && status != workflow.JobFailed && status != workflow.JobCancelled
+}
+
+type jobCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
+func encodeJobCursor(job workflow.Job) string {
+	body, _ := json.Marshal(jobCursor{CreatedAt: job.CreatedAt.UTC(), ID: job.ID})
+	return base64.RawURLEncoding.EncodeToString(body)
+}
+
+func decodeJobCursor(value string) (time.Time, string, error) {
+	body, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(body) > 512 {
+		return time.Time{}, "", errors.New("invalid job cursor encoding")
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	var cursor jobCursor
+	if err := decoder.Decode(&cursor); err != nil || cursor.CreatedAt.IsZero() {
+		return time.Time{}, "", errors.New("invalid job cursor value")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return time.Time{}, "", errors.New("invalid job cursor document")
+	}
+	if _, err := uuid.Parse(cursor.ID); err != nil {
+		return time.Time{}, "", errors.New("invalid job cursor id")
+	}
+	return cursor.CreatedAt.UTC(), cursor.ID, nil
+}
+
+func validJobStatus(status workflow.JobStatus) bool {
+	switch status {
+	case workflow.JobDraft, workflow.JobQueued, workflow.JobRunning, workflow.JobPaused,
+		workflow.JobBlocked, workflow.JobFailed, workflow.JobComplete, workflow.JobCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func jobID(w http.ResponseWriter, r *http.Request) (string, bool) {
