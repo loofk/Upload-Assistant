@@ -322,7 +322,7 @@ type retorrentOptions struct {
 	sourceURL, target, executionMode, stopAfter, idempotencyKey        string
 	downloader, savePath, category, tags                               string
 	targetDownloader, targetSavePath, targetCategory, targetTags       string
-	screenshotProfile, imageHost                                       string
+	screenshotProfile, imageHost, tmdbProvider, ptgenProvider          string
 	downloadLimit, uploadLimit, targetDownloadLimit, targetUploadLimit int64
 	confirmUpload                                                      bool
 	acceptRules, obligations                                           stringList
@@ -371,6 +371,16 @@ func (r runner) retorrent(ctx context.Context, args []string) (json.RawMessage, 
 	if value.imageHost != "" {
 		input["image_host"] = map[string]any{"name": strings.TrimSpace(value.imageHost)}
 	}
+	if value.tmdbProvider != "" || value.ptgenProvider != "" {
+		providers := map[string]any{}
+		if name := strings.TrimSpace(value.tmdbProvider); name != "" {
+			providers["tmdb"] = name
+		}
+		if name := strings.TrimSpace(value.ptgenProvider); name != "" {
+			providers["ptgen"] = name
+		}
+		input["metadata_providers"] = providers
+	}
 	mode := strings.TrimSpace(value.executionMode)
 	if mode == "" {
 		mode = "step"
@@ -409,6 +419,8 @@ func bindRetorrentFlags(flags *flag.FlagSet, value *retorrentOptions) {
 	flags.Int64Var(&value.targetUploadLimit, "target-upload-limit", 0, "target upload limit in bytes/second")
 	flags.StringVar(&value.screenshotProfile, "screenshot-profile", "", "configured screenshot profile")
 	flags.StringVar(&value.imageHost, "image-host", "", "configured image host")
+	flags.StringVar(&value.tmdbProvider, "tmdb-provider", "", "configured TMDb metadata provider")
+	flags.StringVar(&value.ptgenProvider, "ptgen-provider", "", "configured PTGen metadata provider")
 	flags.Var(&value.acceptRules, "accept-rule", "accepted rule SITE=FINGERPRINT (repeatable)")
 	flags.Var(&value.obligations, "obligation", "manual evidence SITE:ID=EVIDENCE (repeatable)")
 	flags.BoolVar(&value.confirmUpload, "confirm-upload", false, "explicitly confirm live upload")
@@ -571,7 +583,7 @@ func (r runner) audit(ctx context.Context, args []string) (json.RawMessage, erro
 
 func (r runner) readiness(ctx context.Context, args []string) (json.RawMessage, error) {
 	if len(args) == 0 || args[0] != "live" {
-		return nil, errors.New("usage: readiness live --source U2|CHD --target MTEAM --downloader NAME [--target-downloader NAME] --image-host NAME --screenshot-profile NAME")
+		return nil, errors.New("usage: readiness live --source U2|CHD --target MTEAM --downloader NAME [--target-downloader NAME] --image-host NAME --screenshot-profile NAME --tmdb-provider NAME --ptgen-provider NAME")
 	}
 	flags := newFlags("readiness live")
 	source := flags.String("source", "", "source site code")
@@ -580,11 +592,13 @@ func (r runner) readiness(ctx context.Context, args []string) (json.RawMessage, 
 	targetDownloader := flags.String("target-downloader", "", "target downloader name; defaults to source downloader")
 	imageHost := flags.String("image-host", "", "image host name")
 	screenshotProfile := flags.String("screenshot-profile", "", "screenshot profile name")
+	tmdbProvider := flags.String("tmdb-provider", "", "TMDb metadata provider name")
+	ptgenProvider := flags.String("ptgen-provider", "", "PTGen metadata provider name")
 	if err := parseFlags(flags, args[1:]); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(*source) == "" || strings.TrimSpace(*target) == "" || strings.TrimSpace(*downloader) == "" || strings.TrimSpace(*imageHost) == "" || strings.TrimSpace(*screenshotProfile) == "" {
-		return nil, errors.New("source, target, downloader, image-host, and screenshot-profile are required")
+	if strings.TrimSpace(*source) == "" || strings.TrimSpace(*target) == "" || strings.TrimSpace(*downloader) == "" || strings.TrimSpace(*imageHost) == "" || strings.TrimSpace(*screenshotProfile) == "" || strings.TrimSpace(*tmdbProvider) == "" || strings.TrimSpace(*ptgenProvider) == "" {
+		return nil, errors.New("source, target, downloader, image-host, screenshot-profile, tmdb-provider, and ptgen-provider are required")
 	}
 	query := url.Values{
 		"source":             []string{strings.ToUpper(strings.TrimSpace(*source))},
@@ -592,6 +606,8 @@ func (r runner) readiness(ctx context.Context, args []string) (json.RawMessage, 
 		"downloader":         []string{strings.TrimSpace(*downloader)},
 		"image_host":         []string{strings.TrimSpace(*imageHost)},
 		"screenshot_profile": []string{strings.TrimSpace(*screenshotProfile)},
+		"tmdb_provider":      []string{strings.TrimSpace(*tmdbProvider)},
+		"ptgen_provider":     []string{strings.TrimSpace(*ptgenProvider)},
 	}
 	setQuery(query, "target_downloader", *targetDownloader)
 	return r.request(ctx, http.MethodGet, "/api/v2/readiness/live", query, nil, nil, true)
@@ -858,7 +874,7 @@ Usage:
   upload-assistant cli [global options] integrations list COLLECTION
   upload-assistant cli [global options] notifications [--limit N]
   upload-assistant cli [global options] audit list [filters]
-  upload-assistant cli [global options] readiness live --source U2|CHD --target MTEAM --downloader NAME --image-host NAME --screenshot-profile NAME
+  upload-assistant cli [global options] readiness live --source U2|CHD --target MTEAM --downloader NAME --image-host NAME --screenshot-profile NAME --tmdb-provider NAME --ptgen-provider NAME
   upload-assistant cli [global options] shell
 
 Global options:

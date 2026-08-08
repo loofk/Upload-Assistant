@@ -41,6 +41,10 @@ func TestRetorrentCreateSendsExplicitSafetyControls(t *testing.T) {
 					SavePath string   `json:"save_path"`
 					Tags     []string `json:"tags"`
 				} `json:"downloader"`
+				MetadataProviders struct {
+					TMDb  string `json:"tmdb"`
+					PTGen string `json:"ptgen"`
+				} `json:"metadata_providers"`
 			} `json:"input"`
 		}
 		body, _ := io.ReadAll(request.Body)
@@ -56,6 +60,9 @@ func TestRetorrentCreateSendsExplicitSafetyControls(t *testing.T) {
 		if payload.Input.Downloader.Name != "box" || payload.Input.Downloader.SavePath != "/downloads" || len(payload.Input.Downloader.Tags) != 2 {
 			t.Fatalf("downloader = %#v", payload.Input.Downloader)
 		}
+		if payload.Input.MetadataProviders.TMDb != "tmdb-main" || payload.Input.MetadataProviders.PTGen != "ptgen-main" {
+			t.Fatalf("metadata providers = %#v", payload.Input.MetadataProviders)
+		}
 		response.Header().Set("Content-Type", "application/json")
 		response.WriteHeader(http.StatusAccepted)
 		_, _ = response.Write([]byte(`{"ok":true,"status":"queued","job_id":"00000000-0000-0000-0000-000000000001"}`))
@@ -66,6 +73,7 @@ func TestRetorrentCreateSendsExplicitSafetyControls(t *testing.T) {
 		"--api-url", server.URL, "retorrent", "create",
 		"--source-url", "https://u2.dmhy.org/details.php?id=60635", "--target", "mteam",
 		"--downloader", "box", "--save-path", "/downloads", "--tags", "source,retorrent",
+		"--tmdb-provider", "tmdb-main", "--ptgen-provider", "ptgen-main",
 		"--accept-rule", "U2=" + sourceFingerprint, "--accept-rule", "MTEAM=" + targetFingerprint,
 		"--obligation", "MTEAM:manual-upload=reviewed-by-user", "--confirm-upload",
 	}, testStreams(&output, nil))
@@ -170,7 +178,8 @@ func TestLiveReadinessUsesExactLocalOnlyInputs(t *testing.T) {
 		if request.Method != http.MethodGet || request.URL.Path != "/api/v2/readiness/live" ||
 			query.Get("source") != "U2" || query.Get("target") != "MTEAM" ||
 			query.Get("downloader") != "box" || query.Get("target_downloader") != "seedbox" ||
-			query.Get("image_host") != "imgbb" || query.Get("screenshot_profile") != "default" {
+			query.Get("image_host") != "imgbb" || query.Get("screenshot_profile") != "default" ||
+			query.Get("tmdb_provider") != "tmdb-main" || query.Get("ptgen_provider") != "ptgen-main" {
 			t.Fatalf("request = %s %s query=%v", request.Method, request.URL.Path, query)
 		}
 		_, _ = response.Write([]byte(`{"ok":false,"status":"blocked","configuration_ready":false,"external_calls_performed":false,"live_upload_authorized":false,"source":"U2","target":"MTEAM","checks":[],"required_confirmations":[],"blockers":[{"code":"site_configuration_required","message":"missing","component":"site.U2"}],"next_actions":[],"resume_state":{"accept_rules":{},"confirm_upload":false},"summary":"local only"}`))
@@ -180,6 +189,7 @@ func TestLiveReadinessUsesExactLocalOnlyInputs(t *testing.T) {
 	err := Run(context.Background(), []string{
 		"--api-url", server.URL, "readiness", "live", "--source", "u2", "--target", "mteam",
 		"--downloader", "box", "--target-downloader", "seedbox", "--image-host", "imgbb", "--screenshot-profile", "default",
+		"--tmdb-provider", "tmdb-main", "--ptgen-provider", "ptgen-main",
 	}, testStreams(&output, nil))
 	if err != nil || !strings.Contains(output.String(), `"external_calls_performed": false`) ||
 		!strings.Contains(output.String(), `"live_upload_authorized": false`) || !strings.Contains(output.String(), `"confirm_upload": false`) {

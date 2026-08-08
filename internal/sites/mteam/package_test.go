@@ -77,6 +77,31 @@ func TestPackageAdapterBuildsBDInfoDescriptionAndInfersResolution(t *testing.T) 
 	}
 }
 
+func TestPackageAdapterEnforcesAndIncludesV2MetadataEnrichment(t *testing.T) {
+	material := packageMaterial("U2")
+	material.Source.AniDBID = "3456"
+	material.MetadataEnrichmentRequired = true
+	_, err := NewPackageAdapter().PreparePackage(context.Background(), material)
+	var required *sites.PackageRequirementsError
+	if !errors.As(err, &required) || len(required.Requirements) != 4 {
+		t.Fatalf("metadata requirements = %#v", err)
+	}
+	material.Links = map[string]string{
+		"imdb":   "https://www.imdb.com/title/tt1234567/",
+		"tmdb":   "https://www.themoviedb.org/movie/42",
+		"douban": "https://movie.douban.com/subject/1292052/",
+	}
+	material.MetadataDescription = "[b]外部简介[/b]\n[/quote]"
+	result, err := NewPackageAdapter().PreparePackage(context.Background(), material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Description, "豆瓣/PTGen 简介") || !strings.Contains(result.Description, "［b］外部简介［/b］") ||
+		!strings.Contains(result.Description, "［/quote］") || strings.Contains(result.Description, "[b]外部简介[/b]") || result.FormFields["douban"] != material.Links["douban"] {
+		t.Fatalf("enriched description/fields = %#v\n%s", result.FormFields, result.Description)
+	}
+}
+
 func TestPackageAdapterRejectsUnknownOptionsAndUnsafeImageURL(t *testing.T) {
 	material := packageMaterial("CHD")
 	material.Options = json.RawMessage(`{"category":419,"standard":1,"silent_skip":true}`)

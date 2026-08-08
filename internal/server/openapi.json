@@ -62,14 +62,16 @@
     "/api/v2/readiness/live": {
       "get": {
         "operationId": "getLiveReadiness",
-        "description": "Read-only local configuration preflight. It performs no tracker, downloader, image-host, or media-manager calls and never authorizes live upload.",
+        "description": "Read-only local configuration preflight. It performs no tracker, downloader, image-host, metadata-provider, or media-manager calls and never authorizes live upload.",
         "parameters": [
           {"name": "source", "in": "query", "required": true, "schema": {"type": "string", "enum": ["U2", "CHD"]}},
           {"name": "target", "in": "query", "required": true, "schema": {"type": "string", "const": "MTEAM"}},
           {"name": "downloader", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
           {"name": "target_downloader", "in": "query", "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "Defaults to downloader."}},
           {"name": "image_host", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
-          {"name": "screenshot_profile", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}}
+          {"name": "screenshot_profile", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
+          {"name": "tmdb_provider", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
+          {"name": "ptgen_provider", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}}
         ],
         "responses": {
           "200": {"description": "Machine-readable local live-configuration handoff without external execution", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LiveReadinessReport"}}}},
@@ -532,6 +534,7 @@
           "target_downloader": {"$ref": "#/components/schemas/RetorrentDownloader", "description": "Target seeding settings. Defaults to the source downloader and the verified parent save path; skip_checking and paused must remain false."},
           "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
           "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
+          "metadata_providers": {"$ref": "#/components/schemas/RetorrentMetadataProviders"},
           "target_package": {"$ref": "#/components/schemas/MTeamPackageOptions"},
           "target_duplicate_check": {"$ref": "#/components/schemas/TargetDuplicateCheckOptions"},
           "confirm_upload": {"type": "boolean", "default": false, "description": "A later live target upload gate requires an explicit true value; it is never inferred."}
@@ -562,6 +565,11 @@
       "RetorrentImageHost": {
         "type": "object", "additionalProperties": false,
         "properties": {"name": {"type": "string", "default": "default", "description": "Configured imgbb/PTPimg integration name."}}
+      },
+      "RetorrentMetadataProviders": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"tmdb": {"type": "string", "description": "Explicit configured TMDb provider name."}, "ptgen": {"type": "string", "description": "Explicit configured PTGen provider name."}},
+        "description": "No provider is contacted unless its name is explicitly present. Missing required metadata later produces a resumable blocker."
       },
       "DailyCandidateInput": {
         "type": "object", "additionalProperties": false,
@@ -596,6 +604,7 @@
           "target_downloader": {"$ref": "#/components/schemas/RetorrentDownloader"},
           "screenshots": {"$ref": "#/components/schemas/RetorrentScreenshots"},
           "image_host": {"$ref": "#/components/schemas/RetorrentImageHost"},
+          "metadata_providers": {"$ref": "#/components/schemas/RetorrentMetadataProviders"},
           "target_package": {"$ref": "#/components/schemas/MTeamPackageOptions"}
         },
         "description": "This request deliberately has no accept_rules or confirm_upload fields. The created retorrent job must satisfy those gates later."
@@ -776,7 +785,29 @@
           "job_id": {"type": "string", "format": "uuid"}, "generated_at": {"type": "string", "format": "date-time"},
           "source": {"type": "object", "required": ["site_code", "torrent_id", "torrent", "rules", "downloader"], "additionalProperties": true},
           "content": {"type": "object", "required": ["file_count", "total_size_bytes", "local_root", "remote_root", "manifest"], "additionalProperties": true},
-          "materials": {"type": "object", "required": ["metadata", "media_info", "screenshots", "image_uploads"], "additionalProperties": true},
+          "materials": {
+            "type": "object", "required": ["metadata", "metadata_enrichment", "media_info", "screenshots", "image_uploads"],
+            "properties": {
+              "metadata_enrichment": {
+                "type": "object", "required": ["required", "tmdb", "ptgen"],
+                "properties": {
+                  "required": {"type": "boolean"},
+                  "tmdb": {
+                    "type": "object", "required": ["resolved", "identity", "provider", "adapter", "configuration_sha256", "query_sha256", "artifact_id", "storage_path", "sha256"],
+                    "properties": {"resolved": {"type": "boolean"}, "identity": {"type": "object"}, "provider": {"type": "string"}, "adapter": {"type": "string"}, "configuration_sha256": {"type": "string"}, "query_sha256": {"type": "string"}, "artifact_id": {"type": "string"}, "storage_path": {"type": "string"}, "sha256": {"type": "string"}},
+                    "additionalProperties": false
+                  },
+                  "ptgen": {
+                    "type": "object", "required": ["resolved", "identity", "provider", "adapter", "configuration_sha256", "query_sha256", "description_sha256", "description_size_bytes", "artifact_id", "storage_path", "sha256"],
+                    "properties": {"resolved": {"type": "boolean"}, "identity": {"type": "object"}, "provider": {"type": "string"}, "adapter": {"type": "string"}, "configuration_sha256": {"type": "string"}, "query_sha256": {"type": "string"}, "description_sha256": {"type": "string"}, "description_size_bytes": {"type": "integer", "minimum": 0}, "artifact_id": {"type": "string"}, "storage_path": {"type": "string"}, "sha256": {"type": "string"}},
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": true
+          },
           "target": {"type": "object", "required": ["site_code", "torrent_id", "details_url", "rules", "duplicate_check", "package", "submitted_torrent", "upload", "downloaded_torrent"], "additionalProperties": true},
 					"seeding": {"type": "object", "required": ["downloader_name", "downloader_adapter", "downloader_configuration_sha256", "torrent_hash", "expected_remote_content_path", "apply_labels", "category", "tags", "requirements", "checks", "observation_artifact_id", "observation_sha256"], "additionalProperties": true},
           "audit": {"type": "object", "required": ["artifact_count", "artifacts", "required_gates"], "properties": {"artifact_count": {"type": "integer", "minimum": 1}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/RetorrentSummaryArtifact"}}, "required_gates": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false},

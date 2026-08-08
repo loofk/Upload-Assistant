@@ -4,8 +4,8 @@ import "testing"
 
 func TestRetorrentDefinitionHasStableHardGates(t *testing.T) {
 	definition := RetorrentDefinition()
-	if len(definition.Steps) != 20 {
-		t.Fatalf("step count = %d, want 20", len(definition.Steps))
+	if definition.Version != 2 || len(definition.Steps) != 22 {
+		t.Fatalf("version/step count = %d/%d, want 2/22", definition.Version, len(definition.Steps))
 	}
 	wantGates := map[string]string{
 		"source_rules":           "accept_rules",

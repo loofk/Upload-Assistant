@@ -209,6 +209,7 @@ func serve(args []string) error {
 		worker.WithSourceAdapters(sourceRegistry, artifactStore),
 		worker.WithDownloader(downloaderManager, artifactStore),
 		worker.WithMetadata(artifactStore),
+		worker.WithMetadataProviders(metadataProvider, artifactStore),
 		worker.WithMediaInspection(
 			media.NewMediaInfo(cfg.MediaInfoBinary, 2*time.Minute),
 			media.NewBDInfo(cfg.BDInfoBinary, filepath.Join(cfg.DataDir, "tmp"), 15*time.Minute),

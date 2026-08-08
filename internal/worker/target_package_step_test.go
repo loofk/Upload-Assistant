@@ -128,6 +128,61 @@ func TestTargetPackageStepAcceptsVerifiedBDInfoArtifact(t *testing.T) {
 	}
 }
 
+func TestTargetPackageStepVerifiesV2MetadataArtifacts(t *testing.T) {
+	store := mustArtifactStore(t)
+	execution := targetPackageExecution(t, store, "U2", map[string]any{})
+	identity := metadataIdentity{Title: "Fixture.Release.2026.1080p", IMDbID: "tt1234567", TMDbID: "42", TMDbType: "movie", DoubanID: "1292052", AniDBID: "3456"}
+	description := "[b]Fixture PTGen[/b]"
+	document := metadataPTGenDocument{
+		SchemaVersion: 1, Source: "provider", Provider: "ptgen-main", Adapter: "ptgen", Identity: identity,
+		Description: description, DescriptionSHA256: sha256Hex([]byte(description)),
+		ConfigurationSHA256: strings.Repeat("6", 64), QuerySHA256: strings.Repeat("7", 64), GeneratedAt: time.Unix(2, 0).UTC(),
+	}
+	body, _ := json.Marshal(document)
+	file, err := store.Write(context.Background(), artifacts.Scope{JobID: "job-id", StepID: "ptgen-step", AttemptID: "ptgen-attempt"}, "metadata-ptgen.json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	previous := snapshot["previous_steps"].(map[string]any)
+	tmdbDocument := metadataTMDbDocument{
+		SchemaVersion: 1, Source: "provider", Provider: "tmdb-main", Adapter: "tmdb", Identity: identity,
+		ConfigurationSHA256: strings.Repeat("4", 64), QuerySHA256: strings.Repeat("8", 64), GeneratedAt: time.Unix(1, 0).UTC(),
+	}
+	tmdbBody, _ := json.Marshal(tmdbDocument)
+	tmdbFile, err := store.Write(context.Background(), artifacts.Scope{JobID: "job-id", StepID: "tmdb-step", AttemptID: "tmdb-attempt"}, "metadata-tmdb.json", bytes.NewReader(tmdbBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous["metadata_tmdb"] = map[string]any{
+		"resolved": true, "identity": identity, "links": metadataLinks(identity), "provider": "tmdb-main", "adapter": "tmdb",
+		"configuration_sha256": strings.Repeat("4", 64), "query_sha256": strings.Repeat("8", 64),
+		"artifact_id": "tmdb-artifact", "artifact_sha256": tmdbFile.SHA256, "artifact_storage_path": tmdbFile.RelativePath,
+	}
+	previous["metadata_ptgen"] = map[string]any{
+		"resolved": true, "identity": identity, "provider": "ptgen-main", "adapter": "ptgen",
+		"configuration_sha256": strings.Repeat("6", 64), "query_sha256": strings.Repeat("7", 64), "description_sha256": document.DescriptionSHA256,
+		"description_size_bytes": len([]byte(description)), "artifact_id": "ptgen-artifact", "artifact_sha256": file.SHA256, "artifact_storage_path": file.RelativePath,
+	}
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	recorder := &fakeArtifactRecorder{}
+	if _, err := (targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: recorder}).Execute(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Open(recorder.recorded.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stored.Close()
+	var prepared sites.PreparedTargetPackage
+	if json.NewDecoder(stored).Decode(&prepared) != nil || !strings.Contains(prepared.Description, "Fixture PTGen") || prepared.FormFields["imdb"] == nil || prepared.FormFields["douban"] == nil {
+		t.Fatalf("prepared package = %#v", prepared)
+	}
+}
+
 func targetPackageRegistry(t *testing.T) *sites.TargetPackageRegistry {
 	t.Helper()
 	registry, err := sites.NewTargetPackageRegistry(mteam.NewPackageAdapter())

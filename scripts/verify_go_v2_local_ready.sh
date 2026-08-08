@@ -80,9 +80,9 @@ health_json="$(curl --fail --silent --show-error "$base_url/health/ready")"
 openapi_json="$(curl --fail --silent --show-error "$base_url/openapi.json")"
 tools_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/tools")"
 audit_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/audit-events?limit=5")"
-readiness_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/readiness/live?source=U2&target=MTEAM&downloader=box&image_host=imgbb&screenshot_profile=default")"
+readiness_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/readiness/live?source=U2&target=MTEAM&downloader=box&image_host=imgbb&screenshot_profile=default&tmdb_provider=tmdb-main&ptgen_provider=ptgen-main")"
 cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact audit list --limit 2)"
-readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default)"
+readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default --tmdb-provider tmdb-main --ptgen-provider ptgen-main)"
 
 jq -e '.ok == true and .status == "ready" and .checks.database == "ready" and .checks.data_dir == "ready"' <<<"$health_json" >/dev/null
 jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/audit-events"] and .paths["/api/v2/readiness/live"] and .components.schemas.RetorrentSummary and .components.schemas.LiveReadinessReport' <<<"$openapi_json" >/dev/null
@@ -156,6 +156,22 @@ if [[ "$migration_count" != "$source_migration_count" ]]; then
   exit 1
 fi
 
+# Normal unit-test runs deliberately skip PostgreSQL integration cases. Exercise
+# every durable store and the complete retorrent/daily-candidate runners against
+# a separate temporary database so service workers cannot claim fixture jobs.
+# PostgreSQL remains unpublished; the host reaches its isolated bridge address.
+test_database="${UA_POSTGRES_DB}_verify"
+compose exec -T postgres createdb -U "$UA_POSTGRES_USER" -O "$UA_POSTGRES_USER" "$test_database"
+postgres_address="$(docker inspect "$postgres_container_id" | jq -er '.[0].NetworkSettings.Networks | to_entries[0].value.IPAddress')"
+if [[ ! "$postgres_address" =~ ^[0-9a-fA-F:.]+$ ]]; then
+  echo "could not resolve the isolated PostgreSQL container address" >&2
+  exit 1
+fi
+UA_TEST_DATABASE_URL="postgres://$UA_POSTGRES_USER:$UA_POSTGRES_PASSWORD@$postgres_address:5432/$test_database?sslmode=disable" \
+  go test ./... -p 1 -count=1
+compose exec -T postgres dropdb -U "$UA_POSTGRES_USER" "$test_database"
+unset postgres_address test_database
+
 job_request='{"kind":"retorrent","execution_mode":"step","stop_after_step":"source_parse","input":{"source_url":"https://u2.dmhy.org/details.php?id=1","target":"MTEAM","confirm_upload":false}}'
 job_headers=(-H "$auth_header" -H 'Content-Type: application/json' -H "Idempotency-Key: local-ready-$verify_suffix")
 created_job="$(curl --fail --silent --show-error -X POST "${job_headers[@]}" --data "$job_request" "$base_url/api/v2/jobs")"
@@ -208,6 +224,7 @@ jq -n \
       web: "ready",
       cli: "ready",
       migrations: "ready",
+      postgres_integration_tests: "ready",
       idempotency: "ready",
       restart_persistence: "ready",
       local_live_readiness_handoff: "safe_blocked",

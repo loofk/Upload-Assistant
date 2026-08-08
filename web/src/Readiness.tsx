@@ -8,6 +8,8 @@ export default function Readiness({client, onError}: {client: ApiClient; onError
   const [targetDownloader, setTargetDownloader] = useState("");
   const [imageHost, setImageHost] = useState("imgbb");
   const [screenshotProfile, setScreenshotProfile] = useState("default");
+  const [tmdbProvider, setTMDbProvider] = useState("tmdb-main");
+  const [ptgenProvider, setPTGenProvider] = useState("ptgen-main");
   const [report, setReport] = useState<LiveReadinessReport | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -15,7 +17,7 @@ export default function Readiness({client, onError}: {client: ApiClient; onError
     event.preventDefault();
     setLoading(true);
     try {
-      setReport(await client.getLiveReadiness({source, target: "MTEAM", downloader, targetDownloader, imageHost, screenshotProfile}));
+      setReport(await client.getLiveReadiness({source, target: "MTEAM", downloader, targetDownloader, imageHost, screenshotProfile, tmdbProvider, ptgenProvider}));
     } catch (reason) {
       onError(reason);
     } finally {
@@ -34,6 +36,8 @@ export default function Readiness({client, onError}: {client: ApiClient; onError
       <label>目标下载器<input value={targetDownloader} onChange={(event) => setTargetDownloader(event.target.value)} placeholder="留空则同源下载器" /></label>
       <label>图床<input required value={imageHost} onChange={(event) => setImageHost(event.target.value)} /></label>
       <label>截图策略<input required value={screenshotProfile} onChange={(event) => setScreenshotProfile(event.target.value)} /></label>
+      <label>TMDb 提供方<input required value={tmdbProvider} onChange={(event) => setTMDbProvider(event.target.value)} /></label>
+      <label>PTGen 提供方<input required value={ptgenProvider} onChange={(event) => setPTGenProvider(event.target.value)} /></label>
       <button className="primary" type="submit" disabled={loading}>{loading ? "检查中…" : "执行本地检查"}</button>
     </form>
     <section className="readiness-safety" aria-label="安全边界">

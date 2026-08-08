@@ -21,6 +21,8 @@ describe("ApiClient safety defaults", () => {
 			applyLabels: true,
       screenshotProfile: "default",
       imageHost: "default",
+      tmdbProvider: "tmdb-main",
+      ptgenProvider: "ptgen-main",
     });
 
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -33,6 +35,7 @@ describe("ApiClient safety defaults", () => {
     expect(body.execution_mode).toBe("step");
 		expect(body.input.downloader).toMatchObject({apply_labels: true, category: "retorrent-source", tags: ["upload-assistant", "source"]});
 		expect(body.input.target_downloader).toEqual({apply_labels: true});
+		expect(body.input.metadata_providers).toEqual({tmdb: "tmdb-main", ptgen: "ptgen-main"});
   });
 
 	it("requires an explicit no-label workflow control for capability-limited downloaders", async () => {
@@ -124,14 +127,15 @@ describe("ApiClient safety defaults", () => {
     vi.stubGlobal("fetch", fetchMock);
     await new ApiClient("ua_test-token-value-that-is-long-enough").getLiveReadiness({
       source: "U2", target: "MTEAM", downloader: "box", targetDownloader: "seedbox",
-      imageHost: "imgbb", screenshotProfile: "default",
+		imageHost: "imgbb", screenshotProfile: "default",
+		tmdbProvider: "tmdb-main", ptgenProvider: "ptgen-main",
     });
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const query = new URLSearchParams(path.split("?")[1]);
     expect(path.split("?")[0]).toBe("/api/v2/readiness/live");
     expect(Object.fromEntries(query)).toEqual({
       source: "U2", target: "MTEAM", downloader: "box", target_downloader: "seedbox",
-      image_host: "imgbb", screenshot_profile: "default",
+		image_host: "imgbb", screenshot_profile: "default", tmdb_provider: "tmdb-main", ptgen_provider: "ptgen-main",
     });
     expect(init.method).toBeUndefined();
     expect(path).not.toContain("confirm_upload");

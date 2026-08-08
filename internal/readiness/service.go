@@ -30,6 +30,7 @@ type IntegrationProvider interface {
 	GetRuntimeDownloader(context.Context, string) (integrations.RuntimeDownloader, error)
 	GetRuntimeImageHost(context.Context, string) (integrations.RuntimeImageHost, error)
 	GetRuntimeScreenshotProfile(context.Context, string) (integrations.RuntimeScreenshotProfile, error)
+	GetRuntimeMetadataProvider(context.Context, string) (integrations.RuntimeMetadataProvider, error)
 }
 
 type Runtime struct {
@@ -48,6 +49,8 @@ type Input struct {
 	TargetDownloader  string
 	ImageHost         string
 	ScreenshotProfile string
+	TMDbProvider      string
+	PTGenProvider     string
 }
 
 type Check struct {
@@ -112,6 +115,8 @@ func (service *Service) Check(ctx context.Context, input Input) (Report, error) 
 	input.TargetDownloader = strings.TrimSpace(input.TargetDownloader)
 	input.ImageHost = strings.TrimSpace(input.ImageHost)
 	input.ScreenshotProfile = strings.TrimSpace(input.ScreenshotProfile)
+	input.TMDbProvider = strings.TrimSpace(input.TMDbProvider)
+	input.PTGenProvider = strings.TrimSpace(input.PTGenProvider)
 	if input.TargetDownloader == "" {
 		input.TargetDownloader = input.Downloader
 	}
@@ -121,7 +126,10 @@ func (service *Service) Check(ctx context.Context, input Input) (Report, error) 
 	report := Report{
 		Status: "blocked", ExternalCallsPerformed: false, LiveUploadAuthorized: false,
 		Source: input.Source, Target: input.Target, Checks: []Check{}, RequiredConfirmations: []RuleConfirmation{},
-		Blockers: []Blocker{}, NextActions: []NextAction{}, ResumeState: map[string]any{"accept_rules": map[string]any{}, "confirm_upload": false},
+		Blockers: []Blocker{}, NextActions: []NextAction{}, ResumeState: map[string]any{
+			"accept_rules": map[string]any{}, "confirm_upload": false,
+			"metadata_providers": map[string]any{"tmdb": input.TMDbProvider, "ptgen": input.PTGenProvider},
+		},
 	}
 
 	service.checkAdapter(&report, "source_adapter", input.Source, slices.Contains([]string{"U2", "CHD"}, input.Source), "source")
@@ -148,6 +156,12 @@ func (service *Service) Check(ctx context.Context, input Input) (Report, error) 
 		return Report{}, err
 	}
 	if err := service.checkScreenshotProfile(ctx, &report, input.ScreenshotProfile); err != nil {
+		return Report{}, err
+	}
+	if err := service.checkMetadataProvider(ctx, &report, "metadata_provider.tmdb", input.TMDbProvider, "tmdb", []string{"api_key"}); err != nil {
+		return Report{}, err
+	}
+	if err := service.checkMetadataProvider(ctx, &report, "metadata_provider.ptgen", input.PTGenProvider, "ptgen", nil); err != nil {
 		return Report{}, err
 	}
 	service.checkBinary(&report, "mediainfo_binary", service.runtime.MediaInfoBinary)
@@ -183,11 +197,38 @@ func validateInput(input Input) error {
 	for name, value := range map[string]string{
 		"downloader": input.Downloader, "target_downloader": input.TargetDownloader,
 		"image_host": input.ImageHost, "screenshot_profile": input.ScreenshotProfile,
+		"tmdb_provider": input.TMDbProvider, "ptgen_provider": input.PTGenProvider,
 	} {
 		if !resourceNamePattern.MatchString(value) {
 			return fmt.Errorf("%w: %s must match %s", ErrInvalid, name, resourceNamePattern.String())
 		}
 	}
+	return nil
+}
+
+func (service *Service) checkMetadataProvider(ctx context.Context, report *Report, key, name, expectedAdapter string, requiredCredentials []string) error {
+	runtime, err := service.integrations.GetRuntimeMetadataProvider(ctx, name)
+	if isConfigurationError(err) {
+		report.block(key, "metadata_provider_configuration_required", "元数据提供方不存在、已禁用或凭据无法读取。", map[string]any{"name": name, "expected_adapter": expectedAdapter})
+		report.NextActions = append(report.NextActions, NextAction{Action: "configure_metadata_provider", Description: "配置并启用独立元数据提供方；本预检不会调用其远程接口。", Parameters: map[string]any{"name": name, "adapter": expectedAdapter, "required_fields": requiredCredentials}})
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check metadata provider %s: %w", name, err)
+	}
+	fields := presentFields(runtime.Credentials)
+	missing := missingFields(fields, requiredCredentials)
+	if runtime.Adapter != expectedAdapter || len(missing) > 0 {
+		report.block(key, "metadata_provider_configuration_incomplete", "元数据提供方 adapter 或必需凭据字段不完整。", map[string]any{
+			"name": name, "adapter": runtime.Adapter, "expected_adapter": expectedAdapter,
+			"credential_fields": fields, "missing_fields": missing,
+		})
+		return nil
+	}
+	report.Checks = append(report.Checks, Check{Key: key, Status: "ready", Summary: "enabled metadata-provider configuration is available", Evidence: map[string]any{
+		"name": name, "adapter": runtime.Adapter, "configuration_sha256": runtime.ConfigurationSHA256,
+		"credential_fields": fields, "health_status": runtime.HealthStatus,
+	}})
 	return nil
 }
 

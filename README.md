@@ -55,7 +55,7 @@ qBittorrent 位于宿主机时，在 Web「配置」中使用 `http://host.docke
 
 1. 在 Web 中配置源站 U2 或 CHD、目标站 MTEAM；凭据只写不读并加密保存。
 2. 导入完整规则 Markdown，审阅解析策略和原文，按精确 fingerprint 审批并激活。
-3. 配置下载器、图床和截图策略；按需配置 Discord、Sonarr/Radarr 及 TMDb/PTGen provider。PTGen 不会回退到内置公共地址。
+3. 配置下载器、图床、截图策略以及参考闭环所需的 TMDb/PTGen provider；按需配置 Discord 和 Sonarr/Radarr。PTGen 不会回退到内置公共地址。
 4. 打开「就绪检查」，或调用 `GET /api/v2/readiness/live`，修复所有本地 blocker。
 5. 获得操作者授权后，分别执行真实站点/下载器探测，再用 `execution_mode=step` 创建受控任务。
 6. 审阅不可变上传包和最终查重后，提交精确 `accept_rules`、人工 obligation 证据及显式 `confirm_upload=true`。
@@ -77,7 +77,8 @@ upload-assistant cli candidates list --source U2 --target MTEAM
 upload-assistant cli audit list --resource-type downloader --resource-id box
 upload-assistant cli readiness live \
   --source U2 --target MTEAM \
-  --downloader box --image-host imgbb --screenshot-profile default
+  --downloader box --image-host imgbb --screenshot-profile default \
+  --tmdb-provider tmdb-main --ptgen-provider ptgen-main
 ```
 
 创建任务默认建议 `execution_mode=step`。live 上传时，源站和目标站的精确规则 fingerprint、所有阻塞 obligation 证据和 `--confirm-upload` 必须在同一次明确意图中提供，服务端仍会重新验证所有 gate。
@@ -102,7 +103,7 @@ UA_POSTGRES_PASSWORD=compose-config-fixture make go-compose-config
 make verify-go-v2-local
 ```
 
-`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、41 个 AI 工具、Agent Skill、中文 Web、CLI、迁移、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
+`make go-check` 执行 TypeScript 类型检查、Web 测试/构建、Go 格式/vet/测试和二进制构建。`verify-go-v2-local` 创建全新隔离 Compose 项目和卷，验证 linux/amd64、非 root、只读根文件系统、capability/no-new-privileges、PostgreSQL 无宿主机端口、主密钥权限、MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 原生工具链、健康检查、安全响应头、鉴权、OpenAPI、41 个 AI 工具、Agent Skill、中文 Web、CLI、迁移、全部 PostgreSQL store 与完整 retorrent/每日候选 fixture、幂等、重启持久性和安全阻塞的 live 交接，完成后自动清理。
 
 本地与 CI 测试只使用 fixture、`httptest` 和隔离 PostgreSQL，不联系真实 Tracker、下载器或图床。真实 U2→MTEAM、CHD→MTEAM、qBittorrent、MediaInfo/BDInfo/截图/mkbrr 与 imgbb/PTPimg 闭环必须由操作者提供合法账号、资源和显式授权后执行；在此之前必须保持为外部验证阻塞，不能伪造完成。
 

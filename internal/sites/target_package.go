@@ -44,16 +44,18 @@ type TargetScreenshotEvidence struct {
 }
 
 type TargetPackageMaterial struct {
-	Target            string                     `json:"target"`
-	Source            SourceInfo                 `json:"source"`
-	Title             string                     `json:"title"`
-	Links             map[string]string          `json:"links"`
-	SourceDescription string                     `json:"source_description,omitempty"`
-	Content           TargetContentEvidence      `json:"content"`
-	Media             TargetMediaEvidence        `json:"media"`
-	Screenshots       []TargetScreenshotEvidence `json:"screenshots"`
-	Evidence          map[string]any             `json:"evidence"`
-	Options           json.RawMessage            `json:"options"`
+	Target                     string                     `json:"target"`
+	Source                     SourceInfo                 `json:"source"`
+	Title                      string                     `json:"title"`
+	Links                      map[string]string          `json:"links"`
+	MetadataDescription        string                     `json:"metadata_description,omitempty"`
+	MetadataEnrichmentRequired bool                       `json:"metadata_enrichment_required,omitempty"`
+	SourceDescription          string                     `json:"source_description,omitempty"`
+	Content                    TargetContentEvidence      `json:"content"`
+	Media                      TargetMediaEvidence        `json:"media"`
+	Screenshots                []TargetScreenshotEvidence `json:"screenshots"`
+	Evidence                   map[string]any             `json:"evidence"`
+	Options                    json.RawMessage            `json:"options"`
 }
 
 type TargetDecision struct {

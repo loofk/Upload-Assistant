@@ -104,6 +104,31 @@ type summaryBindings struct {
 		SHA256       string `json:"metadata_sha256"`
 		StoragePath  string `json:"metadata_storage_path"`
 	}
+	MetadataEnriched bool
+	MetadataTMDb     struct {
+		Resolved      bool             `json:"resolved"`
+		Identity      metadataIdentity `json:"identity"`
+		Provider      string           `json:"provider"`
+		Adapter       string           `json:"adapter"`
+		Configuration string           `json:"configuration_sha256"`
+		QuerySHA256   string           `json:"query_sha256"`
+		ArtifactID    string           `json:"artifact_id"`
+		SHA256        string           `json:"artifact_sha256"`
+		StoragePath   string           `json:"artifact_storage_path"`
+	}
+	MetadataPTGen struct {
+		Resolved        bool             `json:"resolved"`
+		Identity        metadataIdentity `json:"identity"`
+		Provider        string           `json:"provider"`
+		Adapter         string           `json:"adapter"`
+		Configuration   string           `json:"configuration_sha256"`
+		QuerySHA256     string           `json:"query_sha256"`
+		DescriptionSHA  string           `json:"description_sha256"`
+		DescriptionSize int64            `json:"description_size_bytes"`
+		ArtifactID      string           `json:"artifact_id"`
+		SHA256          string           `json:"artifact_sha256"`
+		StoragePath     string           `json:"artifact_storage_path"`
+	}
 	MediaInfo struct {
 		Kind        string `json:"kind"`
 		Tool        string `json:"tool"`
@@ -284,6 +309,24 @@ func (executor summaryExecutor) Execute(ctx context.Context, execution Execution
 				"selected_path": bindings.MediaInfo.Selected, "artifact_id": bindings.MediaInfo.ArtifactID,
 				"storage_path": bindings.MediaInfo.StoragePath, "sha256": bindings.MediaInfo.SHA256,
 			},
+			"metadata_enrichment": map[string]any{
+				"required": bindings.MetadataEnriched,
+				"tmdb": map[string]any{
+					"resolved": bindings.MetadataTMDb.Resolved, "provider": bindings.MetadataTMDb.Provider,
+					"identity": bindings.MetadataTMDb.Identity,
+					"adapter":  bindings.MetadataTMDb.Adapter, "configuration_sha256": bindings.MetadataTMDb.Configuration,
+					"query_sha256": bindings.MetadataTMDb.QuerySHA256, "artifact_id": bindings.MetadataTMDb.ArtifactID,
+					"storage_path": bindings.MetadataTMDb.StoragePath, "sha256": bindings.MetadataTMDb.SHA256,
+				},
+				"ptgen": map[string]any{
+					"resolved": bindings.MetadataPTGen.Resolved, "provider": bindings.MetadataPTGen.Provider,
+					"identity": bindings.MetadataPTGen.Identity,
+					"adapter":  bindings.MetadataPTGen.Adapter, "configuration_sha256": bindings.MetadataPTGen.Configuration,
+					"query_sha256": bindings.MetadataPTGen.QuerySHA256, "description_sha256": bindings.MetadataPTGen.DescriptionSHA,
+					"description_size_bytes": bindings.MetadataPTGen.DescriptionSize, "artifact_id": bindings.MetadataPTGen.ArtifactID,
+					"storage_path": bindings.MetadataPTGen.StoragePath, "sha256": bindings.MetadataPTGen.SHA256,
+				},
+			},
 			"screenshots":   map[string]any{"count": bindings.Screenshots.Count, "profile": bindings.Screenshots.Profile},
 			"image_uploads": map[string]any{"count": bindings.Images.Count},
 		},
@@ -412,6 +455,15 @@ func decodeSummaryBindings(snapshotBody json.RawMessage) (summaryBindings, error
 			return bindings, err
 		}
 	}
+	if _, exists := snapshot.PreviousSteps["metadata_tmdb"]; exists {
+		bindings.MetadataEnriched = true
+		if err := decodeSummaryStep(snapshot.PreviousSteps, "metadata_tmdb", &bindings.MetadataTMDb); err != nil {
+			return bindings, err
+		}
+		if err := decodeSummaryStep(snapshot.PreviousSteps, "metadata_ptgen", &bindings.MetadataPTGen); err != nil {
+			return bindings, err
+		}
+	}
 	var waited struct {
 		Completed bool `json:"completed"`
 	}
@@ -514,6 +566,21 @@ func validateSummaryBindings(bindings summaryBindings, artifacts map[string]work
 		{bindings.Downloaded.ReceiptID, bindings.Downloaded.ReceiptSHA, "target_torrent_download_receipt"},
 		{bindings.Injection.ReceiptID, bindings.Injection.ReceiptSHA, "target_injection_receipt"},
 		{bindings.Seed.ObservationID, bindings.Seed.ObservationSHA, "target_seed_observation"},
+	}
+	if bindings.MetadataEnriched {
+		if !bindings.MetadataTMDb.Resolved || !bindings.MetadataPTGen.Resolved || bindings.MetadataTMDb.ArtifactID == "" ||
+			bindings.MetadataPTGen.ArtifactID == "" || len(bindings.MetadataPTGen.DescriptionSHA) != 64 || bindings.MetadataPTGen.DescriptionSize <= 0 {
+			return fmt.Errorf("TMDb or PTGen enrichment evidence is incomplete")
+		}
+		if bindings.MetadataTMDb.Identity != bindings.MetadataPTGen.Identity || bindings.MetadataPTGen.Identity.IMDbID == "" ||
+			bindings.MetadataPTGen.Identity.TMDbID == "" || bindings.MetadataPTGen.Identity.DoubanID == "" ||
+			validateMetadataIdentity(bindings.MetadataPTGen.Identity) != nil {
+			return fmt.Errorf("TMDb and PTGen enrichment identities are incomplete or inconsistent")
+		}
+		bindingsToCheck = append(bindingsToCheck,
+			struct{ id, sha, kind string }{bindings.MetadataTMDb.ArtifactID, bindings.MetadataTMDb.SHA256, "metadata_tmdb"},
+			struct{ id, sha, kind string }{bindings.MetadataPTGen.ArtifactID, bindings.MetadataPTGen.SHA256, "metadata_ptgen"},
+		)
 	}
 	for _, binding := range bindingsToCheck {
 		artifact, exists := artifacts[binding.id]

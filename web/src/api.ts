@@ -128,10 +128,12 @@ export class ApiClient {
   async getLiveReadiness(input: {
     source: "U2" | "CHD"; target: "MTEAM"; downloader: string;
     targetDownloader?: string; imageHost: string; screenshotProfile: string;
+    tmdbProvider: string; ptgenProvider: string;
   }): Promise<LiveReadinessReport> {
     const query = new URLSearchParams({
       source: input.source, target: input.target, downloader: input.downloader,
       image_host: input.imageHost, screenshot_profile: input.screenshotProfile,
+      tmdb_provider: input.tmdbProvider, ptgen_provider: input.ptgenProvider,
     });
     if (input.targetDownloader) query.set("target_downloader", input.targetDownloader);
     return this.request(`/api/v2/readiness/live?${query.toString()}`);
@@ -166,6 +168,12 @@ export class ApiClient {
       screenshots: {profile: input.screenshotProfile},
       image_host: {name: input.imageHost},
     };
+    if (input.tmdbProvider || input.ptgenProvider) {
+      const providers: Record<string, JsonValue> = {};
+      if (input.tmdbProvider) providers.tmdb = input.tmdbProvider;
+      if (input.ptgenProvider) providers.ptgen = input.ptgenProvider;
+      workflowInput.metadata_providers = providers;
+    }
     const body: Record<string, JsonValue> = {
       kind: "retorrent",
       execution_mode: input.executionMode,

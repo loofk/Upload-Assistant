@@ -30,6 +30,7 @@ type fakeIntegrations struct {
 	downloaders map[string]integrations.RuntimeDownloader
 	imageHosts  map[string]integrations.RuntimeImageHost
 	screenshots map[string]integrations.RuntimeScreenshotProfile
+	metadata    map[string]integrations.RuntimeMetadataProvider
 }
 
 func (provider fakeIntegrations) GetRuntimeSite(_ context.Context, name string) (integrations.RuntimeSite, error) {
@@ -64,6 +65,14 @@ func (provider fakeIntegrations) GetRuntimeScreenshotProfile(_ context.Context, 
 	return value, nil
 }
 
+func (provider fakeIntegrations) GetRuntimeMetadataProvider(_ context.Context, name string) (integrations.RuntimeMetadataProvider, error) {
+	value, exists := provider.metadata[name]
+	if !exists {
+		return integrations.RuntimeMetadataProvider{}, integrations.ErrNotFound
+	}
+	return value, nil
+}
+
 func TestCheckReportsConfigurationReadyWithoutAuthorizingLiveUpload(t *testing.T) {
 	runtime := testRuntime(t)
 	provider := fakeIntegrations{
@@ -80,6 +89,16 @@ func TestCheckReportsConfigurationReadyWithoutAuthorizingLiveUpload(t *testing.T
 		screenshots: map[string]integrations.RuntimeScreenshotProfile{
 			"default": {ScreenshotProfile: integrations.ScreenshotProfile{Name: "default", Revision: 2, Enabled: true, Config: json.RawMessage(`{"count":6,"format":"png"}`)}},
 		},
+		metadata: map[string]integrations.RuntimeMetadataProvider{
+			"tmdb-main": {
+				MetadataProvider:    integrations.MetadataProvider{Name: "tmdb-main", Adapter: "tmdb", Enabled: true, HealthStatus: "unknown"},
+				ConfigurationSHA256: strings.Repeat("4", 64), Credentials: map[string]string{"api_key": "secret"},
+			},
+			"ptgen-main": {
+				MetadataProvider:    integrations.MetadataProvider{Name: "ptgen-main", Adapter: "ptgen", Enabled: true, HealthStatus: "unknown"},
+				ConfigurationSHA256: strings.Repeat("5", 64), Credentials: map[string]string{},
+			},
+		},
 	}
 	ruleProvider := fakeRules{revisions: map[string]rules.Revision{
 		"U2":    {ID: "rule-u2", SiteCode: "U2", Status: "approved", Fingerprint: strings.Repeat("a", 64), Obligations: mustJSON([]rules.Obligation{{ID: "manual-transfer", Blocking: true}})},
@@ -88,6 +107,7 @@ func TestCheckReportsConfigurationReadyWithoutAuthorizingLiveUpload(t *testing.T
 
 	report, err := NewService(ruleProvider, provider, runtime).Check(context.Background(), Input{
 		Source: "u2", Target: "mteam", Downloader: "box", ImageHost: "imgbb", ScreenshotProfile: "default",
+		TMDbProvider: "tmdb-main", PTGenProvider: "ptgen-main",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +122,9 @@ func TestCheckReportsConfigurationReadyWithoutAuthorizingLiveUpload(t *testing.T
 	if report.ResumeState["confirm_upload"] != false || resumeRules["U2"].(map[string]any)["accepted"] != false {
 		t.Fatalf("unsafe resume template = %#v", report.ResumeState)
 	}
+	if providers := report.ResumeState["metadata_providers"].(map[string]any); providers["tmdb"] != "tmdb-main" || providers["ptgen"] != "ptgen-main" {
+		t.Fatalf("metadata provider resume template = %#v", providers)
+	}
 	body, _ := json.Marshal(report)
 	for _, secret := range []string{"secret"} {
 		if strings.Contains(string(body), secret) {
@@ -114,14 +137,15 @@ func TestCheckReturnsActionableBlockersWithoutExternalCalls(t *testing.T) {
 	report, err := NewService(fakeRules{}, fakeIntegrations{}, Runtime{
 		MediaInfoBinary: "/missing/mediainfo", BDInfoBinary: "/missing/bdinfo", FFmpegBinary: "/missing/ffmpeg",
 		FFprobeBinary: "/missing/ffprobe", MkbrrBinary: "/missing/mkbrr", DownloadsDir: "/missing/downloads",
-	}).Check(context.Background(), Input{Source: "CHD", Target: "MTEAM", Downloader: "box", TargetDownloader: "seedbox", ImageHost: "ptpimg", ScreenshotProfile: "six"})
+	}).Check(context.Background(), Input{Source: "CHD", Target: "MTEAM", Downloader: "box", TargetDownloader: "seedbox", ImageHost: "ptpimg", ScreenshotProfile: "six", TMDbProvider: "tmdb-main", PTGenProvider: "ptgen-main"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if report.OK || report.Status != "blocked" || report.ConfigurationReady || report.ExternalCallsPerformed || report.LiveUploadAuthorized || len(report.Blockers) < 10 || len(report.NextActions) == 0 {
 		t.Fatalf("unexpected blocked report: %#v", report)
 	}
-	if !hasBlocker(report.Blockers, "active_rule_required") || !hasBlocker(report.Blockers, "runtime_binary_required") || !hasBlocker(report.Blockers, "downloads_mount_required") {
+	if !hasBlocker(report.Blockers, "active_rule_required") || !hasBlocker(report.Blockers, "metadata_provider_configuration_required") ||
+		!hasBlocker(report.Blockers, "runtime_binary_required") || !hasBlocker(report.Blockers, "downloads_mount_required") {
 		t.Fatalf("missing expected blockers: %#v", report.Blockers)
 	}
 }
@@ -129,9 +153,9 @@ func TestCheckReturnsActionableBlockersWithoutExternalCalls(t *testing.T) {
 func TestCheckRejectsUnsupportedReferenceFlowAndUnsafeNames(t *testing.T) {
 	service := NewService(fakeRules{}, fakeIntegrations{}, Runtime{})
 	for _, input := range []Input{
-		{Source: "TTG", Target: "MTEAM", Downloader: "box", ImageHost: "imgbb", ScreenshotProfile: "default"},
-		{Source: "U2", Target: "CHD", Downloader: "box", ImageHost: "imgbb", ScreenshotProfile: "default"},
-		{Source: "U2", Target: "MTEAM", Downloader: "bad/name", ImageHost: "imgbb", ScreenshotProfile: "default"},
+		{Source: "TTG", Target: "MTEAM", Downloader: "box", ImageHost: "imgbb", ScreenshotProfile: "default", TMDbProvider: "tmdb-main", PTGenProvider: "ptgen-main"},
+		{Source: "U2", Target: "CHD", Downloader: "box", ImageHost: "imgbb", ScreenshotProfile: "default", TMDbProvider: "tmdb-main", PTGenProvider: "ptgen-main"},
+		{Source: "U2", Target: "MTEAM", Downloader: "bad/name", ImageHost: "imgbb", ScreenshotProfile: "default", TMDbProvider: "tmdb-main", PTGenProvider: "ptgen-main"},
 	} {
 		if _, err := service.Check(context.Background(), input); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("input %#v error = %v", input, err)

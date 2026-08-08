@@ -186,6 +186,8 @@ export interface CreateJobInput {
 	applyLabels: boolean;
   screenshotProfile: string;
   imageHost: string;
+  tmdbProvider?: string;
+  ptgenProvider?: string;
 }
 
 export interface EndpointConfig {

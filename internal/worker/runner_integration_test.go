@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/media"
+	"github.com/loofk/upload-assistant/v2/internal/metadataproviders"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
@@ -70,8 +72,9 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 				"confirmed": true, "evidence": "Fixture confirms target-side upload obligations were reviewed.",
 			}},
 		}},
-		"downloader":     map[string]any{"name": "fixture-box", "save_path": "/remote/downloads"},
-		"confirm_upload": true,
+		"downloader":         map[string]any{"name": "fixture-box", "save_path": "/remote/downloads"},
+		"metadata_providers": map[string]any{"tmdb": "tmdb-fixture", "ptgen": "ptgen-fixture"},
+		"confirm_upload":     true,
 	})
 	job, err := service.CreateJob(ctx, workflow.CreateJobInput{
 		Kind: "retorrent", ExecutionMode: workflow.ExecutionAuto, Input: input,
@@ -97,7 +100,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := fakeSourceProvider{
-		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", IMDbID: "tt1234567", AniDBID: "3456", RetrievedAt: time.Now().UTC()},
+		info: sites.SourceInfo{Tracker: "U2", TorrentID: "60635", Name: "fixture", IMDbID: "tt1234567", TMDbID: "42", TMDbType: "movie", DoubanID: "1292052", AniDBID: "3456", RetrievedAt: time.Now().UTC()},
 		download: sites.DownloadedTorrent{
 			Bytes: metainfo, Filename: "U2-60635.torrent", ContentType: "application/x-bittorrent",
 			SizeBytes: int64(len(metainfo)), SHA256: sha256String(metainfo), Hashes: hashes,
@@ -160,6 +163,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithSourceAdapters(source, artifactStore),
 		WithDownloader(downloader, artifactStore, allowedContentRoot),
 		WithMetadata(artifactStore),
+		WithMetadataProviders(integrationMetadataResolver{}, artifactStore),
 		WithMediaInfo(&fakeMediaInspector{result: media.Inspection{
 			Tool: "mediainfo", Version: "fixture", Format: "json", Document: []byte(`{"media":{"track":[{"@type":"Video","Width":"1920","Height":"1080"}]}}`), DurationMS: 1,
 		}}, artifactStore),
@@ -255,12 +259,34 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("metadata RunOnce() error = %v", err)
 	}
 	job, err = service.GetJob(ctx, job.ID)
-	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "media_info" {
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "metadata_tmdb" {
 		t.Fatalf("metadata job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 3 || storedArtifacts[2].Kind != "metadata" {
 		t.Fatalf("metadata artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("TMDb metadata RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "metadata_ptgen" {
+		t.Fatalf("TMDb metadata job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 4 || storedArtifacts[3].Kind != "metadata_tmdb" {
+		t.Fatalf("TMDb metadata artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("PTGen metadata RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "media_info" {
+		t.Fatalf("PTGen metadata job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 5 || storedArtifacts[4].Kind != "metadata_ptgen" {
+		t.Fatalf("PTGen metadata artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
 		t.Fatalf("media info RunOnce() error = %v", err)
@@ -270,7 +296,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("media-info job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 4 || storedArtifacts[3].Kind != "mediainfo" {
+	if err != nil || len(storedArtifacts) != 6 || storedArtifacts[5].Kind != "mediainfo" {
 		t.Fatalf("media-info artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -281,7 +307,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("screenshots job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 5 || storedArtifacts[4].Kind != "screenshot" {
+	if err != nil || len(storedArtifacts) != 7 || storedArtifacts[6].Kind != "screenshot" {
 		t.Fatalf("screenshot artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -292,7 +318,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("image-upload job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 6 || storedArtifacts[5].Kind != "image_upload_receipt" {
+	if err != nil || len(storedArtifacts) != 8 || storedArtifacts[7].Kind != "image_upload_receipt" {
 		t.Fatalf("image-upload artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -303,7 +329,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-package job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 7 || storedArtifacts[6].Kind != "target_package" {
+	if err != nil || len(storedArtifacts) != 9 || storedArtifacts[8].Kind != "target_package" {
 		t.Fatalf("target-package artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -314,7 +340,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-duplicate job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 8 || storedArtifacts[7].Kind != "duplicate_check" {
+	if err != nil || len(storedArtifacts) != 10 || storedArtifacts[9].Kind != "duplicate_check" {
 		t.Fatalf("target-duplicate artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -332,7 +358,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-torrent job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 10 || storedArtifacts[8].Kind != "target_torrent" || storedArtifacts[9].Kind != "target_torrent_receipt" {
+	if err != nil || len(storedArtifacts) != 12 || storedArtifacts[10].Kind != "target_torrent" || storedArtifacts[11].Kind != "target_torrent_receipt" {
 		t.Fatalf("target-torrent artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -343,7 +369,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-upload job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 12 || storedArtifacts[10].Kind != "preupload_duplicate_check" || storedArtifacts[11].Kind != "target_upload_receipt" {
+	if err != nil || len(storedArtifacts) != 14 || storedArtifacts[12].Kind != "preupload_duplicate_check" || storedArtifacts[13].Kind != "target_upload_receipt" {
 		t.Fatalf("target-upload artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if targetDuplicates.calls != 2 || targetUploader.calls != 1 || !targetUploader.request.Confirmed {
@@ -357,7 +383,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-torrent-download job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 14 || storedArtifacts[12].Kind != "target_downloaded_torrent" || storedArtifacts[13].Kind != "target_torrent_download_receipt" {
+	if err != nil || len(storedArtifacts) != 16 || storedArtifacts[14].Kind != "target_downloaded_torrent" || storedArtifacts[15].Kind != "target_torrent_download_receipt" {
 		t.Fatalf("target-torrent-download artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if targetTorrentDownloader.calls != 1 || targetTorrentDownloader.request.TorrentID != "98765" || targetTorrentDownloader.request.UploadReceiptSHA256 == "" {
@@ -371,7 +397,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-injection job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 15 || storedArtifacts[14].Kind != "target_injection_receipt" {
+	if err != nil || len(storedArtifacts) != 17 || storedArtifacts[16].Kind != "target_injection_receipt" {
 		t.Fatalf("target-injection artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if downloader.addCalls != 2 || downloader.addOptions.SavePath != "/remote/downloads" || downloader.addOptions.SkipChecking || downloader.addOptions.Paused {
@@ -400,7 +426,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("target-seed job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 16 || storedArtifacts[15].Kind != "target_seed_observation" {
+	if err != nil || len(storedArtifacts) != 18 || storedArtifacts[17].Kind != "target_seed_observation" {
 		t.Fatalf("target-seed artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	if err := runner.RunOnce(ctx); err != nil {
@@ -411,7 +437,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		t.Fatalf("completed job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
 	}
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
-	if err != nil || len(storedArtifacts) != 17 || storedArtifacts[16].Kind != "job_summary" {
+	if err != nil || len(storedArtifacts) != 19 || storedArtifacts[18].Kind != "job_summary" {
 		t.Fatalf("summary artifacts/error = %#v/%v", storedArtifacts, err)
 	}
 	var finalSummary struct {
@@ -421,7 +447,7 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		SummaryFile summaryArtifact `json:"summary_file"`
 	}
 	if err := json.Unmarshal(job.Summary, &finalSummary); err != nil || !finalSummary.OK || finalSummary.Status != "complete" ||
-		finalSummary.JobID != job.ID || finalSummary.SummaryFile.ArtifactID != storedArtifacts[16].ID || finalSummary.SummaryFile.SHA256 != storedArtifacts[16].SHA256 {
+		finalSummary.JobID != job.ID || finalSummary.SummaryFile.ArtifactID != storedArtifacts[18].ID || finalSummary.SummaryFile.SHA256 != storedArtifacts[18].SHA256 {
 		t.Fatalf("final job summary/error = %s/%v", job.Summary, err)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
@@ -432,6 +458,31 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 
 type integrationRuleProvider struct {
 	revisions map[string]rules.Revision
+}
+
+type integrationMetadataResolver struct{}
+
+func (integrationMetadataResolver) Resolve(_ context.Context, name string, request metadataproviders.ResolveRequest, _ workflow.Actor) (metadataproviders.ResolveResult, error) {
+	identity := metadataproviders.Identity{
+		IMDbID: request.IMDbID, TMDbID: request.TMDbID, TMDbType: request.TMDbType, DoubanID: request.DoubanID,
+	}
+	result := metadataproviders.ResolveResult{
+		Name: name, Matched: true, Identity: identity, ConfigurationSHA256: strings.Repeat("7", 64),
+		QuerySHA256: strings.Repeat("8", 64), Calls: []metadataproviders.CallEvidence{{
+			Sequence: 1, Purpose: "fixture", QuerySHA256: strings.Repeat("a", 64), ResponseSHA256: strings.Repeat("b", 64), StatusCode: 200,
+		}},
+	}
+	switch name {
+	case "tmdb-fixture":
+		result.Adapter = "tmdb"
+	case "ptgen-fixture":
+		result.Adapter = "ptgen"
+		result.Description = "Fixture PTGen/Douban description"
+		result.DescriptionSHA256 = sha256Hex([]byte(result.Description))
+	default:
+		return metadataproviders.ResolveResult{}, fmt.Errorf("unexpected fixture metadata provider %s", name)
+	}
+	return result, nil
 }
 
 func (provider integrationRuleProvider) Active(_ context.Context, siteCode string) (rules.Revision, error) {

@@ -111,6 +111,22 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 			Parameters: map[string]any{"allowed_values": []int{1, 2, 3, 5, 6, 7}},
 		})
 	}
+	if material.MetadataEnrichmentRequired {
+		for _, required := range []struct {
+			key, code, message string
+		}{
+			{"imdb", "target_imdb_required", "MTEAM reference workflow requires a verified IMDb link"},
+			{"tmdb", "target_tmdb_required", "MTEAM reference workflow requires a verified typed TMDb link"},
+			{"douban", "target_douban_required", "MTEAM reference workflow requires a verified Douban subject link"},
+		} {
+			if strings.TrimSpace(material.Links[required.key]) == "" {
+				requirements = append(requirements, requirement("metadata."+required.key, required.code, required.message))
+			}
+		}
+		if strings.TrimSpace(material.MetadataDescription) == "" {
+			requirements = append(requirements, requirement("metadata.ptgen_description", "target_ptgen_description_required", "MTEAM reference workflow requires a verified PTGen/Douban description"))
+		}
+	}
 	if len(requirements) > 0 {
 		return sites.PreparedTargetPackage{}, &sites.PackageRequirementsError{Requirements: requirements}
 	}
@@ -330,6 +346,9 @@ func buildDescription(material sites.TargetPackageMaterial, title string) (strin
 	)
 	if sourceText := htmlToPlainText(material.SourceDescription); sourceText != "" {
 		lines = append(lines, "", "[b]原站简介（已文本化）[/b]", safeBBCodeText(sourceText))
+	}
+	if metadataText := safeBBCodeText(material.MetadataDescription); metadataText != "" {
+		lines = append(lines, "", "[b]豆瓣/PTGen 简介（已安全文本化）[/b]", metadataText)
 	}
 	mediaLabel := "MediaInfo"
 	if strings.EqualFold(material.Media.Kind, "bdinfo") {

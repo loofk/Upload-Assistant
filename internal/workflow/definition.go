@@ -22,7 +22,7 @@ type Definition struct {
 func RetorrentDefinition() Definition {
 	return Definition{
 		Name:    "retorrent",
-		Version: 1,
+		Version: 2,
 		Steps: []StepDefinition{
 			{Key: "source_parse", Required: true},
 			{Key: "source_inspect", Required: true},
@@ -32,6 +32,8 @@ func RetorrentDefinition() Definition {
 			{Key: "downloader_wait", Required: true},
 			{Key: "content_resolve", Required: true},
 			{Key: "metadata", Required: true},
+			{Key: "metadata_tmdb", Required: true},
+			{Key: "metadata_ptgen", Required: true},
 			{Key: "media_info", Required: true},
 			{Key: "screenshots", Required: true},
 			{Key: "image_upload", Required: true},

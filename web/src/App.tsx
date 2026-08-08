@@ -432,6 +432,7 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
   const [form, setForm] = useState<CreateJobInput>({
     sourceURL: "", target: "MTEAM", executionMode: "step", stopAfterStep: "",
 		downloaderName: "default", savePath: "/downloads", applyLabels: true, screenshotProfile: "default", imageHost: "default",
+		tmdbProvider: "", ptgenProvider: "",
   });
   const [busy, setBusy] = useState(false);
   const update = <K extends keyof CreateJobInput>(key: K, value: CreateJobInput[K]) => setForm((current) => ({...current, [key]: value}));
@@ -459,6 +460,8 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
 				<label className="full"><input type="checkbox" checked={form.applyLabels} onChange={(event) => update("applyLabels", event.target.checked)} /> 应用下载器分类和标签（Deluge 核心 API 等不支持标签的适配器必须取消）</label>
         <label>截图配置<input required value={form.screenshotProfile} onChange={(event) => update("screenshotProfile", event.target.value)} /></label>
         <label>图床配置<input required value={form.imageHost} onChange={(event) => update("imageHost", event.target.value)} /></label>
+        <label>TMDb provider（可选）<input placeholder="例如 tmdb-main" value={form.tmdbProvider} onChange={(event) => update("tmdbProvider", event.target.value)} /></label>
+        <label>PTGen provider（可选）<input placeholder="例如 ptgen-main" value={form.ptgenProvider} onChange={(event) => update("ptgenProvider", event.target.value)} /></label>
         <label className="full">指定暂停步骤（可选）<input value={form.stopAfterStep} placeholder="例如 target_duplicate_check" onChange={(event) => update("stopAfterStep", event.target.value)} /></label>
         <div className="safety-callout full"><strong>安全默认值</strong><span>新任务不会附带规则接受，也不会确认 live 上传。流程会在对应硬门禁停下，等待人工提交指纹或显式确认。</span></div>
         <footer className="full"><button type="button" className="secondary" onClick={onClose}>取消</button><button type="submit" className="primary" disabled={busy}>{busy ? "创建中…" : "创建任务"}</button></footer>
@@ -494,6 +497,7 @@ function humanizeStep(key: string): string {
     source_parse: "识别源站链接", source_inspect: "读取源站信息", source_rules: "验证源站规则",
     source_torrent: "获取源站种子", downloader_add: "加入下载器", downloader_wait: "等待下载完成",
     content_resolve: "解析内容与路径", metadata: "收集元数据", media_info: "生成媒体信息",
+    metadata_tmdb: "核验 TMDb 元数据", metadata_ptgen: "生成豆瓣/PTGen 简介",
     screenshots: "生成截图", image_upload: "上传图片", target_package: "生成目标描述包",
     target_duplicate_check: "目标站查重", target_rules: "验证目标站规则", target_torrent: "生成目标种子",
     target_upload: "上传目标站", target_torrent_download: "下载目标站新种", target_inject: "注入目标站做种",

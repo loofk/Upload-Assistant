@@ -34,11 +34,11 @@ func TestLiveReadinessRouteReturnsSafeMachineReadableHandoff(t *testing.T) {
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Build: buildinfo.Info{Version: "test"},
 		Auth: fakeAuthenticator{principal: security.Principal{UserID: "user", Role: "auditor", TokenScopes: []string{"config:read"}}},
 	})
-	request := httptest.NewRequest(http.MethodGet, "/api/v2/readiness/live?source=U2&target=MTEAM&downloader=box&target_downloader=seedbox&image_host=imgbb&screenshot_profile=six", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/readiness/live?source=U2&target=MTEAM&downloader=box&target_downloader=seedbox&image_host=imgbb&screenshot_profile=six&tmdb_provider=tmdb-main&ptgen_provider=ptgen-main", nil)
 	request.Header.Set("Authorization", "Bearer fixture")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || service.input.Source != "U2" || service.input.TargetDownloader != "seedbox" {
+	if response.Code != http.StatusOK || service.input.Source != "U2" || service.input.TargetDownloader != "seedbox" || service.input.TMDbProvider != "tmdb-main" || service.input.PTGenProvider != "ptgen-main" {
 		t.Fatalf("response=%d %s input=%#v", response.Code, response.Body.String(), service.input)
 	}
 	for _, expected := range []string{`"status":"blocked"`, `"external_calls_performed":false`, `"live_upload_authorized":false`, `"confirm_upload":false`, `"active_rule_required"`} {

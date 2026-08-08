@@ -41,13 +41,14 @@ type createCandidateJobRequest struct {
 }
 
 type submitCandidateRequest struct {
-	ExecutionMode    workflow.ExecutionMode `json:"execution_mode,omitempty"`
-	StopAfterStep    string                 `json:"stop_after_step,omitempty"`
-	Downloader       json.RawMessage        `json:"downloader,omitempty"`
-	TargetDownloader json.RawMessage        `json:"target_downloader,omitempty"`
-	Screenshots      json.RawMessage        `json:"screenshots,omitempty"`
-	ImageHost        json.RawMessage        `json:"image_host,omitempty"`
-	TargetPackage    json.RawMessage        `json:"target_package,omitempty"`
+	ExecutionMode     workflow.ExecutionMode `json:"execution_mode,omitempty"`
+	StopAfterStep     string                 `json:"stop_after_step,omitempty"`
+	Downloader        json.RawMessage        `json:"downloader,omitempty"`
+	TargetDownloader  json.RawMessage        `json:"target_downloader,omitempty"`
+	Screenshots       json.RawMessage        `json:"screenshots,omitempty"`
+	ImageHost         json.RawMessage        `json:"image_host,omitempty"`
+	MetadataProviders json.RawMessage        `json:"metadata_providers,omitempty"`
+	TargetPackage     json.RawMessage        `json:"target_package,omitempty"`
 }
 
 func registerCandidateRoutes(mux *http.ServeMux, store CandidateService, jobs JobService) {
@@ -218,7 +219,7 @@ func (api candidateAPI) submitRetorrent(w http.ResponseWriter, r *http.Request) 
 	}
 	for key, value := range map[string]json.RawMessage{
 		"downloader": request.Downloader, "target_downloader": request.TargetDownloader,
-		"screenshots": request.Screenshots, "image_host": request.ImageHost, "target_package": request.TargetPackage,
+		"screenshots": request.Screenshots, "image_host": request.ImageHost, "metadata_providers": request.MetadataProviders, "target_package": request.TargetPackage,
 	} {
 		if len(value) > 0 {
 			retorrentInput[key] = value

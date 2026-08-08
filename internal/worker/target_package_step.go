@@ -140,6 +140,83 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 	if !decodePrevious(snapshot.PreviousSteps, "metadata", &metadata) || metadata.Identity.Title == "" || metadata.MetadataSHA256 == "" {
 		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("metadata evidence is missing or incomplete")
 	}
+	metadataEvidence := map[string]any{"artifact_id": metadata.MetadataArtifactID, "sha256": metadata.MetadataSHA256, "storage_path": metadata.MetadataStoragePath}
+	metadataDescription := ""
+	metadataEnrichmentRequired := false
+	var tmdbOutput struct {
+		Resolved            bool              `json:"resolved"`
+		Identity            metadataIdentity  `json:"identity"`
+		Links               map[string]string `json:"links"`
+		Provider            string            `json:"provider"`
+		Adapter             string            `json:"adapter"`
+		ConfigurationSHA256 string            `json:"configuration_sha256"`
+		QuerySHA256         string            `json:"query_sha256"`
+		ArtifactID          string            `json:"artifact_id"`
+		ArtifactSHA256      string            `json:"artifact_sha256"`
+		ArtifactStoragePath string            `json:"artifact_storage_path"`
+	}
+	if body, exists := snapshot.PreviousSteps["metadata_tmdb"]; exists {
+		metadataEnrichmentRequired = true
+		if json.Unmarshal(body, &tmdbOutput) != nil || !tmdbOutput.Resolved || tmdbOutput.Identity.IMDbID == "" ||
+			tmdbOutput.Identity.TMDbID == "" || tmdbOutput.ArtifactID == "" || tmdbOutput.ArtifactSHA256 == "" {
+			return sites.TargetPackageMaterial{}, nil, fmt.Errorf("metadata_tmdb evidence is missing or incomplete")
+		}
+		tmdbBody, readErr := readTargetArtifact(executor.artifacts, sites.TargetArtifactEvidence{
+			ArtifactID: tmdbOutput.ArtifactID, StoragePath: tmdbOutput.ArtifactStoragePath, SHA256: tmdbOutput.ArtifactSHA256,
+		}, 512<<10)
+		var tmdbDocument metadataTMDbDocument
+		if readErr != nil || json.Unmarshal(tmdbBody, &tmdbDocument) != nil || tmdbDocument.Identity != tmdbOutput.Identity ||
+			tmdbDocument.Provider != tmdbOutput.Provider || tmdbDocument.Adapter != tmdbOutput.Adapter ||
+			tmdbDocument.ConfigurationSHA256 != tmdbOutput.ConfigurationSHA256 || tmdbDocument.QuerySHA256 != tmdbOutput.QuerySHA256 {
+			return sites.TargetPackageMaterial{}, nil, fmt.Errorf("metadata_tmdb artifact verification failed")
+		}
+		metadata.Identity, metadata.Links = tmdbOutput.Identity, tmdbOutput.Links
+		metadataEvidence["tmdb"] = map[string]any{
+			"provider": tmdbOutput.Provider, "adapter": tmdbOutput.Adapter, "configuration_sha256": tmdbOutput.ConfigurationSHA256,
+			"query_sha256": tmdbOutput.QuerySHA256,
+			"artifact_id":  tmdbOutput.ArtifactID, "sha256": tmdbOutput.ArtifactSHA256, "storage_path": tmdbOutput.ArtifactStoragePath,
+		}
+	}
+	var ptgenOutput struct {
+		Resolved            bool             `json:"resolved"`
+		Identity            metadataIdentity `json:"identity"`
+		Provider            string           `json:"provider"`
+		Adapter             string           `json:"adapter"`
+		ConfigurationSHA256 string           `json:"configuration_sha256"`
+		QuerySHA256         string           `json:"query_sha256"`
+		DescriptionSHA256   string           `json:"description_sha256"`
+		DescriptionSize     int              `json:"description_size_bytes"`
+		ArtifactID          string           `json:"artifact_id"`
+		ArtifactSHA256      string           `json:"artifact_sha256"`
+		ArtifactStoragePath string           `json:"artifact_storage_path"`
+	}
+	if body, exists := snapshot.PreviousSteps["metadata_ptgen"]; exists {
+		metadataEnrichmentRequired = true
+		if json.Unmarshal(body, &ptgenOutput) != nil || !ptgenOutput.Resolved || ptgenOutput.Identity != metadata.Identity ||
+			ptgenOutput.DescriptionSHA256 == "" || ptgenOutput.ArtifactSHA256 == "" {
+			return sites.TargetPackageMaterial{}, nil, fmt.Errorf("metadata_ptgen evidence is missing or inconsistent")
+		}
+		ptgenBody, readErr := readTargetArtifact(executor.artifacts, sites.TargetArtifactEvidence{
+			ArtifactID: ptgenOutput.ArtifactID, StoragePath: ptgenOutput.ArtifactStoragePath, SHA256: ptgenOutput.ArtifactSHA256,
+		}, maxPTGenDescriptionBytes+64*1024)
+		var ptgenDocument metadataPTGenDocument
+		if readErr != nil || json.Unmarshal(ptgenBody, &ptgenDocument) != nil || ptgenDocument.Identity != metadata.Identity ||
+			ptgenDocument.Provider != ptgenOutput.Provider || ptgenDocument.Adapter != ptgenOutput.Adapter ||
+			ptgenDocument.ConfigurationSHA256 != ptgenOutput.ConfigurationSHA256 || ptgenDocument.QuerySHA256 != ptgenOutput.QuerySHA256 ||
+			ptgenDocument.DescriptionSHA256 != ptgenOutput.DescriptionSHA256 || sha256Hex([]byte(ptgenDocument.Description)) != ptgenOutput.DescriptionSHA256 ||
+			len([]byte(ptgenDocument.Description)) != ptgenOutput.DescriptionSize {
+			return sites.TargetPackageMaterial{}, nil, fmt.Errorf("metadata_ptgen artifact verification failed")
+		}
+		metadataDescription = ptgenDocument.Description
+		metadataEvidence["ptgen"] = map[string]any{
+			"provider": ptgenOutput.Provider, "adapter": ptgenOutput.Adapter, "configuration_sha256": ptgenOutput.ConfigurationSHA256,
+			"query_sha256":       ptgenOutput.QuerySHA256,
+			"description_sha256": ptgenOutput.DescriptionSHA256, "description_size_bytes": ptgenOutput.DescriptionSize,
+			"artifact_id": ptgenOutput.ArtifactID, "sha256": ptgenOutput.ArtifactSHA256, "storage_path": ptgenOutput.ArtifactStoragePath,
+		}
+	} else if metadataEnrichmentRequired {
+		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("metadata_ptgen evidence is missing")
+	}
 	var content struct {
 		Resolved            bool   `json:"resolved"`
 		DownloaderName      string `json:"downloader_name"`
@@ -217,7 +294,8 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 
 	material := sites.TargetPackageMaterial{
 		Target: parsed.Target, Source: inspected.SourceInfo, Title: metadata.Identity.Title,
-		Links: metadata.Links, SourceDescription: sourceDescription,
+		Links: metadata.Links, MetadataDescription: metadataDescription,
+		MetadataEnrichmentRequired: metadataEnrichmentRequired, SourceDescription: sourceDescription,
 		Content: sites.TargetContentEvidence{
 			LocalRoot: content.LocalRoot, FileCount: content.FileCount, TotalSizeBytes: content.TotalSizeBytes,
 			ManifestID: content.ManifestArtifactID, ManifestSHA256: content.ManifestSHA256,
@@ -234,7 +312,7 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 			"source_rule":         map[string]any{"revision_id": sourceRules.RevisionID, "fingerprint": sourceRules.Fingerprint},
 			"source_torrent":      map[string]any{"artifact_id": sourceTorrent.ArtifactID, "sha256": sourceTorrent.SHA256, "hashes": sourceTorrent.Hashes},
 			"source_description":  inspected.DescriptionArtifact,
-			"metadata":            map[string]any{"artifact_id": metadata.MetadataArtifactID, "sha256": metadata.MetadataSHA256, "storage_path": metadata.MetadataStoragePath},
+			"metadata":            metadataEvidence,
 			"content_manifest":    map[string]any{"artifact_id": content.ManifestArtifactID, "sha256": content.ManifestSHA256, "storage_path": content.ManifestStoragePath},
 			"media_info":          map[string]any{"artifact_id": mediaOutput.ArtifactID, "sha256": mediaOutput.ArtifactSHA256, "storage_path": mediaOutput.ArtifactStoragePath},
 			"screenshot_receipts": screenshots,

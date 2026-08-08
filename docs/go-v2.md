@@ -38,7 +38,7 @@ upload-assistant cli jobs summary <job-id>
 upload-assistant cli candidates list --source U2 --target MTEAM
 upload-assistant cli integrations list downloaders
 upload-assistant cli audit list --resource-type downloader --resource-id box
-upload-assistant cli readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default
+upload-assistant cli readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default --tmdb-provider tmdb-main --ptgen-provider ptgen-main
 upload-assistant cli shell
 ```
 
@@ -50,6 +50,7 @@ upload-assistant cli retorrent create \
   --target MTEAM \
   --downloader box --save-path /downloads \
   --screenshot-profile default --image-host imgbb \
+  --tmdb-provider tmdb-main --ptgen-provider ptgen-main \
   --idempotency-key operator-request-20260808-01
 
 upload-assistant cli jobs resume <job-id> \
@@ -61,7 +62,7 @@ live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新�
 
 ## 真实环境就绪交接
 
-在进行任何站点、下载器或图床联网探测前，先调用 `GET /api/v2/readiness/live`，或使用 Web 顶部「就绪检查」和 CLI `readiness live`。当前完整参考路径限定为 U2/CHD → MTEAM。该只读检查仅验证：已审批激活的规则 fingerprint 与阻塞 obligations、站点凭据字段是否存在、源/目标下载器、图床、截图策略、`/downloads` 挂载以及 MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 是否可用。
+在进行任何站点、下载器、图床或元数据提供方联网探测前，先调用 `GET /api/v2/readiness/live`，或使用 Web 顶部「就绪检查」和 CLI `readiness live`。当前完整参考路径限定为 U2/CHD → MTEAM。该只读检查仅验证：已审批激活的规则 fingerprint 与阻塞 obligations、站点凭据字段是否存在、源/目标下载器、图床、截图策略、显式 TMDb/PTGen provider、`/downloads` 挂载以及 MediaInfo/BDInfo/FFmpeg/FFprobe/mkbrr 是否可用。
 
 普通视频文件使用 MediaInfo JSON；检测到 `BDMV/STREAM` 时改为对原盘根目录运行非交互 BDInfo 整盘扫描，并把原始 UTF-8 文本作为独立 `bdinfo` artifact 绑定到 MTEAM 上传包。每个 attempt 使用独立临时报告目录，只接受唯一、受限大小的普通文本文件。Docker 镜像从固定 commit 构建自包含 BDInfo，并校验源归档 SHA-256、保留 LGPL 许可证。`VIDEO_TS` 不会被 MediaInfo 或 BDInfo 冒充处理，而会明确返回 `dvdinfo_adapter_required`。
 
@@ -113,6 +114,8 @@ Discord 投递由 PostgreSQL 队列和独立 Worker 执行，使用租约、最�
 - `GET/PUT /api/v2/metadata-providers` 独立管理 TMDb/PTGen endpoint；key 加密保存且只回显字段名。TMDb 启用时必须提供 key，PTGen key 可选，但 endpoint 始终必须显式配置，不会回退到公共服务。
 - `POST /api/v2/metadata-providers/{name}/resolve` 是显式 external-read。TMDb 按官方 v3 `find/{imdb}` 或 `movie|tv/{id}/external_ids` 契约规范化 IMDb/TMDb ID，并阻断跨类型歧义或 ID 冲突；PTGen 兼容 legacy 的 IMDb→豆瓣二段查询和直接豆瓣 subject 查询。
 - 所有请求禁重定向、限时、限响应大小。全局审计只保存配置、查询、响应和 PTGen 描述 SHA-256、规范化 ID 与字节数，不保存 API key、原始响应或简介。配置成功不是联网许可，`matched=false` 也不是材料已完成。
+- 新建 retorrent 工作流版本 2 把 `metadata_tmdb` 与 `metadata_ptgen` 作为两个独立、可暂停和可恢复的必需步骤。任务只有在输入或 resume state 显式选择 provider 时才调用远端；也可由人工在对应 resume 字段提交已复核 ID/简介。每步把 provider 配置 fingerprint、查询/响应 hash 和不可变 artifact 绑定到事件链。
+- MTEAM 打包硬性要求 IMDb、带 movie/tv 类型的 TMDb、豆瓣 subject 和非空 PTGen/豆瓣简介。原始简介只保存在受控 artifact；步骤响应与 summary 只暴露 hash 和字节数，打包前重新校验 artifact SHA-256，并把 BBCode 标记安全文本化，避免外部简介注入上传描述结构。
 
 ## 远程下载器
 

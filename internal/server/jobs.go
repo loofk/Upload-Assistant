@@ -84,7 +84,7 @@ func registerJobRoutes(mux *http.ServeMux, service JobService, reader ArtifactCo
 const maxArtifactContentBytes = 64 << 20
 
 var downloadableArtifactKinds = map[string]struct{}{
-	"content_manifest": {}, "metadata": {}, "mediainfo": {}, "bdinfo": {}, "screenshot": {},
+	"content_manifest": {}, "metadata": {}, "metadata_tmdb": {}, "metadata_ptgen": {}, "mediainfo": {}, "bdinfo": {}, "screenshot": {},
 	"image_upload_receipt": {}, "target_package": {}, "duplicate_check": {},
 	"target_torrent_receipt": {}, "preupload_duplicate_check": {}, "target_upload_receipt": {},
 	"target_torrent_download_receipt": {}, "target_injection_receipt": {},

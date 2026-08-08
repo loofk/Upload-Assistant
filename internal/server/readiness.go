@@ -28,6 +28,7 @@ func (api liveReadinessAPI) check(w http.ResponseWriter, r *http.Request) {
 		Source: strings.TrimSpace(r.URL.Query().Get("source")), Target: strings.TrimSpace(r.URL.Query().Get("target")),
 		Downloader: strings.TrimSpace(r.URL.Query().Get("downloader")), TargetDownloader: strings.TrimSpace(r.URL.Query().Get("target_downloader")),
 		ImageHost: strings.TrimSpace(r.URL.Query().Get("image_host")), ScreenshotProfile: strings.TrimSpace(r.URL.Query().Get("screenshot_profile")),
+		TMDbProvider: strings.TrimSpace(r.URL.Query().Get("tmdb_provider")), PTGenProvider: strings.TrimSpace(r.URL.Query().Get("ptgen_provider")),
 	}
 	report, err := api.service.Check(r.Context(), input)
 	if err != nil {
