@@ -1,0 +1,147 @@
+package rules
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseYAMLRuleAndStableFingerprint(t *testing.T) {
+	raw := testRuleMarkdown(false)
+	document, err := ParseMarkdown([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseMarkdown() error = %v", err)
+	}
+	if document.Site.Code != "U2" || document.Source.Complete || document.Format != "yaml" {
+		t.Fatalf("unexpected document: site=%s complete=%t format=%s", document.Site.Code, document.Source.Complete, document.Format)
+	}
+	if !document.Transfer.ForbidOriginalTorrent || !document.Transfer.PreserveContent {
+		t.Fatal("hard transfer rules were not parsed")
+	}
+	fingerprint, err := document.Fingerprint()
+	if err != nil {
+		t.Fatalf("Fingerprint() error = %v", err)
+	}
+	document.Review.Status = "approved"
+	document.Review.Reviewer = "someone"
+	again, err := document.Fingerprint()
+	if err != nil {
+		t.Fatalf("Fingerprint() second error = %v", err)
+	}
+	if fingerprint != again {
+		t.Fatal("review metadata changed immutable rule fingerprint")
+	}
+}
+
+func TestParseLegacyTOMLRule(t *testing.T) {
+	raw := `+++
+schema_version = 1
+kind = "ptcli.site_rule_document.v1"
+tracker = "CHD"
+display_name = "CHDBits"
+roles = ["source"]
+rules_url = "https://ptchdbits.co/rules.php"
+captured_at = "2026-08-08"
+source_complete = false
+source_scope = "User supplied rules"
+review_status = "draft"
+
+[automation]
+manual_review_required = true
+download = true
+upload = false
+retorrent = true
+
+[qbit_limits]
+download_limit = "20MiB/s"
+
+[seeding_requirements]
+min_seed_time_hours = 72
+
+[transfer_rules]
+freeleech_required = false
+
+[[obligations]]
+id = "chd-no-direct-torrent-reuse"
+scope = "retorrent"
+verification = "programmatic"
+blocking = true
+resolution = "pending"
+description = "Do not reuse source torrent"
+enforcement = "Generate a new torrent"
++++
+
+# Original rules
+
+Do not upload the source torrent to another tracker.
+`
+	document, err := ParseMarkdown([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseMarkdown() legacy error = %v", err)
+	}
+	if document.Kind != Kind || document.Site.Code != "CHD" || document.Format != "toml" {
+		t.Fatalf("unexpected legacy document: kind=%s site=%s format=%s", document.Kind, document.Site.Code, document.Format)
+	}
+	if len(document.Obligations) != 1 || document.Obligations[0].ID != "chd-no-direct-torrent-reuse" {
+		t.Fatalf("legacy obligations = %#v", document.Obligations)
+	}
+}
+
+func TestRuleTextSHA256MismatchIsRejected(t *testing.T) {
+	raw := strings.Replace(testRuleMarkdown(false), "text_sha256: \"\"", "text_sha256: deadbeef", 1)
+	if _, err := ParseMarkdown([]byte(raw)); err == nil {
+		t.Fatal("ParseMarkdown() checksum error = nil")
+	}
+}
+
+func testRuleMarkdown(complete bool) string {
+	completeValue := "false"
+	if complete {
+		completeValue = "true"
+	}
+	return `---
+schema_version: 1
+kind: upload-assistant.site-rule.v1
+site:
+  code: U2
+  display_name: U2
+  roles: [source]
+source:
+  url: https://u2.dmhy.org/rules.php
+  captured_at: "2026-08-08"
+  complete: ` + completeValue + `
+  scope: User supplied source and transfer rules
+  text_sha256: ""
+automation:
+  manual_review_required: true
+  download: true
+  upload: false
+  retorrent: true
+  auto_pull: false
+  auto_upload: false
+limits:
+  download: 20MiB/s
+seeding:
+  minimum_time_hours: 72
+transfer:
+  freeleech_required: false
+  forbid_original_torrent: true
+  preserve_content: true
+obligations:
+  - id: u2-origin-repost-restrictions
+    scope: source_download
+    verification: manual
+    blocking: true
+    resolution: pending
+    description: Verify original repost restrictions
+    evidence_refs: [rule-6]
+    enforcement: Stop when the source permission cannot be established
+notes: []
+review:
+  status: draft
+---
+
+# Original rules
+
+Do not upload the source torrent to another tracker.
+`
+}

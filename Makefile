@@ -1,6 +1,7 @@
-.PHONY: help lint lint-ptcli test test-ptcli test-legacy check check-ptcli verify-ptcli-local verify-ptcli-seedbox-handoff smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live
+.PHONY: help lint lint-ptcli test test-ptcli test-legacy check check-ptcli verify-ptcli-local verify-ptcli-seedbox-handoff smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live go-fmt go-lint go-test go-build go-check go-compose-config
 
 PYTHON ?= python3
+GO ?= go
 
 help: ## 查看所有可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -53,3 +54,21 @@ smoke-ptcli: ## 快速导入检查（验证聚焦版 PT CLI 可正常导入）
 
 test-live: ## 运行实时集成测试（需要 data/cookies + data/config.py）
 	$(PYTHON) -m pytest -m live -v --tb=short
+
+go-fmt: ## 格式化 Go 源码
+	gofmt -w cmd internal migrations
+
+go-lint: ## 检查 Go 格式和静态问题
+	test -z "$$(gofmt -l cmd internal migrations)"
+	$(GO) vet ./...
+
+go-test: ## 运行 Go 单元测试
+	$(GO) test ./...
+
+go-build: ## 构建 Go 服务
+	$(GO) build -o tmp/upload-assistant-v2 ./cmd/upload-assistant
+
+go-compose-config: ## 校验 Go/PostgreSQL Compose 配置
+	docker compose -f docker-compose.go.yml config --quiet
+
+go-check: go-lint go-test go-build ## 执行 Go 基础门禁

@@ -1,0 +1,40 @@
+FROM golang:1.26-bookworm AS go-builder
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILT_AT=unknown
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY migrations/ migrations/
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w -X github.com/loofk/upload-assistant/v2/internal/buildinfo.version=${VERSION:-dev} -X github.com/loofk/upload-assistant/v2/internal/buildinfo.commit=${COMMIT:-unknown} -X github.com/loofk/upload-assistant/v2/internal/buildinfo.builtAt=${BUILT_AT:-unknown}" \
+    -o /out/upload-assistant ./cmd/upload-assistant
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    mediainfo \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1000 upload-assistant \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin upload-assistant \
+    && mkdir -p /data/artifacts /data/rules /data/tmp /downloads \
+    && chown -R upload-assistant:upload-assistant /data /downloads
+
+COPY --from=go-builder /out/upload-assistant /usr/local/bin/upload-assistant
+
+USER 1000:1000
+EXPOSE 8080
+VOLUME ["/data", "/downloads"]
+
+ENTRYPOINT ["/usr/local/bin/upload-assistant"]
+CMD ["serve"]
