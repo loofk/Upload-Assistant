@@ -36,11 +36,23 @@ func registerIntegrationRoutes(mux *http.ServeMux, service IntegrationService) {
 	mux.HandleFunc("PUT /api/v2/sites/{site_code}/credentials/{credential_name}", api.putSiteCredential)
 	mux.HandleFunc("POST /api/v2/sites/{site_code}/credentials/{credential_name}/disable", api.disableSiteCredential)
 	mux.HandleFunc("GET /api/v2/downloaders", api.listDownloaders)
+	mux.HandleFunc("GET /api/v2/downloader-adapters", api.listDownloaderAdapters)
 	mux.HandleFunc("PUT /api/v2/downloaders/{name}", api.putDownloader)
 	mux.HandleFunc("GET /api/v2/image-hosts", api.listImageHosts)
 	mux.HandleFunc("PUT /api/v2/image-hosts/{name}", api.putImageHost)
 	mux.HandleFunc("GET /api/v2/screenshot-profiles", api.listScreenshotProfiles)
 	mux.HandleFunc("POST /api/v2/screenshot-profiles", api.createScreenshotProfile)
+}
+
+func (api integrationsAPI) listDownloaderAdapters(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "config:read"); !ok {
+		return
+	}
+	items := integrations.DownloaderAdapterCapabilities()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": "ready", "count": len(items), "adapters": items,
+		"blockers": []any{}, "next_actions": []any{},
+	})
 }
 
 func (api integrationsAPI) listSiteCredentials(w http.ResponseWriter, r *http.Request) {

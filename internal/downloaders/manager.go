@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -25,6 +26,15 @@ type ConfigurationStore interface {
 
 type Manager struct {
 	store ConfigurationStore
+}
+
+type torrentClient interface {
+	Probe(context.Context) (qbittorrent.ProbeResult, error)
+	Get(context.Context, string) (qbittorrent.Torrent, error)
+	Files(context.Context, string) ([]qbittorrent.TorrentFile, error)
+	Add(context.Context, []byte, qbittorrent.AddOptions) (qbittorrent.AddResult, error)
+	SetLimits(context.Context, string, int64, int64) error
+	WaitComplete(context.Context, string, time.Duration) (qbittorrent.Torrent, error)
 }
 
 type TorrentEvidence struct {
@@ -62,7 +72,7 @@ func NewManager(store ConfigurationStore) *Manager {
 }
 
 func (manager *Manager) Probe(ctx context.Context, name string, actor workflow.Actor) (qbittorrent.ProbeResult, error) {
-	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	runtime, client, err := manager.client(ctx, name)
 	if err != nil {
 		return qbittorrent.ProbeResult{}, err
 	}
@@ -82,7 +92,7 @@ func (manager *Manager) Probe(ctx context.Context, name string, actor workflow.A
 }
 
 func (manager *Manager) Inspect(ctx context.Context, name, hash string, actor workflow.Actor) (TorrentEvidence, error) {
-	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	runtime, client, err := manager.client(ctx, name)
 	if err != nil {
 		return TorrentEvidence{}, err
 	}
@@ -101,7 +111,7 @@ func (manager *Manager) Inspect(ctx context.Context, name, hash string, actor wo
 }
 
 func (manager *Manager) Files(ctx context.Context, name, hash string, actor workflow.Actor) (TorrentFilesEvidence, error) {
-	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	runtime, client, err := manager.client(ctx, name)
 	if err != nil {
 		return TorrentFilesEvidence{}, err
 	}
@@ -140,12 +150,22 @@ func (manager *Manager) Files(ctx context.Context, name, hash string, actor work
 }
 
 func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, options qbittorrent.AddOptions, actor workflow.Actor) (AddEvidence, error) {
-	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	runtime, client, err := manager.client(ctx, name)
 	if err != nil {
 		return AddEvidence{}, err
 	}
 	result, err := client.Add(ctx, metainfo, options)
 	if err != nil {
+		var partial *transmission.PartialAddError
+		if errors.As(err, &partial) {
+			auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			_ = manager.store.AuditDownloaderAction(auditCtx, name, "torrent.add_partial", map[string]any{
+				"observed_hash": partial.Hash, "v1_infohash": result.Hashes.V1SHA1, "v2_infohash": result.Hashes.V2SHA256,
+				"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
+				"reconciliation_required": true, "error": safeError(partial.Err),
+			}, actor)
+		}
 		return AddEvidence{}, err
 	}
 	torrentSHA := sha256.Sum256(metainfo)
@@ -171,7 +191,7 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 }
 
 func (manager *Manager) SetLimits(ctx context.Context, name, hash string, downloadBytesPerSecond, uploadBytesPerSecond int64, actor workflow.Actor) (TorrentEvidence, error) {
-	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	runtime, client, err := manager.client(ctx, name)
 	if err != nil {
 		return TorrentEvidence{}, err
 	}
@@ -194,7 +214,7 @@ func (manager *Manager) SetLimits(ctx context.Context, name, hash string, downlo
 }
 
 func (manager *Manager) WaitComplete(ctx context.Context, name, hash string, interval time.Duration, actor workflow.Actor) (TorrentEvidence, error) {
-	runtime, client, err := manager.qbittorrentClient(ctx, name)
+	runtime, client, err := manager.client(ctx, name)
 	if err != nil {
 		return TorrentEvidence{}, err
 	}
@@ -213,19 +233,25 @@ func (manager *Manager) WaitComplete(ctx context.Context, name, hash string, int
 	return evidence, nil
 }
 
-func (manager *Manager) qbittorrentClient(ctx context.Context, name string) (integrations.RuntimeDownloader, *qbittorrent.Client, error) {
+func (manager *Manager) client(ctx context.Context, name string) (integrations.RuntimeDownloader, torrentClient, error) {
 	runtime, err := manager.store.GetRuntimeDownloader(ctx, name)
 	if err != nil {
 		return integrations.RuntimeDownloader{}, nil, err
 	}
-	if runtime.Adapter != "qbittorrent" {
+	timeout := time.Duration(runtime.EndpointConfig.TimeoutSeconds) * time.Second
+	var client torrentClient
+	switch runtime.Adapter {
+	case "qbittorrent":
+		client, err = qbittorrent.New(qbittorrent.Config{
+			Endpoint: runtime.EndpointConfig.Endpoint, Timeout: timeout, Credentials: runtime.Credentials,
+		})
+	case "transmission":
+		client, err = transmission.New(transmission.Config{
+			Endpoint: runtime.EndpointConfig.Endpoint, Timeout: timeout, Credentials: runtime.Credentials,
+		})
+	default:
 		return integrations.RuntimeDownloader{}, nil, fmt.Errorf("%w: %s", ErrAdapterUnavailable, runtime.Adapter)
 	}
-	client, err := qbittorrent.New(qbittorrent.Config{
-		Endpoint:    runtime.EndpointConfig.Endpoint,
-		Timeout:     time.Duration(runtime.EndpointConfig.TimeoutSeconds) * time.Second,
-		Credentials: runtime.Credentials,
-	})
 	if err != nil {
 		return integrations.RuntimeDownloader{}, nil, err
 	}

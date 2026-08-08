@@ -90,6 +90,38 @@ func TestManagerProbeInspectAndPathMapping(t *testing.T) {
 	}
 }
 
+func TestManagerDispatchesTransmissionRuntime(t *testing.T) {
+	const sessionID = "manager-transmission-session"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") != sessionID {
+			w.Header().Set("X-Transmission-Session-Id", sessionID)
+			http.Error(w, "session required", http.StatusConflict)
+			return
+		}
+		var request struct {
+			Tag int64 `json:"tag"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": "success", "tag": request.Tag,
+			"arguments": map[string]any{"version": "4.0.6", "rpc-version": 17, "rpc-version-minimum": 14},
+		})
+	}))
+	t.Cleanup(server.Close)
+	store := &fakeConfigurationStore{runtime: integrations.RuntimeDownloader{
+		Downloader:     integrations.Downloader{Name: "transmission", Adapter: "transmission", Enabled: true},
+		EndpointConfig: integrations.EndpointConfig{Endpoint: server.URL, TimeoutSeconds: 5},
+		Credentials:    map[string]string{},
+	}}
+	probe, err := NewManager(store).Probe(context.Background(), "transmission", workflow.Actor{Type: "test", ID: "manager"})
+	if err != nil || probe.ApplicationVersion != "4.0.6" || store.healthStatus != "ready" {
+		t.Fatalf("Probe() result/health/error = %#v/%s/%v", probe, store.healthStatus, err)
+	}
+}
+
 func TestMapPathUsesPathBoundary(t *testing.T) {
 	mapping := integrations.PathMapping{RemotePath: "/remote/downloads", LocalPath: "/downloads"}
 	if mapped, ok := mapPath("/remote/downloads/release/file.mkv", mapping); !ok || mapped != "/downloads/release/file.mkv" {

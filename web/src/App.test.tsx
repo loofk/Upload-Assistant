@@ -25,6 +25,7 @@ describe("App authentication boundary", () => {
       const path = String(input);
       const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
         : path === "/api/v2/downloaders" ? {downloaders: []}
+				: path === "/api/v2/downloader-adapters" ? {adapters: [{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: [], operations: {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: true, tags: true, skip_checking: true}}]}
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
         : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
         : path === "/api/v2/sites" ? {sites: []}
@@ -72,6 +73,7 @@ describe("App authentication boundary", () => {
       const path = String(input);
       const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
         : path === "/api/v2/downloaders" ? {downloaders: []}
+				: path === "/api/v2/downloader-adapters" ? {adapters: [{adapter: "qbittorrent", display_name: "qBittorrent", runtime_supported: true, credential_fields: [], operations: {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: true, tags: true, skip_checking: true}}]}
         : path === "/api/v2/image-hosts" ? {image_hosts: []}
         : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
         : path === "/api/v2/sites" ? {sites: []}

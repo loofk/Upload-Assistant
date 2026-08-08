@@ -19,8 +19,6 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
-var downloaderAdapters = []string{"qbittorrent", "rtorrent", "deluge", "transmission"}
-
 type Store struct {
 	pool    *pgxpool.Pool
 	secrets *security.SecretStore
@@ -215,8 +213,16 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	if err := validateResourceName("downloader", name); err != nil {
 		return Downloader{}, err
 	}
-	if !slices.Contains(downloaderAdapters, input.Adapter) {
+	capability, exists := DownloaderAdapterCapabilityFor(input.Adapter)
+	if !exists {
 		return Downloader{}, fmt.Errorf("%w: unsupported downloader adapter %q", ErrValidation, input.Adapter)
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	if enabled && !capability.RuntimeSupported {
+		return Downloader{}, fmt.Errorf("%w: downloader adapter %q cannot be enabled: %s", ErrValidation, input.Adapter, capability.UnavailableReason)
 	}
 	config, err := validateEndpointConfig(input.Config)
 	if err != nil {
@@ -238,10 +244,6 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 			return Downloader{}, err
 		}
 		newSecretID = secretID
-	}
-	enabled := true
-	if input.Enabled != nil {
-		enabled = *input.Enabled
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -299,6 +301,7 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	} else {
 		downloader.CredentialFields = credentialFields
 	}
+	attachDownloaderCapability(&downloader)
 	return downloader, err
 }
 
@@ -331,6 +334,7 @@ func (s *Store) ListDownloaders(ctx context.Context) ([]Downloader, error) {
 		if err != nil {
 			return nil, err
 		}
+		attachDownloaderCapability(&item)
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -359,6 +363,11 @@ func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeD
 	if !runtime.Enabled {
 		return RuntimeDownloader{}, fmt.Errorf("%w: downloader is disabled", ErrValidation)
 	}
+	capability, exists := DownloaderAdapterCapabilityFor(runtime.Adapter)
+	if !exists || !capability.RuntimeSupported {
+		return RuntimeDownloader{}, fmt.Errorf("%w: downloader adapter %q has no native runtime", ErrValidation, runtime.Adapter)
+	}
+	runtime.AdapterCapability = capability
 	runtime.LastHealthCheck = timePointer(healthChecked)
 	if err := json.Unmarshal(runtime.Config, &runtime.EndpointConfig); err != nil {
 		return RuntimeDownloader{}, fmt.Errorf("decode runtime downloader config: %w", err)

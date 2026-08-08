@@ -15,6 +15,7 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
+	"github.com/loofk/upload-assistant/v2/internal/downloaders/transmission"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
@@ -339,6 +340,7 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	code := "downloader_request_failed"
 	action := "retry_step"
 	description := "Verify downloader availability, then resume this step."
+	var partialAdd *transmission.PartialAddError
 	switch {
 	case errors.Is(err, integrations.ErrNotFound):
 		code, action = "downloader_configuration_required", "configure_downloader"
@@ -349,16 +351,22 @@ func downloaderBlock(err error, name, operation string, evidence map[string]any)
 	case errors.Is(err, downloaders.ErrAdapterUnavailable):
 		code, action = "downloader_adapter_unavailable", "install_downloader_adapter"
 		description = "Use a supported downloader adapter or implement the configured adapter."
+	case errors.As(err, &partialAdd):
+		code, action = "downloader_partial_add_requires_reconciliation", "inspect_torrent_before_retry"
+		description = "The torrent was added, but applying mandatory settings failed. Inspect this exact hash before resuming; a duplicate add is idempotent."
 	case errors.Is(err, qbittorrent.ErrUnauthorized):
 		code, action = "downloader_authentication_failed", "configure_downloader_credentials"
 		description = "Refresh encrypted qBittorrent credentials before resuming."
 	case errors.Is(err, qbittorrent.ErrNotFound):
 		code, action = "downloader_torrent_not_observed", "retry_step"
-		description = "Wait for qBittorrent to observe the torrent, then resume this step."
+		description = "Wait for the configured downloader to observe the torrent, then resume this step."
 	}
 	parameters := map[string]any{"downloader_name": name, "operation": operation}
 	for key, value := range evidence {
 		parameters[key] = value
+	}
+	if partialAdd != nil {
+		parameters["observed_hash"] = partialAdd.Hash
 	}
 	return &BlockError{
 		Blockers:    []Blocker{{Code: code, Message: err.Error()}},

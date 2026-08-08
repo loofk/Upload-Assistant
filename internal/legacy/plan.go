@@ -384,9 +384,13 @@ func (plan *Plan) buildDownloaders(defaults, clients map[string]any) {
 			continue
 		}
 		clientType := strings.ToLower(usefulString(section["torrent_client"]))
+		if clientType == "transmission" {
+			plan.buildTransmissionDownloader(defaultName, name, section)
+			continue
+		}
 		if clientType != "qbit" && clientType != "qbittorrent" {
 			if clientType != "" {
-				plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_downloader_adapter_deferred", Resource: name, Message: "当前 Go 运行时仅执行 qBittorrent；该下载器需在对应 adapter 完成后手工配置。"})
+				plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_downloader_adapter_deferred", Resource: name, Message: "当前 Go 运行时尚未执行该下载器；配置需在对应 adapter 完成后手工迁移。"})
 			}
 			continue
 		}
@@ -433,6 +437,94 @@ func (plan *Plan) buildDownloaders(defaults, clients map[string]any) {
 			plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_speed_limits_require_rule_review", Resource: name, Message: "旧下载器限速不会覆盖已审批站点规则，需在规则 Markdown 中人工复核。"})
 		}
 	}
+}
+
+func (plan *Plan) buildTransmissionDownloader(defaultName, name string, section map[string]any) {
+	endpoint, loopback, err := legacyTransmissionEndpoint(section)
+	if err != nil {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_transmission_endpoint_invalid", Resource: name, Message: "Transmission RPC 地址无法安全转换，已跳过。"})
+		return
+	}
+	credentials := map[string]string{}
+	username := usefulString(section["transmission_username"])
+	password := usefulString(section["transmission_password"])
+	credentialsComplete := username == "" && password == ""
+	if username != "" && password != "" {
+		credentials["username"], credentials["password"] = username, password
+		credentialsComplete = true
+	} else if username != "" || password != "" {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "legacy_transmission_credentials_incomplete", Resource: name, Message: "Transmission 用户名和密码不完整；配置会保持禁用。"})
+	}
+	enabled := (defaultName == "" || name == defaultName) && !loopback && credentialsComplete
+	if loopback {
+		plan.Warnings = append(plan.Warnings, Issue{Code: "container_loopback_requires_review", Resource: name, Message: "旧地址指向 127.0.0.1/localhost，在容器中不是盒子宿主机；配置会保持禁用。"})
+	}
+	mappings, mappingWarnings := legacyPathMappings(section)
+	plan.Warnings = append(plan.Warnings, mappingWarnings...)
+	options := map[string]any{}
+	if label := usefulString(section["transmission_label"]); label != "" {
+		options["label"] = label
+	}
+	plan.downloaders = append(plan.downloaders, downloaderOperation{name: name, input: integrations.DownloaderInput{
+		Adapter: "transmission", Enabled: boolPointer(enabled),
+		Config:      integrations.EndpointConfig{Endpoint: endpoint, TimeoutSeconds: 30, Options: options},
+		Credentials: credentials, PathMappings: mappings,
+	}})
+	plan.Resources = append(plan.Resources, ResourcePreview{
+		Kind: "downloader", Name: name, Adapter: "transmission", Enabled: enabled,
+		CredentialFields: sortedKeys(credentials),
+		Configuration:    map[string]any{"endpoint": endpoint, "path_mapping_count": len(mappings), "options": options},
+	})
+}
+
+func legacyTransmissionEndpoint(section map[string]any) (string, bool, error) {
+	protocol := strings.ToLower(usefulString(section["transmission_protocol"]))
+	if protocol == "" {
+		protocol = "http"
+	}
+	if protocol != "http" && protocol != "https" {
+		return "", false, errors.New("transmission_protocol is invalid")
+	}
+	host := usefulString(section["transmission_host"])
+	if host == "" || strings.ContainsAny(host, "/?#@") {
+		return "", false, errors.New("transmission_host is invalid")
+	}
+	parsed, err := url.Parse(protocol + "://" + host)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" {
+		return "", false, errors.New("transmission_host is unsafe")
+	}
+	port := 9091
+	if rawPort, exists := section["transmission_port"]; exists && rawPort != nil {
+		value, err := integerValue(rawPort)
+		if err != nil || value < 1 || value > 65535 {
+			return "", false, errors.New("transmission_port is invalid")
+		}
+		port = value
+	}
+	portText := strconv.Itoa(port)
+	if parsed.Port() != "" && parsed.Port() != portText {
+		return "", false, errors.New("transmission ports conflict")
+	}
+	parsed.Host = net.JoinHostPort(parsed.Hostname(), portText)
+	rpcPath := usefulString(section["transmission_path"])
+	if rpcPath == "" {
+		rpcPath = "/transmission/rpc"
+	}
+	if !strings.HasPrefix(rpcPath, "/") || filepath.Clean(rpcPath) != rpcPath {
+		return "", false, errors.New("transmission_path is invalid")
+	}
+	for _, segment := range strings.Split(strings.Trim(rpcPath, "/"), "/") {
+		if secretPathSegment.MatchString(segment) {
+			return "", false, errors.New("transmission_path may contain a credential")
+		}
+	}
+	parsed.Path = rpcPath
+	hostname := strings.ToLower(parsed.Hostname())
+	loopback := hostname == "localhost"
+	if address := net.ParseIP(hostname); address != nil && address.IsLoopback() {
+		loopback = true
+	}
+	return parsed.String(), loopback, nil
 }
 
 func legacyQBitEndpoint(section map[string]any) (string, bool, error) {

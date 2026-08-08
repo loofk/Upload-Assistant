@@ -45,8 +45,8 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	var secretIDs []string
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloader_path_mappings WHERE downloader_id IN (SELECT id FROM downloaders WHERE name = $1)", "qbit-"+nameSuffix)
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloaders WHERE name = $1", "qbit-"+nameSuffix)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloader_path_mappings WHERE downloader_id IN (SELECT id FROM downloaders WHERE name = ANY($1))", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "deluge-" + nameSuffix})
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM downloaders WHERE name = ANY($1)", []string{"qbit-" + nameSuffix, "transmission-" + nameSuffix, "deluge-" + nameSuffix})
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM image_hosts WHERE name = $1", "imgbb-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM screenshot_profiles WHERE name = $1", "default-"+nameSuffix)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM site_credentials WHERE name = $1", "cookie-"+nameSuffix)
@@ -106,7 +106,7 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertDownloader() error = %v", err)
 	}
-	if len(downloader.CredentialFields) != 2 || len(downloader.PathMappings) != 1 {
+	if len(downloader.CredentialFields) != 2 || len(downloader.PathMappings) != 1 || !downloader.AdapterCapability.RuntimeSupported {
 		t.Fatalf("downloader credential fields/mappings = %#v/%#v", downloader.CredentialFields, downloader.PathMappings)
 	}
 	runtimeDownloader, err := store.GetRuntimeDownloader(ctx, downloader.Name)
@@ -134,6 +134,29 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 		if item.ID == downloader.ID && item.HealthStatus != "ready" {
 			t.Fatalf("downloader health status = %s", item.HealthStatus)
 		}
+	}
+
+	transmission, err := store.UpsertDownloader(ctx, "transmission-"+nameSuffix, DownloaderInput{
+		Adapter: "transmission", Enabled: &enabled,
+		Config: EndpointConfig{Endpoint: "http://host.docker.internal:9091/transmission/rpc"},
+	}, actor)
+	if err != nil || !transmission.Enabled || !transmission.AdapterCapability.RuntimeSupported || transmission.AdapterCapability.Operations.SkipChecking {
+		t.Fatalf("Transmission downloader/error = %#v/%v", transmission, err)
+	}
+	disabled := false
+	deluge, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{
+		Adapter: "deluge", Enabled: &disabled,
+		Config: EndpointConfig{Endpoint: "http://host.docker.internal:8112"},
+	}, actor)
+	if err != nil || deluge.Enabled || deluge.AdapterCapability.RuntimeSupported || deluge.AdapterCapability.UnavailableReason == "" {
+		t.Fatalf("disabled Deluge downloader/error = %#v/%v", deluge, err)
+	}
+	if _, err := store.UpsertDownloader(ctx, "deluge-"+nameSuffix, DownloaderInput{
+		Adapter: "deluge", Enabled: &enabled,
+		Config:      EndpointConfig{Endpoint: "http://host.docker.internal:8112"},
+		Credentials: map[string]string{"password": "must-not-be-stored"},
+	}, actor); err == nil {
+		t.Fatal("UpsertDownloader() enabled an unavailable Deluge runtime")
 	}
 
 	imageHost, err := store.UpsertImageHost(ctx, "imgbb-"+nameSuffix, ImageHostInput{

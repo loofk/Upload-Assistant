@@ -99,6 +99,41 @@ func TestInspectDisablesContainerLoopbackDownloader(t *testing.T) {
 	}
 }
 
+func TestInspectMigratesTransmissionWithoutExposingCredentials(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "DEFAULT": {"default_torrent_client": "transmission"},
+  "TORRENT_CLIENTS": {"transmission": {
+    "torrent_client": "transmission", "transmission_protocol": "https",
+    "transmission_host": "seedbox.example", "transmission_port": 9091,
+    "transmission_path": "/transmission/rpc", "transmission_username": "operator",
+    "transmission_password": "private-password", "transmission_label": "retorrent",
+    "local_path": ["/downloads"], "remote_path": ["/srv/downloads"]
+  }}
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.downloaders) != 1 {
+		t.Fatalf("downloaders = %#v", plan.downloaders)
+	}
+	operation := plan.downloaders[0]
+	if operation.input.Adapter != "transmission" || operation.input.Enabled == nil || !*operation.input.Enabled ||
+		operation.input.Config.Endpoint != "https://seedbox.example:9091/transmission/rpc" ||
+		operation.input.Credentials["username"] != "operator" || operation.input.Credentials["password"] != "private-password" ||
+		len(operation.input.PathMappings) != 1 {
+		t.Fatalf("Transmission operation = %#v", operation)
+	}
+	serialized, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(serialized), "private-password") || !strings.Contains(string(serialized), `"adapter":"transmission"`) {
+		t.Fatalf("redacted Transmission preview = %s", serialized)
+	}
+}
+
 func TestInspectRejectsSymlinkAndExecutableConfig(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(t.TempDir(), "config.py")

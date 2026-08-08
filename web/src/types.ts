@@ -147,6 +147,25 @@ export interface PathMapping {
   priority?: number;
 }
 
+export interface DownloaderAdapterCapability {
+  adapter: string;
+  display_name: string;
+  runtime_supported: boolean;
+  credential_fields: string[];
+  operations: {
+    probe: boolean;
+    add_torrent: boolean;
+    inspect: boolean;
+    list_files: boolean;
+    set_limits: boolean;
+    wait_complete: boolean;
+    category: boolean;
+    tags: boolean;
+		skip_checking: boolean;
+  };
+  unavailable_reason?: string;
+}
+
 export interface Downloader {
   id: string;
   name: string;
@@ -159,6 +178,7 @@ export interface Downloader {
   last_health_check_at?: string;
   created_at: string;
   updated_at: string;
+  adapter_capability: DownloaderAdapterCapability;
 }
 
 export interface ImageHost {

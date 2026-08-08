@@ -1,12 +1,13 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from "react";
 import {ApiClient} from "./api";
-import type {Downloader, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
+import type {Downloader, DownloaderAdapterCapability, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
 
 type ConfigTab = "downloaders" | "image-hosts" | "screenshots" | "rules" | "migration";
 
 export default function Configuration({client, onError}: {client: ApiClient; onError: (reason: unknown) => void}) {
   const [tab, setTab] = useState<ConfigTab>("downloaders");
   const [downloaders, setDownloaders] = useState<Downloader[]>([]);
+	const [downloaderAdapters, setDownloaderAdapters] = useState<DownloaderAdapterCapability[]>([]);
   const [imageHosts, setImageHosts] = useState<ImageHost[]>([]);
   const [screenshots, setScreenshots] = useState<ScreenshotProfile[]>([]);
   const [sites, setSites] = useState<SiteSummary[]>([]);
@@ -15,10 +16,11 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextDownloaders, nextImageHosts, nextScreenshots, nextSites] = await Promise.all([
-        client.listDownloaders(), client.listImageHosts(), client.listScreenshotProfiles(), client.listSites(),
+		const [nextDownloaders, nextDownloaderAdapters, nextImageHosts, nextScreenshots, nextSites] = await Promise.all([
+			client.listDownloaders(), client.listDownloaderAdapters(), client.listImageHosts(), client.listScreenshotProfiles(), client.listSites(),
       ]);
       setDownloaders(nextDownloaders);
+		setDownloaderAdapters(nextDownloaderAdapters);
       setImageHosts(nextImageHosts);
       setScreenshots(nextScreenshots);
       setSites(nextSites);
@@ -41,7 +43,7 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
         {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
       </button>)}
     </nav>
-    {tab === "downloaders" && <DownloadersPanel items={downloaders} client={client} reload={reload} onError={onError} />}
+		{tab === "downloaders" && <DownloadersPanel items={downloaders} adapters={downloaderAdapters} client={client} reload={reload} onError={onError} />}
     {tab === "image-hosts" && <ImageHostsPanel items={imageHosts} client={client} reload={reload} onError={onError} />}
     {tab === "screenshots" && <ScreenshotsPanel items={screenshots} client={client} reload={reload} onError={onError} />}
     {tab === "rules" && <RulesPanel sites={sites} client={client} reloadSites={reload} onError={onError} />}
@@ -100,8 +102,8 @@ function formatBytes(value: number): string {
   return `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
 
-function DownloadersPanel({items, client, reload, onError}: {items: Downloader[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
-  const [form, setForm] = useState({name: "default", adapter: "qbittorrent", endpoint: "http://host.docker.internal:8080", username: "", password: "", apiKey: "", remote: "/downloads", local: "/downloads"});
+function DownloadersPanel({items, adapters, client, reload, onError}: {items: Downloader[]; adapters: DownloaderAdapterCapability[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
+	const [form, setForm] = useState({name: "default", adapter: "qbittorrent", enabled: true, endpoint: "http://host.docker.internal:8080", username: "", password: "", apiKey: "", remote: "/downloads", local: "/downloads"});
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -112,7 +114,7 @@ function DownloadersPanel({items, client, reload, onError}: {items: Downloader[]
       if (form.username) credentials.username = form.username;
       if (form.password) credentials.password = form.password;
       await client.putDownloader(form.name, {
-        adapter: form.adapter, endpoint: form.endpoint, credentials,
+			adapter: form.adapter, enabled: form.enabled, endpoint: form.endpoint, credentials,
         pathMappings: form.remote && form.local ? [{remote_path: form.remote, local_path: form.local, priority: 100}] : [],
       });
       setForm((current) => ({...current, username: "", password: "", apiKey: ""}));
@@ -120,10 +122,11 @@ function DownloadersPanel({items, client, reload, onError}: {items: Downloader[]
     } catch (reason) { onError(reason); } finally { setBusy(false); }
   };
   return <div className="config-layout"><section><ConfigSectionTitle title="远程下载器" copy="每个实例有独立 endpoint、加密凭据和远程→容器路径映射。" />
-    <div className="integration-grid">{items.map((item) => <IntegrationCard key={item.id} title={item.name} type={item.adapter} enabled={item.enabled} health={item.health_status} endpoint={item.config.endpoint} credentials={item.credential_fields} details={item.path_mappings.map((mapping) => `${mapping.remote_path} → ${mapping.local_path}`)} action={<button className="card-action" onClick={async () => { try { await client.probeDownloader(item.name); await reload(); } catch (reason) { onError(reason); } }}>显式探测</button>} />)}{!items.length && <ConfigEmpty text="尚未配置下载器。" />}</div>
+		<div className="integration-grid">{items.map((item) => <IntegrationCard key={item.id} title={item.name} type={item.adapter} enabled={item.enabled} health={item.health_status} endpoint={item.config.endpoint} credentials={item.credential_fields} details={[...item.path_mappings.map((mapping) => `${mapping.remote_path} → ${mapping.local_path}`), ...(item.adapter_capability?.unavailable_reason ? [item.adapter_capability.unavailable_reason] : [])]} action={<button className="card-action" disabled={!item.enabled || !item.adapter_capability?.runtime_supported} onClick={async () => { try { await client.probeDownloader(item.name); await reload(); } catch (reason) { onError(reason); } }}>显式探测</button>} />)}{!items.length && <ConfigEmpty text="尚未配置下载器。" />}</div>
   </section><ConfigForm title="添加或更新下载器" onSubmit={submit} busy={busy}>
     <label>配置名称<input value={form.name} required onChange={(event) => setForm({...form, name: event.target.value})} /></label>
-    <label>适配器<select value={form.adapter} onChange={(event) => setForm({...form, adapter: event.target.value})}><option value="qbittorrent">qBittorrent</option><option value="rtorrent">rTorrent</option><option value="deluge">Deluge</option><option value="transmission">Transmission</option></select></label>
+		<label>适配器<select value={form.adapter} onChange={(event) => { const adapter = event.target.value; const capability = adapters.find((item) => item.adapter === adapter); const endpoint = adapter === "transmission" ? "http://host.docker.internal:9091/transmission/rpc" : form.endpoint; setForm({...form, adapter, endpoint, enabled: capability?.runtime_supported ?? false}); }}>{adapters.map((item) => <option key={item.adapter} value={item.adapter}>{item.display_name}{item.runtime_supported ? "" : "（仅可禁用保存）"}</option>)}</select></label>
+		<label><input type="checkbox" checked={form.enabled} disabled={!adapters.find((item) => item.adapter === form.adapter)?.runtime_supported} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 启用运行时</label>
     <label className="full">服务地址<input type="url" value={form.endpoint} required onChange={(event) => setForm({...form, endpoint: event.target.value})} /></label>
     <label>用户名（可选）<input autoComplete="off" value={form.username} onChange={(event) => setForm({...form, username: event.target.value})} /></label>
     <label>密码（留空则保留）<input type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({...form, password: event.target.value})} /></label>

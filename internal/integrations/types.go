@@ -39,18 +39,43 @@ type DownloaderInput struct {
 	PathMappings []PathMapping     `json:"path_mappings,omitempty"`
 }
 
+type DownloaderOperations struct {
+	Probe        bool `json:"probe"`
+	AddTorrent   bool `json:"add_torrent"`
+	Inspect      bool `json:"inspect"`
+	ListFiles    bool `json:"list_files"`
+	SetLimits    bool `json:"set_limits"`
+	WaitComplete bool `json:"wait_complete"`
+	Category     bool `json:"category"`
+	Tags         bool `json:"tags"`
+	SkipChecking bool `json:"skip_checking"`
+}
+
+// DownloaderAdapterCapability is the authoritative public/runtime contract for
+// a downloader adapter. An adapter may remain in the catalog for safe config
+// migration while runtime_supported=false prevents it from being enabled.
+type DownloaderAdapterCapability struct {
+	Adapter           string               `json:"adapter"`
+	DisplayName       string               `json:"display_name"`
+	RuntimeSupported  bool                 `json:"runtime_supported"`
+	CredentialFields  []string             `json:"credential_fields"`
+	Operations        DownloaderOperations `json:"operations"`
+	UnavailableReason string               `json:"unavailable_reason,omitempty"`
+}
+
 type Downloader struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	Adapter          string          `json:"adapter"`
-	Enabled          bool            `json:"enabled"`
-	Config           json.RawMessage `json:"config"`
-	CredentialFields []string        `json:"credential_fields"`
-	PathMappings     []PathMapping   `json:"path_mappings"`
-	HealthStatus     string          `json:"health_status"`
-	LastHealthCheck  *time.Time      `json:"last_health_check_at,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	ID                string                      `json:"id"`
+	Name              string                      `json:"name"`
+	Adapter           string                      `json:"adapter"`
+	Enabled           bool                        `json:"enabled"`
+	Config            json.RawMessage             `json:"config"`
+	CredentialFields  []string                    `json:"credential_fields"`
+	PathMappings      []PathMapping               `json:"path_mappings"`
+	HealthStatus      string                      `json:"health_status"`
+	LastHealthCheck   *time.Time                  `json:"last_health_check_at,omitempty"`
+	CreatedAt         time.Time                   `json:"created_at"`
+	UpdatedAt         time.Time                   `json:"updated_at"`
+	AdapterCapability DownloaderAdapterCapability `json:"adapter_capability"`
 }
 
 type RuntimeDownloader struct {

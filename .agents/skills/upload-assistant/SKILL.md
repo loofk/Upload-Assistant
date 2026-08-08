@@ -33,7 +33,7 @@ Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use envir
 2. Poll with bounded intervals and report durable step transitions. Do not hide or reinterpret blockers.
 3. Require the exact active rule fingerprint and every unresolved manual obligation before accepting rules.
 4. Require explicit live-upload confirmation only after the user can review the immutable upload package, duplicate result, active rules, and remaining obligations.
-5. After upload, continue through target torrent download, qBittorrent injection, seeding verification, and final summary.
+5. After upload, continue through target torrent download, configured target-downloader injection, seeding verification, and final summary.
 6. Call the job complete only when the API reports `status=complete`, `ok=true`, no blockers, and a persisted `summary_file`.
 
 When an operator wants stepwise control, use `execution_mode=step` or `stop_after_step`. A paused job is an expected control boundary, not a failure.
@@ -64,6 +64,8 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 Rule changes follow an immutable review sequence: import Markdown as a draft, inspect the parsed policy and original text, have a human approve the exact fingerprint, then activate the approved revision. Missing, incomplete, unapproved, or stale rules must block automation.
 
 Credentials are write-only inputs. Confirm successful storage from redacted API responses; never try to read secrets back. Keep downloader path mappings explicit and validate them before running jobs.
+
+Before configuring or invoking a downloader, call `GET /api/v2/downloader-adapters` and honor `runtime_supported` plus every `operations` flag. An unavailable adapter may only be preserved disabled. Never enable it, probe it, or infer support from its name. Transmission reports `skip_checking=false`; do not request or simulate that behavior.
 
 ## Migrate Legacy Configuration
 

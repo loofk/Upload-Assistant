@@ -6,6 +6,7 @@ import type {
   DailyCandidateListEnvelope,
   EventsEnvelope,
   Downloader,
+	DownloaderAdapterCapability,
   ImageHost,
   JobEnvelope,
   JobListEnvelope,
@@ -168,16 +169,22 @@ export class ApiClient {
     return response.downloaders;
   }
 
+  async listDownloaderAdapters(): Promise<DownloaderAdapterCapability[]> {
+    const response = await this.request<{adapters: DownloaderAdapterCapability[]}>("/api/v2/downloader-adapters");
+    return response.adapters;
+  }
+
   async putDownloader(name: string, input: {
     adapter: string;
     endpoint: string;
     credentials: Record<string, string>;
     pathMappings: PathMapping[];
+		enabled: boolean;
   }): Promise<void> {
     await this.request(`/api/v2/downloaders/${encodeURIComponent(name)}`, {
       method: "PUT",
       body: JSON.stringify({
-        adapter: input.adapter, enabled: true,
+		adapter: input.adapter, enabled: input.enabled,
         config: {endpoint: input.endpoint, timeout_seconds: 30, options: {}},
         credentials: input.credentials, path_mappings: input.pathMappings,
       }),
