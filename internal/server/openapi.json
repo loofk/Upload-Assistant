@@ -302,6 +302,45 @@
     "/api/v2/screenshot-profiles": {
       "get": {"operationId": "listScreenshotProfiles", "responses": {"200": {"description": "Immutable screenshot profile revisions", "content": {"application/json": {"schema": {"type": "object"}}}}}},
       "post": {"operationId": "createScreenshotProfile", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScreenshotProfileInput"}}}}, "responses": {"201": {"description": "New screenshot profile revision created", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/migrations/legacy/preview": {
+      "get": {
+        "operationId": "previewLegacyMigration",
+        "description": "Parses only a single Python config literal from the fixed read-only legacy mount. Python is never executed and secret values are never returned.",
+        "responses": {
+          "200": {"description": "Redacted migration preview and source fingerprint", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LegacyMigrationPreview"}}}},
+          "404": {"$ref": "#/components/responses/Problem"},
+          "422": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/api/v2/migrations/legacy": {
+      "get": {
+        "operationId": "listLegacyMigrations",
+        "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}}],
+        "responses": {"200": {"description": "Redacted migration history and encrypted archive retention state", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LegacyMigrationListEnvelope"}}}}}
+      },
+      "post": {
+        "operationId": "executeLegacyMigration",
+        "description": "Imports a previously reviewed exact fingerprint. No external service is contacted and original files are never modified or deleted.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LegacyMigrationRequest"}}}},
+        "responses": {
+          "200": {"description": "An identical completed import returned idempotently without resource writes", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LegacyMigrationEnvelope"}}}},
+          "201": {"description": "Migration completed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LegacyMigrationEnvelope"}}}},
+          "409": {"$ref": "#/components/responses/Problem"},
+          "422": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/api/v2/migrations/legacy/{import_id}": {
+      "get": {
+        "operationId": "getLegacyMigration",
+        "parameters": [{"$ref": "#/components/parameters/ImportID"}],
+        "responses": {
+          "200": {"description": "One redacted migration report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LegacyMigrationEnvelope"}}}},
+          "404": {"$ref": "#/components/responses/Problem"}
+        }
+      }
     }
   },
   "components": {
@@ -311,6 +350,7 @@
     "parameters": {
       "JobID": {"name": "job_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "ArtifactID": {"name": "artifact_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "ImportID": {"name": "import_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "RevisionID": {"name": "revision_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "SiteCode": {"name": "site_code", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Z0-9_-]+$"}},
       "ResourceName": {"name": "name", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
@@ -340,6 +380,61 @@
         "required": ["action"],
         "properties": {"action": {"type": "string"}, "description": {"type": "string"}, "parameters": {"type": "object", "additionalProperties": true}},
         "additionalProperties": true
+      },
+      "LegacyMigrationIssue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "resource": {"type": "string"}}
+      },
+      "LegacyMigrationPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ok", "status", "source_kind", "source_fingerprint", "source_files", "resources", "archive", "blockers", "warnings", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean"},
+          "status": {"type": "string", "enum": ["ready", "blocked"]},
+          "source_kind": {"type": "string", "const": "upload_assistant_python_config"},
+          "source_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "source_files": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["path", "fingerprint", "size_bytes"], "properties": {"path": {"type": "string"}, "fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Master-keyed HMAC; never a plain hash of secret-bearing source content."}, "size_bytes": {"type": "integer", "minimum": 1}}}},
+          "resources": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "name", "enabled"], "properties": {"kind": {"type": "string"}, "name": {"type": "string"}, "adapter": {"type": "string"}, "enabled": {"type": "boolean"}, "credential_fields": {"type": "array", "items": {"type": "string"}}, "configuration": {"type": "object", "additionalProperties": true}}}},
+          "archive": {"type": "object", "additionalProperties": false, "required": ["encrypted", "retention_days", "file_count", "uncompressed_bytes", "deletes_originals", "plaintext_available_via_api"], "properties": {"encrypted": {"type": "boolean", "const": true}, "retention_days": {"type": "integer", "const": 30}, "file_count": {"type": "integer"}, "uncompressed_bytes": {"type": "integer"}, "deletes_originals": {"type": "boolean", "const": false}, "plaintext_available_via_api": {"type": "boolean", "const": false}}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyMigrationIssue"}},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyMigrationIssue"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyMigrationIssue"}}
+        }
+      },
+      "LegacyMigrationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_fingerprint", "confirm_import"],
+        "properties": {"source_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Exact master-keyed HMAC-SHA256 returned by preview; not a plain source hash."}, "confirm_import": {"type": "boolean", "const": true}}
+      },
+      "LegacyMigrationRecord": {
+        "type": "object",
+        "required": ["id", "ok", "status", "source_kind", "source_path", "source_fingerprint", "report", "archive_available", "archive_expires_at", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "ok": {"type": "boolean"},
+          "status": {"type": "string", "enum": ["running", "blocked", "failed", "complete"]},
+          "source_kind": {"type": "string"}, "source_path": {"type": "string"},
+          "source_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "report": {"type": "object", "additionalProperties": true},
+          "archive_available": {"type": "boolean"}, "archive_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 over encrypted archive metadata and ciphertext, never the plaintext archive."},
+          "archive_size_bytes": {"type": "integer"}, "archive_expires_at": {"type": "string", "format": "date-time"},
+          "archive_deleted_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}
+		  ,"idempotent_replay": {"type": "boolean"}
+        }
+      },
+      "LegacyMigrationEnvelope": {
+        "type": "object",
+        "required": ["ok", "status", "import_id", "source_fingerprint", "blockers", "next_actions", "summary", "import"],
+        "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "import_id": {"type": "string", "format": "uuid"}, "source_fingerprint": {"type": "string"}, "idempotent_replay": {"type": "boolean"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyMigrationIssue"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyMigrationIssue"}}, "summary": {"type": "string"}, "import": {"$ref": "#/components/schemas/LegacyMigrationRecord"}}
+      },
+      "LegacyMigrationListEnvelope": {
+        "type": "object",
+        "required": ["ok", "status", "imports", "count", "blockers", "next_actions"],
+        "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "imports": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyMigrationRecord"}}, "count": {"type": "integer"}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}}
       },
       "ObligationAcceptance": {
         "type": "object",

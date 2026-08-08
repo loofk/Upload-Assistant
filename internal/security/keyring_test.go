@@ -72,3 +72,21 @@ func TestLoadKeyringRejectsSymlink(t *testing.T) {
 		t.Fatal("LoadKeyring() accepted a symlink")
 	}
 }
+
+func TestSecretFingerprintIsPurposeSeparatedAndKeyed(t *testing.T) {
+	key := bytes.Repeat([]byte{0x42}, 32)
+	keyring, err := ParseKeyring(bytes.NewBufferString("1:" + base64.RawStdEncoding.EncodeToString(key) + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewSecretStore(nil, keyring)
+	first, err := store.Fingerprint("legacy.source.bundle.v1", []byte("weak-password"))
+	if err != nil || len(first) != 64 {
+		t.Fatalf("Fingerprint() value/error = %q/%v", first, err)
+	}
+	second, err := store.Fingerprint("legacy.source.bundle.v1", []byte("weak-password"))
+	otherPurpose, err2 := store.Fingerprint("legacy.source.file.v1", []byte("weak-password"))
+	if err != nil || err2 != nil || second != first || otherPurpose == first {
+		t.Fatal("fingerprint is not deterministic and purpose separated")
+	}
+}

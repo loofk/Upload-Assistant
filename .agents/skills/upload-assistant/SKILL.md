@@ -1,6 +1,6 @@
 ---
 name: upload-assistant
-description: Operate the local Upload Assistant v2 HTTP service for Chinese PT retorrent jobs, daily candidate recommendations and schedules, rule review, duplicate checks, integrations, evidence, notifications, and task recovery. Use when an agent must create, inspect, pause, resume, schedule, or audit a durable PT workflow without bypassing accept_rules, confirm_upload, site obligations, duplicate gates, or seeding requirements.
+description: Operate the local Upload Assistant v2 HTTP service for Chinese PT retorrent jobs, daily candidate recommendations and schedules, rule review, duplicate checks, integrations, safe legacy configuration migration, evidence, notifications, and task recovery. Use when an agent must create, inspect, pause, resume, schedule, migrate, or audit a durable PT workflow without bypassing fingerprints, explicit confirmations, accept_rules, confirm_upload, site obligations, duplicate gates, or seeding requirements.
 ---
 
 # Upload Assistant
@@ -25,6 +25,7 @@ Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use envir
 - Read status and summary for normal progress. Read events and verified artifacts for an audit.
 - Resume only with the values named by `blockers`, `next_actions`, and `resume_state`.
 - Change rules, downloaders, image hosts, screenshot profiles, or site credentials only when the operator explicitly asks.
+- Preview or execute legacy configuration migration only when the operator explicitly asks.
 
 ## Run a Retorrent Workflow
 
@@ -63,6 +64,16 @@ When an operator wants stepwise control, use `execution_mode=step` or `stop_afte
 Rule changes follow an immutable review sequence: import Markdown as a draft, inspect the parsed policy and original text, have a human approve the exact fingerprint, then activate the approved revision. Missing, incomplete, unapproved, or stale rules must block automation.
 
 Credentials are write-only inputs. Confirm successful storage from redacted API responses; never try to read secrets back. Keep downloader path mappings explicit and validate them before running jobs.
+
+## Migrate Legacy Configuration
+
+1. Call `GET /api/v2/migrations/legacy/preview`. It reads only the fixed read-only mount and never executes Python.
+2. Show the operator the exact `source_fingerprint`, resource list, disabled resources, blockers, and warnings. Credential values are intentionally absent.
+3. Do not infer consent from a successful preview. Call `POST /api/v2/migrations/legacy` only after the operator explicitly approves that exact fingerprint; send `confirm_import=true`.
+4. If the fingerprint changed, stop and preview again. Never reuse an older approval.
+5. Treat migration as configuration writes only. It performs no tracker, downloader, or image-host probes and grants no permission for live workflow actions.
+6. Read import history for the applied resource IDs and 30-day encrypted archive state. Never request, decrypt, expose, or claim access to archive plaintext.
+7. Original legacy files are never deleted by migration. Archive expiry removes only the encrypted snapshot and preserves the redacted audit report.
 
 ## Interpret Responses
 

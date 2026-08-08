@@ -18,6 +18,9 @@ import type {
   ScreenshotProfile,
   SiteCredential,
   SiteSummary,
+	LegacyMigrationEnvelope,
+	LegacyMigrationPreview,
+	LegacyMigrationRecord,
 } from "./types";
 
 interface ProblemBody {
@@ -252,6 +255,22 @@ export class ApiClient {
     await this.request(`/api/v2/sites/${encodeURIComponent(siteCode)}/credentials/${encodeURIComponent(name)}`, {
       method: "PUT", body: JSON.stringify({value}),
     });
+  }
+
+  async previewLegacyMigration(): Promise<LegacyMigrationPreview> {
+    return this.request("/api/v2/migrations/legacy/preview");
+  }
+
+  async executeLegacyMigration(sourceFingerprint: string): Promise<LegacyMigrationEnvelope> {
+    return this.request("/api/v2/migrations/legacy", {
+      method: "POST",
+      body: JSON.stringify({source_fingerprint: sourceFingerprint, confirm_import: true}),
+    });
+  }
+
+  async listLegacyMigrations(): Promise<LegacyMigrationRecord[]> {
+    const response = await this.request<{imports: LegacyMigrationRecord[]}>("/api/v2/migrations/legacy?limit=25");
+    return response.imports;
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

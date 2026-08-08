@@ -22,6 +22,15 @@ docker compose -f docker-compose.go.yml exec upload-assistant upload-assistant a
 
 Compose 默认只把 HTTP 端口绑定到 `127.0.0.1`。远程访问应通过具备 TLS 和访问控制的隧道或反向代理，不能把服务无认证暴露到公网。
 
+旧版配置迁移使用独立的只读挂载。默认读取宿主机 `./data`，可在启动前设置：
+
+```bash
+export UA_LEGACY_DATA_HOST_PATH=/absolute/path/to/old-upload-assistant/data
+docker compose -f docker-compose.go.yml up -d --build
+```
+
+容器内固定挂载为 `/legacy:ro`。服务只读取 `/legacy/config.py` 和 allowlist 内的 `/legacy/cookies/{SITE}.txt`，不会执行 Python，也不接受 API 传入任意文件路径。
+
 ## OpenClaw / Hermes
 
 OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`。Hermes 可从部署后的 `/.well-known/upload-assistant/SKILL.md` URL 安装技能。两者都应先读取 OpenAPI 和鉴权后的工具目录，再按照技能中的硬门禁操作。
@@ -39,6 +48,18 @@ OpenClaw 可直接发现项目内的 `.agents/skills/upload-assistant/SKILL.md`�
 - `GET /api/v2/notifications` 读取任务终态后生成的脱敏本地通知。调度、排名和通知均不代表用户批准候选，也不会自动创建正式转种任务或上传种子。
 
 常驻调度器与 Web 本地通知已可用；外部 webhook、Discord 等主动推送渠道仍属于后续能力。在外部渠道完成并有交付证据前，不应把“已主动推送到第三方渠道”报告为完成。
+
+## 旧配置安全迁移
+
+迁移采用 preview → fingerprint 确认 → import：
+
+- `GET /api/v2/migrations/legacy/preview` 使用非执行字面量解析器读取旧配置，只返回主密钥 HMAC fingerprint、文件大小、资源名称、credential 字段名、禁用原因和 warnings。它不会公开可用于猜测弱密码的普通内容 hash。
+- `POST /api/v2/migrations/legacy` 必须同时提交刚刚人工核对的 `source_fingerprint` 与 `confirm_import=true`。预览后任意源文件变化都会使指纹失效。
+- 迁移只写入 PostgreSQL 配置和加密 secrets，不探测站点、下载器或图床，不代表同意站规，也不授权 live 上传。
+- 原文件始终保持不变。源配置与 allowlist cookie 会作为主密钥加密的快照保留 30 天；API 只显示归档 hash、大小和到期状态，不提供归档明文。到期仅删除密文快照，脱敏迁移报告和审计事件继续保留。
+- 旧站点限速不会静默覆盖已审批规则，容器中的 `127.0.0.1/localhost` 下载器会保持禁用，QUI proxy 和尚未实现的集成会明确列入 warnings。
+
+同样的操作可以在 Web「配置 → 旧配置迁移」完成。重复提交同一已完成指纹会返回原迁移记录，不会重复执行资源写入。
 
 ## 开发验收
 

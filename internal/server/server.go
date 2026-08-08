@@ -28,6 +28,7 @@ type Dependencies struct {
 	Artifacts    ArtifactContentReader
 	Candidates   CandidateService
 	Schedules    ScheduleService
+	Legacy       LegacyMigrationService
 	DataDir      string
 	Logger       *slog.Logger
 	Build        buildinfo.Info
@@ -97,6 +98,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.Schedules != nil {
 		registerScheduleRoutes(mux, deps.Schedules)
+	}
+	if deps.Legacy != nil {
+		registerLegacyMigrationRoutes(mux, deps.Legacy)
 	}
 	return requestLogger(deps.Logger, securityHeaders(authenticate(deps.Auth, mux)))
 }

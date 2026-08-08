@@ -59,4 +59,18 @@ describe("ApiClient safety defaults", () => {
 	expect(scheduleBody).toMatchObject({cron_expression: "0 9 * * *", timezone: "Asia/Shanghai", config: {source: "U2", target: "MTEAM", target_count: 10}});
 	expect(JSON.stringify(scheduleBody)).not.toContain("confirm_upload");
   });
+
+  it("executes legacy migration only with the reviewed fingerprint and explicit confirmation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ok: true, status: "complete", import_id: "import-id"}), {
+      status: 201, headers: {"Content-Type": "application/json"},
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fingerprint = "a".repeat(64);
+    await new ApiClient("ua_test-token-value-that-is-long-enough").executeLegacyMigration(fingerprint);
+
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/v2/migrations/legacy");
+    expect(JSON.parse(String(init.body))).toEqual({source_fingerprint: fingerprint, confirm_import: true});
+    expect(String(init.body)).not.toContain("password");
+  });
 });

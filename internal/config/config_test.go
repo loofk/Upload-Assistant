@@ -20,6 +20,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	if cfg.DataDir != defaultDataDir {
 		t.Fatalf("DataDir = %q, want %q", cfg.DataDir, defaultDataDir)
 	}
+	if cfg.LegacyDir != "/legacy" {
+		t.Fatalf("LegacyDir = %q, want /legacy", cfg.LegacyDir)
+	}
 	if cfg.MasterKeyFile != filepath.Join(defaultDataDir, "master-keys") {
 		t.Fatalf("MasterKeyFile = %q", cfg.MasterKeyFile)
 	}
@@ -63,6 +66,20 @@ func TestLoadFromRejectsRelativeDataDir(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("LoadFrom() error = nil, want relative data directory error")
+	}
+}
+
+func TestLoadFromRejectsRelativeLegacyDir(t *testing.T) {
+	env := map[string]string{
+		"UA_DATABASE_URL": "postgres://ua:secret@db/ua",
+		"UA_LEGACY_DIR":   "relative/legacy",
+	}
+	_, err := LoadFrom(func(key string) (string, bool) {
+		value, ok := env[key]
+		return value, ok
+	})
+	if err == nil {
+		t.Fatal("LoadFrom() error = nil, want relative legacy directory error")
 	}
 }
 

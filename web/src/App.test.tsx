@@ -64,4 +64,41 @@ describe("App authentication boundary", () => {
 	expect(await screen.findByRole("heading", {name: "Fixture Anime"})).toBeInTheDocument();
 	expect(screen.getByText("目标查重通过")).toBeInTheDocument();
   });
+
+  it("requires reviewed legacy fingerprint before migration", async () => {
+    sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+    const fingerprint = "a".repeat(64);
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+        : path === "/api/v2/downloaders" ? {downloaders: []}
+        : path === "/api/v2/image-hosts" ? {image_hosts: []}
+        : path === "/api/v2/screenshot-profiles" ? {screenshot_profiles: []}
+        : path === "/api/v2/sites" ? {sites: []}
+        : path === "/api/v2/migrations/legacy/preview" ? {
+          ok: true, status: "ready", source_kind: "upload_assistant_python_config", source_fingerprint: fingerprint,
+          source_files: [{path: "config.py", fingerprint, size_bytes: 100}],
+          resources: [{kind: "downloader", name: "box", adapter: "qbittorrent", enabled: false, credential_fields: ["username", "password"]}],
+          archive: {encrypted: true, retention_days: 30, file_count: 1, uncompressed_bytes: 100, deletes_originals: false, plaintext_available_via_api: false},
+          blockers: [], warnings: [{code: "container_loopback_requires_review", resource: "box", message: "需要改为宿主机地址。"}], next_actions: [],
+        }
+        : path === "/api/v2/migrations/legacy?limit=25" ? {ok: true, status: "ready", imports: [], count: 0, blockers: [], next_actions: []}
+        : path === "/api/v2/migrations/legacy" && init?.method === "POST" ? {ok: true, status: "complete", import_id: "import-id", source_fingerprint: fingerprint, blockers: [], next_actions: [], summary: "done", import: {}}
+        : {};
+      return Promise.resolve(new Response(JSON.stringify(payload), {status: path === "/api/v2/migrations/legacy" ? 201 : 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", {name: "配置"}));
+    await userEvent.click(await screen.findByRole("button", {name: "旧配置迁移"}));
+    expect(await screen.findByText("可执行预览")).toBeInTheDocument();
+    const execute = screen.getByRole("button", {name: "确认执行迁移"});
+    expect(execute).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("我已核对源指纹、资源清单和所有 warnings"));
+    expect(execute).toBeEnabled();
+    await userEvent.click(execute);
+    const call = fetchMock.mock.calls.find(([path, init]) => path === "/api/v2/migrations/legacy" && init?.method === "POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({source_fingerprint: fingerprint, confirm_import: true});
+  });
 });

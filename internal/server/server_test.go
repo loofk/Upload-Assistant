@@ -83,6 +83,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		"/api/v2/schedules/daily-candidates", "/api/v2/schedules/daily-candidates/{schedule_id}",
 		"/api/v2/schedules/daily-candidates/{schedule_id}/runs",
 		"/api/v2/notifications",
+		"/api/v2/migrations/legacy/preview", "/api/v2/migrations/legacy",
+		"/api/v2/migrations/legacy/{import_id}",
 	}
 	for _, path := range requiredPaths {
 		if _, exists := document.Paths[path]; !exists {
@@ -107,8 +109,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 25 {
-		t.Fatalf("tool count = %d, want 25", len(tools))
+	if len(tools) != 29 {
+		t.Fatalf("tool count = %d, want 29", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {

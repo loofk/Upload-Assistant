@@ -20,6 +20,7 @@ type Config struct {
 	ListenAddr       string
 	DatabaseURL      string
 	DataDir          string
+	LegacyDir        string
 	LogLevel         string
 	ShutdownTimeout  time.Duration
 	DatabaseMaxConns int32
@@ -44,6 +45,7 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		ListenAddr:       envOrDefault(lookup, "UA_LISTEN_ADDR", defaultListenAddr),
 		DatabaseURL:      strings.TrimSpace(envOrDefault(lookup, "UA_DATABASE_URL", "")),
 		DataDir:          filepath.Clean(envOrDefault(lookup, "UA_DATA_DIR", defaultDataDir)),
+		LegacyDir:        filepath.Clean(envOrDefault(lookup, "UA_LEGACY_DIR", "/legacy")),
 		LogLevel:         strings.ToLower(envOrDefault(lookup, "UA_LOG_LEVEL", "info")),
 		ShutdownTimeout:  defaultShutdown,
 		DatabaseMaxConns: defaultDatabaseMaxCon,
@@ -61,6 +63,9 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 	}
 	if !filepath.IsAbs(cfg.DataDir) {
 		return Config{}, fmt.Errorf("UA_DATA_DIR must be an absolute path: %s", cfg.DataDir)
+	}
+	if !filepath.IsAbs(cfg.LegacyDir) {
+		return Config{}, fmt.Errorf("UA_LEGACY_DIR must be an absolute path: %s", cfg.LegacyDir)
 	}
 	if !filepath.IsAbs(cfg.MasterKeyFile) {
 		return Config{}, fmt.Errorf("UA_MASTER_KEY_FILE must be an absolute path: %s", cfg.MasterKeyFile)

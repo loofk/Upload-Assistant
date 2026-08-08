@@ -25,6 +25,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
+	"github.com/loofk/upload-assistant/v2/internal/legacy"
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/schedules"
@@ -127,6 +128,10 @@ func serve(args []string) error {
 	}
 	secretStore := security.NewSecretStore(pool, keyring)
 	integrationStore := integrations.NewStore(pool, secretStore)
+	legacyService, err := legacy.NewService(pool, secretStore, integrationStore, cfg.LegacyDir, logger)
+	if err != nil {
+		return fmt.Errorf("initialize legacy migration service: %w", err)
+	}
 	downloaderManager := downloaders.NewManager(integrationStore)
 	imageHostManager := imagehosts.NewManager(integrationStore, nil)
 	mteamClient := mteam.NewClient(integrationStore, nil)
@@ -196,6 +201,7 @@ func serve(args []string) error {
 	go jobRunner.Run(ctx)
 	dailyScheduler := schedules.NewRunner(scheduleStore, jobService, workerID+"-scheduler", logger)
 	go dailyScheduler.Run(ctx)
+	go runLegacyArchiveCleanup(ctx, legacyService, logger)
 
 	handler := server.New(server.Dependencies{
 		Database:     pool,
@@ -207,6 +213,7 @@ func serve(args []string) error {
 		Artifacts:    artifactStore,
 		Candidates:   candidateStore,
 		Schedules:    scheduleStore,
+		Legacy:       legacyService,
 		DataDir:      cfg.DataDir,
 		Logger:       logger,
 		Build:        buildinfo.Current(),
@@ -242,6 +249,30 @@ func serve(args []string) error {
 		return fmt.Errorf("shutdown HTTP server: %w", err)
 	}
 	return nil
+}
+
+func runLegacyArchiveCleanup(ctx context.Context, service *legacy.Service, logger *slog.Logger) {
+	cleanup := func() {
+		count, err := service.CleanupExpired(ctx, workflow.Actor{Type: "system", ID: "legacy-retention"})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("legacy archive retention cleanup failed")
+			return
+		}
+		if count > 0 {
+			logger.Info("expired encrypted legacy archives deleted", "count", count)
+		}
+	}
+	cleanup()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanup()
+		}
+	}
 }
 
 func buildSourceRegistry(provider nexusphp.RuntimeSiteProvider) (*sites.Registry, error) {

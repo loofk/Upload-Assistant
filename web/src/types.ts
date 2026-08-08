@@ -30,6 +30,7 @@ export interface Job {
   updated_at: string;
   started_at?: string;
   finished_at?: string;
+	idempotent_replay?: boolean;
 }
 
 export interface Step {
@@ -362,4 +363,73 @@ export interface NotificationListEnvelope {
   notifications: Notification[];
   blockers: Blocker[];
   next_actions: NextAction[];
+}
+
+export interface LegacyMigrationIssue {
+  code: string;
+  message: string;
+  resource?: string;
+}
+
+export interface LegacyMigrationPreview {
+  ok: boolean;
+  status: "ready" | "blocked";
+  source_kind: string;
+  source_fingerprint: string;
+	idempotent_replay?: boolean;
+  source_files: Array<{path: string; fingerprint: string; size_bytes: number}>;
+  resources: Array<{
+    kind: string;
+    name: string;
+    adapter?: string;
+    enabled: boolean;
+    credential_fields?: string[];
+    configuration?: Record<string, JsonValue>;
+  }>;
+  archive: {
+    encrypted: true;
+    retention_days: 30;
+    file_count: number;
+    uncompressed_bytes: number;
+    deletes_originals: false;
+    plaintext_available_via_api: false;
+  };
+  blockers: LegacyMigrationIssue[];
+  warnings: LegacyMigrationIssue[];
+  next_actions: LegacyMigrationIssue[];
+}
+
+export interface LegacyMigrationRecord {
+  id: string;
+  ok: boolean;
+  status: "running" | "blocked" | "failed" | "complete";
+  source_kind: string;
+  source_path: string;
+  source_fingerprint: string;
+  report: {
+    preview: LegacyMigrationPreview;
+    applied: Array<{kind: string; name: string; resource_id?: string; status: string}>;
+    blockers: LegacyMigrationIssue[];
+    next_actions: LegacyMigrationIssue[];
+    summary: string;
+  };
+  archive_available: boolean;
+  archive_sha256?: string;
+  archive_size_bytes?: number;
+  archive_expires_at: string;
+  archive_deleted_at?: string;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string;
+}
+
+export interface LegacyMigrationEnvelope {
+  ok: boolean;
+  status: LegacyMigrationRecord["status"];
+  import_id: string;
+  source_fingerprint: string;
+  blockers: LegacyMigrationIssue[];
+  next_actions: LegacyMigrationIssue[];
+  summary: string;
+  import: LegacyMigrationRecord;
 }

@@ -1,8 +1,8 @@
 import {FormEvent, ReactNode, useCallback, useEffect, useState} from "react";
 import {ApiClient} from "./api";
-import type {Downloader, ImageHost, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
+import type {Downloader, ImageHost, LegacyMigrationPreview, LegacyMigrationRecord, RuleRevision, ScreenshotProfile, SiteCredential, SiteSummary} from "./types";
 
-type ConfigTab = "downloaders" | "image-hosts" | "screenshots" | "rules";
+type ConfigTab = "downloaders" | "image-hosts" | "screenshots" | "rules" | "migration";
 
 export default function Configuration({client, onError}: {client: ApiClient; onError: (reason: unknown) => void}) {
   const [tab, setTab] = useState<ConfigTab>("downloaders");
@@ -37,15 +37,67 @@ export default function Configuration({client, onError}: {client: ApiClient; onE
       <button className="secondary" onClick={() => void reload()} disabled={loading}>刷新配置</button>
     </header>
     <nav className="config-tabs">
-      {(["downloaders", "image-hosts", "screenshots", "rules"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
-        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : `站点规则 ${sites.length}`}
+      {(["downloaders", "image-hosts", "screenshots", "rules", "migration"] as const).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
+        {value === "downloaders" ? `下载器 ${downloaders.length}` : value === "image-hosts" ? `图床 ${imageHosts.length}` : value === "screenshots" ? `截图策略 ${screenshots.length}` : value === "rules" ? `站点规则 ${sites.length}` : "旧配置迁移"}
       </button>)}
     </nav>
     {tab === "downloaders" && <DownloadersPanel items={downloaders} client={client} reload={reload} onError={onError} />}
     {tab === "image-hosts" && <ImageHostsPanel items={imageHosts} client={client} reload={reload} onError={onError} />}
     {tab === "screenshots" && <ScreenshotsPanel items={screenshots} client={client} reload={reload} onError={onError} />}
     {tab === "rules" && <RulesPanel sites={sites} client={client} reloadSites={reload} onError={onError} />}
+    {tab === "migration" && <LegacyMigrationPanel client={client} />}
   </main>;
+}
+
+function LegacyMigrationPanel({client}: {client: ApiClient}) {
+  const [preview, setPreview] = useState<LegacyMigrationPreview | null>(null);
+  const [imports, setImports] = useState<LegacyMigrationRecord[]>([]);
+  const [error, setError] = useState("");
+  const [reviewed, setReviewed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    setBusy(true);
+    const [previewResult, importsResult] = await Promise.allSettled([
+      client.previewLegacyMigration(), client.listLegacyMigrations(),
+    ]);
+    if (previewResult.status === "fulfilled") {
+      setPreview(previewResult.value);
+      setError("");
+    } else {
+      setPreview(null);
+      setError(previewResult.reason instanceof Error ? previewResult.reason.message : "旧配置预览失败。");
+    }
+    if (importsResult.status === "fulfilled") setImports(importsResult.value);
+    setBusy(false);
+  }, [client]);
+  useEffect(() => { void load(); }, [load]);
+  const execute = async () => {
+    if (!preview || !reviewed) return;
+    if (!window.confirm("确认以当前 source_fingerprint 执行迁移？这会写入加密配置，但不会联网或删除旧文件。")) return;
+    setBusy(true);
+    try {
+      await client.executeLegacyMigration(preview.source_fingerprint);
+      setReviewed(false);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "迁移执行失败。");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <section className="migration-panel">
+    <header className="migration-hero"><div><p className="eyebrow">SAFE LEGACY IMPORT</p><h2>Python 配置迁移</h2><p>只读取固定只读挂载中的 <code>config.py</code> 与中文站点 cookie；不启动 Python、不自动联网、不删除原文件。</p></div><button className="secondary" disabled={busy} onClick={() => void load()}>重新预览</button></header>
+    {error && <div className="migration-blocked"><strong>当前无法预览</strong><p>{error}</p><small>请通过 UA_LEGACY_DATA_HOST_PATH 把旧 data 目录只读挂载到 /legacy。</small></div>}
+    {preview && <div className="migration-grid"><article className="migration-preview"><header><div><strong>{preview.status === "ready" ? "可执行预览" : "预览被阻塞"}</strong><span>{preview.resources.length} 个资源 · {preview.source_files.length} 个源文件</span></div><i className={preview.ok ? "ready" : "blocked"}>{preview.status}</i></header><label>源指纹<code>{preview.source_fingerprint}</code></label><div className="migration-resources">{preview.resources.map((resource) => <div key={`${resource.kind}:${resource.name}`}><strong>{resource.name}</strong><span>{resource.kind}{resource.adapter ? ` · ${resource.adapter}` : ""} · {resource.enabled ? "enabled" : "disabled"}</span><small>secret fields: {resource.credential_fields?.join(", ") || "none"}</small></div>)}</div>{preview.warnings.length > 0 && <div className="migration-warnings"><strong>需要后续人工处理</strong>{preview.warnings.map((issue, index) => <p key={`${issue.code}:${issue.resource}:${index}`}><code>{issue.code}</code>{issue.resource ? ` · ${issue.resource}` : ""} — {issue.message}</p>)}</div>}<footer><span>加密归档 {preview.archive.retention_days} 天；API 永不提供归档明文。</span><label><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} /> 我已核对源指纹、资源清单和所有 warnings</label><button className="primary" disabled={busy || !reviewed || !preview.ok} onClick={() => void execute()}>{busy ? "执行中…" : "确认执行迁移"}</button></footer></article>
+      <aside className="migration-files"><h3>源证据</h3>{preview.source_files.map((file) => <div key={file.path}><strong>{file.path}</strong><code title={file.fingerprint}>{file.fingerprint}</code><span>{formatBytes(file.size_bytes)} · keyed fingerprint</span></div>)}</aside></div>}
+    <section className="migration-history"><ConfigSectionTitle title="迁移历史" copy="仅显示脱敏报告、资源 ID 和归档保留状态；不提供凭据或归档明文。" />{imports.map((item) => <article key={item.id}><header><div><strong>{item.status}</strong><span>{new Date(item.created_at).toLocaleString("zh-CN")}</span></div><i className={item.archive_available ? "ready" : "expired"}>{item.archive_available ? "archive retained" : "archive expired"}</i></header><code title={item.source_fingerprint}>{item.source_fingerprint}</code><p>{item.report.summary}</p><small>已配置 {item.report.applied.length} 个资源 · 归档到期 {new Date(item.archive_expires_at).toLocaleString("zh-CN")}</small></article>)}{!imports.length && <ConfigEmpty text="暂无迁移历史。" />}</section>
+  </section>;
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
 
 function DownloadersPanel({items, client, reload, onError}: {items: Downloader[]; client: ApiClient; reload: () => Promise<void>; onError: (reason: unknown) => void}) {
