@@ -23,6 +23,7 @@ type Dependencies struct {
 	Auth         TokenAuthenticator
 	Rules        RuleService
 	Integrations IntegrationService
+	Downloaders  DownloaderService
 	DataDir      string
 	Logger       *slog.Logger
 	Build        buildinfo.Info
@@ -81,6 +82,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.Integrations != nil {
 		registerIntegrationRoutes(mux, deps.Integrations)
+	}
+	if deps.Downloaders != nil {
+		registerDownloaderRoutes(mux, deps.Downloaders)
 	}
 	return requestLogger(deps.Logger, authenticate(deps.Auth, mux))
 }

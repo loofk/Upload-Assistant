@@ -1,0 +1,92 @@
+package downloaders
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/loofk/upload-assistant/v2/internal/integrations"
+	"github.com/loofk/upload-assistant/v2/internal/workflow"
+)
+
+type fakeConfigurationStore struct {
+	runtime      integrations.RuntimeDownloader
+	healthStatus string
+	auditActions []string
+}
+
+func (store *fakeConfigurationStore) GetRuntimeDownloader(context.Context, string) (integrations.RuntimeDownloader, error) {
+	return store.runtime, nil
+}
+
+func (store *fakeConfigurationStore) RecordDownloaderHealth(_ context.Context, _ string, status string, _ map[string]any, _ workflow.Actor) error {
+	store.healthStatus = status
+	return nil
+}
+
+func (store *fakeConfigurationStore) AuditDownloaderAction(_ context.Context, _ string, action string, _ map[string]any, _ workflow.Actor) error {
+	store.auditActions = append(store.auditActions, action)
+	return nil
+}
+
+func TestManagerProbeInspectAndPathMapping(t *testing.T) {
+	hash := "0123456789abcdef0123456789abcdef01234567"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer qbt_test" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v2/app/version":
+			_, _ = io.WriteString(w, "v5.2.0")
+		case "/api/v2/app/webapiVersion":
+			_, _ = io.WriteString(w, "2.14.1")
+		case "/api/v2/torrents/info":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"hash": hash, "name": "release", "state": "uploading", "progress": 1,
+				"total_size": 1024, "completed": 1024, "amount_left": 0,
+				"save_path": "/remote/downloads", "content_path": "/remote/downloads/release",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	store := &fakeConfigurationStore{runtime: integrations.RuntimeDownloader{
+		Downloader: integrations.Downloader{
+			Name: "qbit", Adapter: "qbittorrent", Enabled: true,
+			PathMappings: []integrations.PathMapping{{RemotePath: "/remote/downloads", LocalPath: "/downloads", Priority: 100}},
+		},
+		EndpointConfig: integrations.EndpointConfig{Endpoint: server.URL, TimeoutSeconds: 5},
+		Credentials:    map[string]string{"api_key": "qbt_test"},
+	}}
+	manager := NewManager(store)
+	actor := workflow.Actor{Type: "test", ID: "manager"}
+	probe, err := manager.Probe(context.Background(), "qbit", actor)
+	if err != nil || probe.WebAPIVersion != "2.14.1" || store.healthStatus != "ready" {
+		t.Fatalf("Probe() result/health/error = %#v/%s/%v", probe, store.healthStatus, err)
+	}
+	evidence, err := manager.Inspect(context.Background(), "qbit", hash, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.LocalContentPath != "/downloads/release" || evidence.PathMapping == nil {
+		t.Fatalf("path evidence = %#v", evidence)
+	}
+	if len(store.auditActions) != 1 || store.auditActions[0] != "torrent.inspect" {
+		t.Fatalf("audit actions = %#v", store.auditActions)
+	}
+}
+
+func TestMapPathUsesPathBoundary(t *testing.T) {
+	mapping := integrations.PathMapping{RemotePath: "/remote/downloads", LocalPath: "/downloads"}
+	if mapped, ok := mapPath("/remote/downloads/release/file.mkv", mapping); !ok || mapped != "/downloads/release/file.mkv" {
+		t.Fatalf("mapPath() = %s/%t", mapped, ok)
+	}
+	if _, ok := mapPath("/remote/downloads-evil/file.mkv", mapping); ok {
+		t.Fatal("mapPath() accepted a prefix without path boundary")
+	}
+}

@@ -53,6 +53,12 @@ type Downloader struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
+type RuntimeDownloader struct {
+	Downloader
+	EndpointConfig EndpointConfig    `json:"-"`
+	Credentials    map[string]string `json:"-"`
+}
+
 type ImageHostInput struct {
 	Adapter     string            `json:"adapter"`
 	Enabled     *bool             `json:"enabled,omitempty"`

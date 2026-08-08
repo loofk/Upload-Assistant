@@ -87,12 +87,30 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if len(downloader.CredentialFields) != 2 || len(downloader.PathMappings) != 1 {
 		t.Fatalf("downloader credential fields/mappings = %#v/%#v", downloader.CredentialFields, downloader.PathMappings)
 	}
+	runtimeDownloader, err := store.GetRuntimeDownloader(ctx, downloader.Name)
+	if err != nil {
+		t.Fatalf("GetRuntimeDownloader() error = %v", err)
+	}
+	if runtimeDownloader.Credentials["password"] != "encrypted-password" || runtimeDownloader.EndpointConfig.Endpoint != "http://host.docker.internal:8080" {
+		t.Fatalf("runtime downloader did not decrypt expected configuration")
+	}
+	if err := store.RecordDownloaderHealth(ctx, downloader.Name, "ready", map[string]any{"webapi_version": "test"}, actor); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AuditDownloaderAction(ctx, downloader.Name, "torrent.inspect", map[string]any{"hash": "test"}, actor); err != nil {
+		t.Fatal(err)
+	}
 	downloaderList, err := store.ListDownloaders(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !containsDownloader(downloaderList, downloader.ID) {
 		t.Fatal("downloader was not listed")
+	}
+	for _, item := range downloaderList {
+		if item.ID == downloader.ID && item.HealthStatus != "ready" {
+			t.Fatalf("downloader health status = %s", item.HealthStatus)
+		}
 	}
 
 	imageHost, err := store.UpsertImageHost(ctx, "imgbb-"+nameSuffix, ImageHostInput{

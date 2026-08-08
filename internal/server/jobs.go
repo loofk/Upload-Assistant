@@ -315,7 +315,11 @@ func jobID(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	return decodeJSONLimit(w, r, destination, 1<<20)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, destination any, limit int64) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
 		return fmt.Errorf("decode JSON body: %w", err)

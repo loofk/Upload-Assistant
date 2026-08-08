@@ -390,9 +390,13 @@ func (s *Store) StartCurrentStep(ctx context.Context, jobID, owner string, actor
 	defer func() { _ = tx.Rollback(ctx) }()
 	var jobStatus JobStatus
 	var stepKey, leaseOwner string
+	var jobInput, jobResumeState, jobConfigSnapshot json.RawMessage
 	err = tx.QueryRow(ctx, `
-		SELECT status, COALESCE(current_step_key, ''), COALESCE(lease_owner, '')
-		FROM jobs WHERE id = $1 FOR UPDATE`, jobID).Scan(&jobStatus, &stepKey, &leaseOwner)
+		SELECT status, COALESCE(current_step_key, ''), COALESCE(lease_owner, ''),
+		       input, resume_state, config_snapshot
+		FROM jobs WHERE id = $1 FOR UPDATE`, jobID).Scan(
+		&jobStatus, &stepKey, &leaseOwner, &jobInput, &jobResumeState, &jobConfigSnapshot,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Step{}, Attempt{}, ErrNotFound
 	}
@@ -409,6 +413,13 @@ func (s *Store) StartCurrentStep(ctx context.Context, jobID, owner string, actor
 	if step.Status != StepReady {
 		return Step{}, Attempt{}, fmt.Errorf("%w: step %s is %s, want ready", ErrConflict, step.Key, step.Status)
 	}
+	inputSnapshot, err := buildStepInputSnapshot(
+		ctx, tx, jobID, step.Position, jobInput, jobResumeState, jobConfigSnapshot,
+	)
+	if err != nil {
+		return Step{}, Attempt{}, err
+	}
+	step.InputSnapshot = inputSnapshot
 	var attemptNumber int
 	if err := tx.QueryRow(ctx, "SELECT COALESCE(max(attempt), 0) + 1 FROM step_attempts WHERE job_step_id = $1", step.ID).Scan(&attemptNumber); err != nil {
 		return Step{}, Attempt{}, fmt.Errorf("allocate step attempt: %w", err)
@@ -417,7 +428,7 @@ func (s *Store) StartCurrentStep(ctx context.Context, jobID, owner string, actor
 	err = tx.QueryRow(ctx, `
 		INSERT INTO step_attempts(job_step_id, attempt, status, input_snapshot)
 		VALUES ($1, $2, 'running', $3)
-		RETURNING id::text, started_at`, step.ID, attemptNumber, step.InputSnapshot).Scan(&attempt.ID, &attempt.StartedAt)
+		RETURNING id::text, started_at`, step.ID, attemptNumber, inputSnapshot).Scan(&attempt.ID, &attempt.StartedAt)
 	if err != nil {
 		return Step{}, Attempt{}, fmt.Errorf("insert step attempt: %w", err)
 	}
@@ -425,12 +436,13 @@ func (s *Store) StartCurrentStep(ctx context.Context, jobID, owner string, actor
 	attempt.Number = attemptNumber
 	attempt.Status = StepRunning
 	if _, err := tx.Exec(ctx, `
-		UPDATE job_steps SET status = 'running', started_at = COALESCE(started_at, now()), updated_at = now()
-		WHERE id = $1`, step.ID); err != nil {
+		UPDATE job_steps SET status = 'running', input_snapshot = $2,
+		       started_at = COALESCE(started_at, now()), updated_at = now()
+		WHERE id = $1`, step.ID, inputSnapshot); err != nil {
 		return Step{}, Attempt{}, fmt.Errorf("mark step running: %w", err)
 	}
 	if _, err := appendEvent(ctx, tx, jobID, step.ID, attempt.ID, "step.started", actor, map[string]any{
-		"step_key": step.Key, "attempt": attempt.Number,
+		"step_key": step.Key, "attempt": attempt.Number, "input_sha256": sha256Hex(inputSnapshot),
 	}); err != nil {
 		return Step{}, Attempt{}, err
 	}
@@ -735,6 +747,47 @@ func (s *Store) transitionJob(
 		return Job{}, fmt.Errorf("commit job transition: %w", err)
 	}
 	return s.GetJob(ctx, jobID)
+}
+
+func buildStepInputSnapshot(
+	ctx context.Context,
+	tx pgx.Tx,
+	jobID string,
+	position int,
+	jobInput, resumeState, configSnapshot json.RawMessage,
+) (json.RawMessage, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT step_key, output_summary FROM job_steps
+		WHERE job_id = $1 AND position < $2 AND status IN ('complete', 'skipped')
+		ORDER BY position`, jobID, position)
+	if err != nil {
+		return nil, fmt.Errorf("load prior step outputs: %w", err)
+	}
+	defer rows.Close()
+	previousSteps := make(map[string]json.RawMessage)
+	for rows.Next() {
+		var key string
+		var output json.RawMessage
+		if err := rows.Scan(&key, &output); err != nil {
+			return nil, fmt.Errorf("scan prior step output: %w", err)
+		}
+		previousSteps[key] = output
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate prior step outputs: %w", err)
+	}
+	snapshot, err := json.Marshal(map[string]any{
+		"job_input": jobInput, "resume_state": resumeState,
+		"config_snapshot": configSnapshot, "previous_steps": previousSteps,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("serialize step input snapshot: %w", err)
+	}
+	canonical, err := canonicalJSON(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize step input snapshot: %w", err)
+	}
+	return canonical, nil
 }
 
 const jobSelect = `

@@ -264,6 +264,103 @@ func (s *Store) ListDownloaders(ctx context.Context) ([]Downloader, error) {
 	return result, nil
 }
 
+func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeDownloader, error) {
+	var runtime RuntimeDownloader
+	var secretID string
+	var healthChecked pgtype.Timestamptz
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
+		       health_status, last_health_check_at, created_at, updated_at
+		FROM downloaders WHERE name = $1`, strings.TrimSpace(name)).Scan(
+		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.Config,
+		&secretID, &runtime.HealthStatus, &healthChecked, &runtime.CreatedAt, &runtime.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeDownloader{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeDownloader{}, fmt.Errorf("load runtime downloader: %w", err)
+	}
+	if !runtime.Enabled {
+		return RuntimeDownloader{}, fmt.Errorf("%w: downloader is disabled", ErrValidation)
+	}
+	runtime.LastHealthCheck = timePointer(healthChecked)
+	if err := json.Unmarshal(runtime.Config, &runtime.EndpointConfig); err != nil {
+		return RuntimeDownloader{}, fmt.Errorf("decode runtime downloader config: %w", err)
+	}
+	runtime.PathMappings, err = s.loadMappings(ctx, runtime.ID)
+	if err != nil {
+		return RuntimeDownloader{}, err
+	}
+	if secretID != "" {
+		plaintext, err := s.secrets.Get(ctx, secretID, "downloaders."+runtime.Name+".credentials")
+		if err != nil {
+			return RuntimeDownloader{}, err
+		}
+		if err := json.Unmarshal(plaintext, &runtime.Credentials); err != nil {
+			return RuntimeDownloader{}, fmt.Errorf("decode runtime downloader credentials: %w", err)
+		}
+	} else {
+		runtime.Credentials = map[string]string{}
+	}
+	runtime.CredentialFields = make([]string, 0, len(runtime.Credentials))
+	for field := range runtime.Credentials {
+		runtime.CredentialFields = append(runtime.CredentialFields, field)
+	}
+	slices.Sort(runtime.CredentialFields)
+	return runtime, nil
+}
+
+func (s *Store) RecordDownloaderHealth(ctx context.Context, name, status string, details map[string]any, actor workflow.Actor) error {
+	if status != "ready" && status != "failed" && status != "unknown" {
+		return fmt.Errorf("%w: invalid downloader health status", ErrValidation)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin downloader health update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var downloaderID string
+	err = tx.QueryRow(ctx, `
+		UPDATE downloaders SET health_status = $2, last_health_check_at = now(), updated_at = now()
+		WHERE name = $1 RETURNING id::text`, name, status).Scan(&downloaderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("update downloader health: %w", err)
+	}
+	if details == nil {
+		details = map[string]any{}
+	}
+	details["status"] = status
+	if err := audit(ctx, tx, actor, "downloader.health", "downloader", downloaderID, details); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) AuditDownloaderAction(ctx context.Context, name, action string, details map[string]any, actor workflow.Actor) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin downloader action audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var downloaderID string
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM downloaders WHERE name = $1 FOR UPDATE", name).Scan(&downloaderID); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock downloader for action audit: %w", err)
+	}
+	if details == nil {
+		details = map[string]any{}
+	}
+	if err := audit(ctx, tx, actor, "downloader."+action, "downloader", downloaderID, details); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Store) UpsertImageHost(ctx context.Context, name string, input ImageHostInput, actor workflow.Actor) (ImageHost, error) {
 	name = strings.TrimSpace(name)
 	input.Adapter = strings.ToLower(strings.TrimSpace(input.Adapter))

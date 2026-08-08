@@ -19,6 +19,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
+	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
@@ -108,6 +109,7 @@ func serve(args []string) error {
 	}
 	secretStore := security.NewSecretStore(pool, keyring)
 	integrationStore := integrations.NewStore(pool, secretStore)
+	downloaderManager := downloaders.NewManager(integrationStore)
 	ruleStore, err := rules.NewStore(pool, cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
@@ -123,6 +125,7 @@ func serve(args []string) error {
 		Auth:         authStore,
 		Rules:        ruleStore,
 		Integrations: integrationStore,
+		Downloaders:  downloaderManager,
 		DataDir:      cfg.DataDir,
 		Logger:       logger,
 		Build:        buildinfo.Current(),

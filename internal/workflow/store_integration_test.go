@@ -100,6 +100,16 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	if step.Key != "source_parse" || attempt.Number != 1 {
 		t.Fatalf("started step/attempt = %s/%d", step.Key, attempt.Number)
 	}
+	var firstSnapshot struct {
+		JobInput      map[string]any             `json:"job_input"`
+		PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
+	}
+	if err := json.Unmarshal(step.InputSnapshot, &firstSnapshot); err != nil {
+		t.Fatalf("decode first input snapshot: %v", err)
+	}
+	if firstSnapshot.JobInput["target"] != "MTEAM" || len(firstSnapshot.PreviousSteps) != 0 {
+		t.Fatalf("first input snapshot = %#v", firstSnapshot)
+	}
 	artifact, err := store.RegisterArtifact(ctx, RegisterArtifactInput{
 		JobID: job.ID, StepID: step.ID, AttemptID: attempt.ID, Kind: "source_reference",
 		StoragePath: "jobs/source-reference.json", Filename: "source-reference.json",
@@ -133,6 +143,16 @@ func TestStoreLifecycleAndAuditChain(t *testing.T) {
 	step, attempt, err = store.StartCurrentStep(ctx, job.ID, "integration-worker", Actor{Type: "worker", ID: "integration-worker"})
 	if err != nil || step.Key != "source_inspect" {
 		t.Fatalf("second StartCurrentStep() step/error = %s/%v", step.Key, err)
+	}
+	var secondSnapshot struct {
+		ResumeState   map[string]any             `json:"resume_state"`
+		PreviousSteps map[string]json.RawMessage `json:"previous_steps"`
+	}
+	if err := json.Unmarshal(step.InputSnapshot, &secondSnapshot); err != nil {
+		t.Fatalf("decode second input snapshot: %v", err)
+	}
+	if _, exists := secondSnapshot.PreviousSteps["source_parse"]; !exists || secondSnapshot.ResumeState["reason"] != "integration-test" {
+		t.Fatalf("second input snapshot = %#v", secondSnapshot)
 	}
 	job, err = store.BlockStep(
 		ctx, job.ID, "integration-worker", attempt.ID,
