@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
@@ -38,6 +39,22 @@ func TestLivenessDoesNotDependOnDatabase(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/live", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestEmbeddedWebUIIsPublicAndUsesStrictSecurityHeaders(t *testing.T) {
+	handler := New(Dependencies{
+		Database: fakeDatabase{}, DataDir: t.TempDir(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Build: buildinfo.Info{Version: "test"},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Fatalf("Web UI response = %d/%s", response.Code, response.Header().Get("Content-Type"))
+	}
+	if response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("X-Frame-Options") != "DENY" ||
+		!strings.Contains(response.Header().Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Fatalf("Web UI security headers = %#v", response.Header())
 	}
 }
 

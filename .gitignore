@@ -33,4 +33,6 @@ data/*.json
 venv/*
 .pyright
 web_ui/static/js/node_modules/
+/web/node_modules/
+/web/*.tsbuildinfo
 .env

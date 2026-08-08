@@ -11,6 +11,7 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/security"
+	"github.com/loofk/upload-assistant/v2/internal/webui"
 )
 
 type DatabaseChecker interface {
@@ -42,6 +43,7 @@ func New(deps Dependencies) http.Handler {
 		deps.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 	mux := http.NewServeMux()
+	webui.Register(mux)
 	registerDocumentationRoutes(mux)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{
@@ -86,7 +88,7 @@ func New(deps Dependencies) http.Handler {
 	if deps.Downloaders != nil {
 		registerDownloaderRoutes(mux, deps.Downloaders)
 	}
-	return requestLogger(deps.Logger, authenticate(deps.Auth, mux))
+	return requestLogger(deps.Logger, securityHeaders(authenticate(deps.Auth, mux)))
 }
 
 type TokenAuthenticator interface {
@@ -120,7 +122,20 @@ func authenticate(authenticator TokenAuthenticator, next http.Handler) http.Hand
 }
 
 func isPublicPath(path string) bool {
-	return path == "/health/live" || path == "/health/ready" || path == "/api/v2/version" || path == "/openapi.json"
+	return path == "/" || path == "/app" || strings.HasPrefix(path, "/app/") || strings.HasPrefix(path, "/assets/") || path == "/favicon.svg" ||
+		path == "/health/live" || path == "/health/ready" || path == "/api/v2/version" || path == "/openapi.json"
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

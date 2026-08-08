@@ -1,7 +1,8 @@
-.PHONY: help lint lint-ptcli test test-ptcli test-legacy check check-ptcli verify-ptcli-local verify-ptcli-seedbox-handoff smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live go-fmt go-lint go-test go-build go-check go-compose-config
+.PHONY: help lint lint-ptcli test test-ptcli test-legacy check check-ptcli verify-ptcli-local verify-ptcli-seedbox-handoff smoke smoke-ptcli smoke-legacy agent-skills-check agent-skills-sync test-live go-fmt go-lint go-test go-build go-check go-compose-config web-install web-check
 
 PYTHON ?= python3
 GO ?= go
+NPM ?= npm
 
 help: ## 查看所有可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -71,4 +72,12 @@ go-build: ## 构建 Go 服务
 go-compose-config: ## 校验 Go/PostgreSQL Compose 配置
 	docker compose -f docker-compose.go.yml config --quiet
 
-go-check: go-lint go-test go-build ## 执行 Go 基础门禁
+web-install: ## 安装内嵌 React/TypeScript Web 依赖
+	cd web && $(NPM) ci --no-audit --no-fund
+
+web-check: ## 类型检查、测试并生成内嵌 Web 产物
+	cd web && $(NPM) run typecheck
+	cd web && $(NPM) test
+	cd web && $(NPM) run build
+
+go-check: web-check go-lint go-test go-build ## 执行 Go 服务与内嵌 Web 门禁
