@@ -40,6 +40,17 @@ type Revision struct {
 	CreatedAt      time.Time       `json:"created_at"`
 }
 
+type SiteSummary struct {
+	ID                    string `json:"id"`
+	Code                  string `json:"code"`
+	Name                  string `json:"name"`
+	Adapter               string `json:"adapter"`
+	Enabled               bool   `json:"enabled"`
+	LiveValidationStatus  string `json:"live_validation_status"`
+	ActiveRuleRevisionID  string `json:"active_rule_revision_id,omitempty"`
+	ActiveRuleFingerprint string `json:"active_rule_fingerprint,omitempty"`
+}
+
 type Store struct {
 	pool *pgxpool.Pool
 	root string
@@ -237,6 +248,10 @@ func (s *Store) Active(ctx context.Context, siteCode string) (Revision, error) {
 		WHERE s.code = $1 AND s.active_rule_revision_id = sr.id`, strings.ToUpper(strings.TrimSpace(siteCode))))
 }
 
+func (s *Store) Get(ctx context.Context, revisionID string) (Revision, error) {
+	return scanRevision(s.pool.QueryRow(ctx, revisionSelect+" WHERE sr.id = $1", revisionID))
+}
+
 func (s *Store) List(ctx context.Context, siteCode string) ([]Revision, error) {
 	rows, err := s.pool.Query(ctx, revisionSelect+` WHERE s.code = $1 ORDER BY sr.revision DESC`, strings.ToUpper(strings.TrimSpace(siteCode)))
 	if err != nil {
@@ -255,6 +270,34 @@ func (s *Store) List(ctx context.Context, siteCode string) ([]Revision, error) {
 		return nil, fmt.Errorf("iterate rule revisions: %w", err)
 	}
 	return revisions, nil
+}
+
+func (s *Store) ListSites(ctx context.Context) ([]SiteSummary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT s.id::text, s.code, s.name, s.adapter, s.enabled, s.live_validation_status,
+		       COALESCE(s.active_rule_revision_id::text, ''), COALESCE(sr.fingerprint, '')
+		FROM sites s
+		LEFT JOIN site_rule_revisions sr ON sr.id = s.active_rule_revision_id
+		ORDER BY s.code`)
+	if err != nil {
+		return nil, fmt.Errorf("list sites: %w", err)
+	}
+	defer rows.Close()
+	sites := make([]SiteSummary, 0)
+	for rows.Next() {
+		var site SiteSummary
+		if err := rows.Scan(
+			&site.ID, &site.Code, &site.Name, &site.Adapter, &site.Enabled,
+			&site.LiveValidationStatus, &site.ActiveRuleRevisionID, &site.ActiveRuleFingerprint,
+		); err != nil {
+			return nil, fmt.Errorf("scan site: %w", err)
+		}
+		sites = append(sites, site)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sites: %w", err)
+	}
+	return sites, nil
 }
 
 func (s *Store) ReadMarkdown(revision Revision) ([]byte, error) {

@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
+	"github.com/loofk/upload-assistant/v2/internal/security"
 )
 
 type DatabaseChecker interface {
@@ -18,6 +20,8 @@ type DatabaseChecker interface {
 type Dependencies struct {
 	Database DatabaseChecker
 	Jobs     JobService
+	Auth     TokenAuthenticator
+	Rules    RuleService
 	DataDir  string
 	Logger   *slog.Logger
 	Build    buildinfo.Info
@@ -70,7 +74,44 @@ func New(deps Dependencies) http.Handler {
 	if deps.Jobs != nil {
 		registerJobRoutes(mux, deps.Jobs)
 	}
-	return requestLogger(deps.Logger, mux)
+	if deps.Rules != nil {
+		registerRuleRoutes(mux, deps.Rules)
+	}
+	return requestLogger(deps.Logger, authenticate(deps.Auth, mux))
+}
+
+type TokenAuthenticator interface {
+	AuthenticateToken(context.Context, string) (security.Principal, error)
+}
+
+func authenticate(authenticator TokenAuthenticator, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPublicPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if authenticator == nil {
+			writeProblem(w, http.StatusServiceUnavailable, "authentication_unavailable", "authentication is not configured")
+			return
+		}
+		scheme, token, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
+		if !found || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(token) == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="upload-assistant"`)
+			writeProblem(w, http.StatusUnauthorized, "authentication_required", "a bearer API token is required")
+			return
+		}
+		principal, err := authenticator.AuthenticateToken(r.Context(), strings.TrimSpace(token))
+		if err != nil {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="upload-assistant", error="invalid_token"`)
+			writeProblem(w, http.StatusUnauthorized, "invalid_token", "the bearer API token is invalid, expired, or revoked")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(security.WithPrincipal(r.Context(), principal)))
+	})
+}
+
+func isPublicPath(path string) bool {
+	return path == "/health/live" || path == "/health/ready" || path == "/api/v2/version"
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

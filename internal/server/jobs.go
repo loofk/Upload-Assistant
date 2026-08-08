@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
@@ -65,6 +66,10 @@ func registerJobRoutes(mux *http.ServeMux, service JobService) {
 }
 
 func (a jobsAPI) create(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "jobs:write")
+	if !ok {
+		return
+	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if idempotencyKey == "" || len(idempotencyKey) > 200 {
 		writeProblem(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 200 characters")
@@ -88,8 +93,8 @@ func (a jobsAPI) create(w http.ResponseWriter, r *http.Request) {
 		StopAfterStep:  request.StopAfterStep,
 		Input:          request.Input,
 		IdempotencyKey: idempotencyKey,
-		Owner:          "unauthenticated-local-api",
-		Actor:          workflow.Actor{Type: "api", ID: "local"},
+		Owner:          principal.UserID,
+		Actor:          workflow.Actor{Type: "user", ID: principal.UserID},
 	})
 	if err != nil {
 		writeWorkflowError(w, err)
@@ -99,6 +104,9 @@ func (a jobsAPI) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) get(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
@@ -112,6 +120,9 @@ func (a jobsAPI) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) steps(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
@@ -133,6 +144,9 @@ func (a jobsAPI) steps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) events(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
@@ -166,6 +180,9 @@ func (a jobsAPI) events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) artifacts(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "jobs:read"); !ok {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
@@ -187,11 +204,15 @@ func (a jobsAPI) artifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) pause(w http.ResponseWriter, r *http.Request) {
+	principal, allowed := requireScope(w, r, "jobs:write")
+	if !allowed {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
 	}
-	job, err := a.service.PauseJob(r.Context(), id, workflow.Actor{Type: "api", ID: "local"})
+	job, err := a.service.PauseJob(r.Context(), id, workflow.Actor{Type: "user", ID: principal.UserID})
 	if err != nil {
 		writeWorkflowError(w, err)
 		return
@@ -200,6 +221,10 @@ func (a jobsAPI) pause(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) resume(w http.ResponseWriter, r *http.Request) {
+	principal, allowed := requireScope(w, r, "jobs:write")
+	if !allowed {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
@@ -211,7 +236,7 @@ func (a jobsAPI) resume(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := a.service.ResumeJob(r.Context(), id, request.ResumeState, workflow.Actor{Type: "api", ID: "local"})
+	job, err := a.service.ResumeJob(r.Context(), id, request.ResumeState, workflow.Actor{Type: "user", ID: principal.UserID})
 	if err != nil {
 		writeWorkflowError(w, err)
 		return
@@ -220,11 +245,15 @@ func (a jobsAPI) resume(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a jobsAPI) cancel(w http.ResponseWriter, r *http.Request) {
+	principal, allowed := requireScope(w, r, "jobs:write")
+	if !allowed {
+		return
+	}
 	id, ok := jobID(w, r)
 	if !ok {
 		return
 	}
-	job, err := a.service.CancelJob(r.Context(), id, workflow.Actor{Type: "api", ID: "local"})
+	job, err := a.service.CancelJob(r.Context(), id, workflow.Actor{Type: "user", ID: principal.UserID})
 	if err != nil {
 		writeWorkflowError(w, err)
 		return
@@ -289,4 +318,17 @@ func writeProblem(w http.ResponseWriter, status int, code, detail string) {
 		"ok": false, "status": "failed", "error": map[string]string{"code": code, "detail": detail},
 		"blockers": []map[string]string{{"code": code, "message": detail}}, "next_actions": []any{},
 	})
+}
+
+func requireScope(w http.ResponseWriter, r *http.Request, scope string) (security.Principal, bool) {
+	principal, ok := security.PrincipalFromContext(r.Context())
+	if !ok {
+		writeProblem(w, http.StatusUnauthorized, "authentication_required", "an authenticated principal is required")
+		return security.Principal{}, false
+	}
+	if !principal.HasScope(scope) {
+		writeProblem(w, http.StatusForbidden, "permission_denied", "the API token does not grant "+scope)
+		return security.Principal{}, false
+	}
+	return principal, true
 }

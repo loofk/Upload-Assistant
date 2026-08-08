@@ -1,23 +1,30 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
+	"github.com/loofk/upload-assistant/v2/internal/rules"
+	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/server"
 	"github.com/loofk/upload-assistant/v2/internal/worker"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -39,6 +46,8 @@ func run(args []string) error {
 		return serve(args)
 	case "migrate":
 		return migrate(args)
+	case "admin":
+		return admin(args)
 	case "version", "--version", "-version":
 		fmt.Println(buildinfo.Current().String())
 		return nil
@@ -88,6 +97,11 @@ func serve(args []string) error {
 		return fmt.Errorf("ensure retorrent workflow: %w", err)
 	}
 	jobService := workflow.NewService(jobStore, definition, workflowID)
+	authStore := security.NewAuthStore(pool)
+	ruleStore, err := rules.NewStore(pool, cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("initialize rule store: %w", err)
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	jobRunner := worker.New(jobService, workerID, logger)
@@ -96,6 +110,8 @@ func serve(args []string) error {
 	handler := server.New(server.Dependencies{
 		Database: pool,
 		Jobs:     jobService,
+		Auth:     authStore,
+		Rules:    ruleStore,
 		DataDir:  cfg.DataDir,
 		Logger:   logger,
 		Build:    buildinfo.Current(),
@@ -156,6 +172,64 @@ func migrate(args []string) error {
 	return nil
 }
 
+func admin(args []string) error {
+	if len(args) == 0 || args[0] != "bootstrap" {
+		return errors.New("usage: upload-assistant admin bootstrap --username <name>")
+	}
+	flags := flag.NewFlagSet("admin bootstrap", flag.ContinueOnError)
+	username := flags.String("username", "admin", "administrator username")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+	password, err := readPassword()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer pool.Close()
+	if err := database.Migrate(ctx, pool); err != nil {
+		return fmt.Errorf("run database migrations: %w", err)
+	}
+	result, err := security.NewAuthStore(pool).BootstrapAdmin(ctx, *username, password)
+	if err != nil {
+		return fmt.Errorf("bootstrap administrator: %w", err)
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(map[string]any{"ok": true, "status": "complete", "admin": result})
+}
+
+func readPassword() (string, error) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprint(os.Stderr, "Administrator password: ")
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", fmt.Errorf("read administrator password: %w", err)
+		}
+		return string(password), nil
+	}
+	reader := bufio.NewReaderSize(os.Stdin, 4096)
+	password, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) && len(password) == 0 {
+		return "", fmt.Errorf("read administrator password: %w", err)
+	}
+	password = strings.TrimRight(password, "\r\n")
+	if password == "" {
+		return "", errors.New("administrator password is required on stdin")
+	}
+	return password, nil
+}
+
 func newLogger(level string) *slog.Logger {
 	var slogLevel slog.Level
 	switch level {
@@ -177,5 +251,6 @@ func printUsage() {
 Usage:
   upload-assistant serve [--listen address]
   upload-assistant migrate
+  upload-assistant admin bootstrap --username <name>
   upload-assistant version`)
 }
