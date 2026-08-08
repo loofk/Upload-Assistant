@@ -20,6 +20,23 @@ func TestLoadFromDefaults(t *testing.T) {
 	if cfg.DataDir != defaultDataDir {
 		t.Fatalf("DataDir = %q, want %q", cfg.DataDir, defaultDataDir)
 	}
+	if cfg.MasterKeyFile != filepath.Join(defaultDataDir, "master-keys") {
+		t.Fatalf("MasterKeyFile = %q", cfg.MasterKeyFile)
+	}
+}
+
+func TestLoadFromRejectsRelativeMasterKeyFile(t *testing.T) {
+	env := map[string]string{
+		"UA_DATABASE_URL":    "postgres://ua:secret@db/ua",
+		"UA_MASTER_KEY_FILE": "relative/master-keys",
+	}
+	_, err := LoadFrom(func(key string) (string, bool) {
+		value, ok := env[key]
+		return value, ok
+	})
+	if err == nil {
+		t.Fatal("LoadFrom() error = nil, want relative master key file error")
+	}
 }
 
 func TestLoadFromRequiresDatabaseURL(t *testing.T) {

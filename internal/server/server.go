@@ -18,13 +18,14 @@ type DatabaseChecker interface {
 }
 
 type Dependencies struct {
-	Database DatabaseChecker
-	Jobs     JobService
-	Auth     TokenAuthenticator
-	Rules    RuleService
-	DataDir  string
-	Logger   *slog.Logger
-	Build    buildinfo.Info
+	Database     DatabaseChecker
+	Jobs         JobService
+	Auth         TokenAuthenticator
+	Rules        RuleService
+	Integrations IntegrationService
+	DataDir      string
+	Logger       *slog.Logger
+	Build        buildinfo.Info
 }
 
 type healthResponse struct {
@@ -77,6 +78,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.Rules != nil {
 		registerRuleRoutes(mux, deps.Rules)
+	}
+	if deps.Integrations != nil {
+		registerIntegrationRoutes(mux, deps.Integrations)
 	}
 	return requestLogger(deps.Logger, authenticate(deps.Auth, mux))
 }

@@ -38,6 +38,7 @@ services:
       UA_LISTEN_ADDR: 0.0.0.0:8080
       UA_DATABASE_URL: postgres://${UA_POSTGRES_USER:-upload_assistant}:${UA_POSTGRES_PASSWORD:-change-me-before-deployment}@postgres:5432/${UA_POSTGRES_DB:-upload_assistant}?sslmode=disable
       UA_DATA_DIR: /data
+      UA_MASTER_KEY_FILE: /data/master-keys
       UA_LOG_LEVEL: ${UA_LOG_LEVEL:-info}
     extra_hosts:
       - "host.docker.internal:host-gateway"

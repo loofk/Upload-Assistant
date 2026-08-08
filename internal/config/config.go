@@ -26,6 +26,7 @@ type Config struct {
 	DatabaseMinConns int32
 	DatabaseMaxIdle  time.Duration
 	DatabaseMaxLife  time.Duration
+	MasterKeyFile    string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -46,11 +47,15 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		DatabaseMaxIdle:  5 * time.Minute,
 		DatabaseMaxLife:  30 * time.Minute,
 	}
+	cfg.MasterKeyFile = filepath.Clean(envOrDefault(lookup, "UA_MASTER_KEY_FILE", filepath.Join(cfg.DataDir, "master-keys")))
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("UA_DATABASE_URL is required")
 	}
 	if !filepath.IsAbs(cfg.DataDir) {
 		return Config{}, fmt.Errorf("UA_DATA_DIR must be an absolute path: %s", cfg.DataDir)
+	}
+	if !filepath.IsAbs(cfg.MasterKeyFile) {
+		return Config{}, fmt.Errorf("UA_MASTER_KEY_FILE must be an absolute path: %s", cfg.MasterKeyFile)
 	}
 	switch cfg.LogLevel {
 	case "debug", "info", "warn", "error":

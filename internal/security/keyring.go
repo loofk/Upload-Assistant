@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,11 +31,11 @@ func LoadKeyring(path string) (*Keyring, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("master key file path is required")
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat master key file: %w", err)
 	}
-	if info.IsDir() || info.Mode().Perm()&0o022 != 0 {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
 		return nil, errors.New("master key file must be a regular file and not group/world writable")
 	}
 	file, err := os.Open(path)
@@ -43,6 +44,54 @@ func LoadKeyring(path string) (*Keyring, error) {
 	}
 	defer file.Close()
 	return ParseKeyring(file)
+}
+
+func LoadOrCreateKeyring(path string) (*Keyring, bool, error) {
+	keyring, err := LoadKeyring(path)
+	if err == nil {
+		return keyring, false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		var pathError *os.PathError
+		if !errors.As(err, &pathError) || !errors.Is(pathError.Err, os.ErrNotExist) {
+			return nil, false, err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return nil, false, fmt.Errorf("create master key directory: %w", err)
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, false, fmt.Errorf("generate master key: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		keyring, loadErr := LoadKeyring(path)
+		return keyring, false, loadErr
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("create master key file: %w", err)
+	}
+	encoded := "1:" + base64.RawStdEncoding.EncodeToString(key) + "\n"
+	if _, err := file.WriteString(encoded); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, false, fmt.Errorf("write master key file: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, false, fmt.Errorf("sync master key file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, false, fmt.Errorf("close master key file: %w", err)
+	}
+	keyring, err = LoadKeyring(path)
+	if err != nil {
+		return nil, false, err
+	}
+	return keyring, true, nil
 }
 
 func ParseKeyring(reader io.Reader) (*Keyring, error) {

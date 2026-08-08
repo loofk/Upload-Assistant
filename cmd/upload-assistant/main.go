@@ -19,6 +19,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/config"
 	"github.com/loofk/upload-assistant/v2/internal/database"
+	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/server"
@@ -98,6 +99,15 @@ func serve(args []string) error {
 	}
 	jobService := workflow.NewService(jobStore, definition, workflowID)
 	authStore := security.NewAuthStore(pool)
+	keyring, createdMasterKey, err := security.LoadOrCreateKeyring(cfg.MasterKeyFile)
+	if err != nil {
+		return fmt.Errorf("load master keyring: %w", err)
+	}
+	if createdMasterKey {
+		logger.Warn("created persistent master key file; include it in encrypted configuration backups", "path", cfg.MasterKeyFile)
+	}
+	secretStore := security.NewSecretStore(pool, keyring)
+	integrationStore := integrations.NewStore(pool, secretStore)
 	ruleStore, err := rules.NewStore(pool, cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
@@ -108,13 +118,14 @@ func serve(args []string) error {
 	go jobRunner.Run(ctx)
 
 	handler := server.New(server.Dependencies{
-		Database: pool,
-		Jobs:     jobService,
-		Auth:     authStore,
-		Rules:    ruleStore,
-		DataDir:  cfg.DataDir,
-		Logger:   logger,
-		Build:    buildinfo.Current(),
+		Database:     pool,
+		Jobs:         jobService,
+		Auth:         authStore,
+		Rules:        ruleStore,
+		Integrations: integrationStore,
+		DataDir:      cfg.DataDir,
+		Logger:       logger,
+		Build:        buildinfo.Current(),
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

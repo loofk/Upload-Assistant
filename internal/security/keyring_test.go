@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -34,5 +36,39 @@ func TestKeyringEncryptDecryptAndRotation(t *testing.T) {
 	}
 	if _, err := keyring.Decrypt("TRACKERS.CHD.cookie", encrypted); err == nil {
 		t.Fatal("Decrypt() accepted different purpose")
+	}
+}
+
+func TestLoadOrCreateKeyringPersistsSecureFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys", "master-keys")
+	first, created, err := LoadOrCreateKeyring(path)
+	if err != nil || !created || first.ActiveVersion() != 1 {
+		t.Fatalf("first LoadOrCreateKeyring() created/version/error = %t/%d/%v", created, first.ActiveVersion(), err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("master key mode = %o", info.Mode().Perm())
+	}
+	second, created, err := LoadOrCreateKeyring(path)
+	if err != nil || created || second.ActiveVersion() != first.ActiveVersion() {
+		t.Fatalf("second LoadOrCreateKeyring() created/version/error = %t/%d/%v", created, second.ActiveVersion(), err)
+	}
+}
+
+func TestLoadKeyringRejectsSymlink(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target")
+	if err := os.WriteFile(target, []byte("1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "master-keys")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKeyring(link); err == nil {
+		t.Fatal("LoadKeyring() accepted a symlink")
 	}
 }
