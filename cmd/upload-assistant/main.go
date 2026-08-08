@@ -31,6 +31,7 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/media"
 	"github.com/loofk/upload-assistant/v2/internal/mediamanagers"
 	"github.com/loofk/upload-assistant/v2/internal/notifications"
+	"github.com/loofk/upload-assistant/v2/internal/readiness"
 	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/schedules"
 	"github.com/loofk/upload-assistant/v2/internal/security"
@@ -164,6 +165,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
 	}
+	liveReadiness := readiness.NewService(ruleStore, integrationStore, readiness.Runtime{
+		MediaInfoBinary: cfg.MediaInfoBinary, FFmpegBinary: cfg.FFmpegBinary,
+		FFprobeBinary: cfg.FFprobeBinary, MkbrrBinary: cfg.MkbrrBinary, DownloadsDir: "/downloads",
+	})
 	artifactStore, err := artifacts.NewLocalStore(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize artifact store: %w", err)
@@ -244,6 +249,7 @@ func serve(args []string) error {
 		Legacy:        legacyService,
 		MediaManagers: mediaManager,
 		AuditLog:      auditLogStore,
+		LiveReadiness: liveReadiness,
 		DataDir:       cfg.DataDir,
 		Logger:        logger,
 		Build:         buildinfo.Current(),

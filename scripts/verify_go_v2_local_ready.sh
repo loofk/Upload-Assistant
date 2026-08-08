@@ -80,13 +80,17 @@ health_json="$(curl --fail --silent --show-error "$base_url/health/ready")"
 openapi_json="$(curl --fail --silent --show-error "$base_url/openapi.json")"
 tools_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/tools")"
 audit_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/audit-events?limit=5")"
+readiness_json="$(curl --fail --silent --show-error -H "$auth_header" "$base_url/api/v2/readiness/live?source=U2&target=MTEAM&downloader=box&image_host=imgbb&screenshot_profile=default")"
 cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact audit list --limit 2)"
+readiness_cli_json="$(compose exec -T -e UA_API_URL=http://127.0.0.1:8080 -e UA_API_TOKEN="$api_token" upload-assistant upload-assistant cli --compact readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default)"
 
 jq -e '.ok == true and .status == "ready" and .checks.database == "ready" and .checks.data_dir == "ready"' <<<"$health_json" >/dev/null
-jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/audit-events"] and .components.schemas.RetorrentSummary' <<<"$openapi_json" >/dev/null
-jq -e '.ok == true and .status == "ready" and .count >= 37 and any(.tools[]; .name == "list_audit_events")' <<<"$tools_json" >/dev/null
+jq -e '.openapi == "3.1.0" and .paths["/api/v2/jobs"] and .paths["/api/v2/audit-events"] and .paths["/api/v2/readiness/live"] and .components.schemas.RetorrentSummary and .components.schemas.LiveReadinessReport' <<<"$openapi_json" >/dev/null
+jq -e '.ok == true and .status == "ready" and .count >= 38 and any(.tools[]; .name == "list_audit_events") and any(.tools[]; .name == "get_live_readiness")' <<<"$tools_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and (.audit_events | type == "array")' <<<"$audit_json" >/dev/null
 jq -e '.ok == true and .status == "ready" and (.audit_events | type == "array")' <<<"$cli_json" >/dev/null
+jq -e '.status == "blocked" and .configuration_ready == false and .external_calls_performed == false and .live_upload_authorized == false and .resume_state.confirm_upload == false and (.blockers | length > 0)' <<<"$readiness_json" >/dev/null
+jq -e '.status == "blocked" and .external_calls_performed == false and .live_upload_authorized == false and .resume_state.confirm_upload == false' <<<"$readiness_cli_json" >/dev/null
 
 unauthorized_status="$(curl --silent --show-error -o "$verify_root/unauthorized.json" -w '%{http_code}' "$base_url/api/v2/jobs")"
 if [[ "$unauthorized_status" != "401" ]] || ! jq -e '.error.code == "authentication_required"' "$verify_root/unauthorized.json" >/dev/null; then
@@ -107,13 +111,13 @@ if [[ -z "$asset_path" ]]; then
   exit 1
 fi
 curl --fail --silent --show-error "$base_url$asset_path" -o "$verify_root/app.js"
-if ! grep -q '全局审计' "$verify_root/app.js"; then
-  echo "embedded Web audit console is missing" >&2
+if ! grep -q '全局审计' "$verify_root/app.js" || ! grep -q '真实环境就绪检查' "$verify_root/app.js"; then
+  echo "embedded Web audit or readiness console is missing" >&2
   exit 1
 fi
 
 skill_text="$(curl --fail --silent --show-error "$base_url/.well-known/upload-assistant/SKILL.md")"
-if [[ "$skill_text" != *"confirm_upload"* ]] || [[ "$skill_text" != *"/api/v2/audit-events"* ]]; then
+if [[ "$skill_text" != *"confirm_upload"* ]] || [[ "$skill_text" != *"/api/v2/audit-events"* ]] || [[ "$skill_text" != *"/api/v2/readiness/live"* ]]; then
   echo "embedded AgentSkill safety or audit contract is missing" >&2
   exit 1
 fi
@@ -186,6 +190,7 @@ jq -n \
       migrations: "ready",
       idempotency: "ready",
       restart_persistence: "ready",
+      local_live_readiness_handoff: "safe_blocked",
       external_calls_performed: false
     },
     evidence: {

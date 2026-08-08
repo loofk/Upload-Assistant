@@ -3,6 +3,7 @@ import {ApiClient, ApiError} from "./api";
 import Candidates from "./Candidates";
 import Configuration from "./Configuration";
 import Audit from "./Audit";
+import Readiness from "./Readiness";
 import type {
   Artifact,
   AuditEvent,
@@ -95,7 +96,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [section, setSection] = useState<"jobs" | "candidates" | "configuration" | "audit">("jobs");
+  const [section, setSection] = useState<"jobs" | "candidates" | "configuration" | "readiness" | "audit">("jobs");
 
   const describeError = useCallback((reason: unknown) => {
     if (reason instanceof ApiError && reason.status === 401) return "API Token 无效、已撤销或已过期。";
@@ -160,7 +161,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
           <div className="brand-mark small" aria-hidden="true">UA</div>
           <div><strong>Upload Assistant</strong><span>可审计转种控制台</span></div>
         </div>
-        <nav className="main-nav" aria-label="主导航"><button className={section === "jobs" ? "active" : ""} onClick={() => setSection("jobs")}>任务</button><button className={section === "candidates" ? "active" : ""} onClick={() => setSection("candidates")}>每日候选</button><button className={section === "configuration" ? "active" : ""} onClick={() => setSection("configuration")}>配置</button><button className={section === "audit" ? "active" : ""} onClick={() => setSection("audit")}>审计</button></nav>
+        <nav className="main-nav" aria-label="主导航"><button className={section === "jobs" ? "active" : ""} onClick={() => setSection("jobs")}>任务</button><button className={section === "candidates" ? "active" : ""} onClick={() => setSection("candidates")}>每日候选</button><button className={section === "configuration" ? "active" : ""} onClick={() => setSection("configuration")}>配置</button><button className={section === "readiness" ? "active" : ""} onClick={() => setSection("readiness")}>就绪检查</button><button className={section === "audit" ? "active" : ""} onClick={() => setSection("audit")}>审计</button></nav>
         <div className="topbar-actions">
           <span className="service-state"><i /> 本地服务已连接</span>
           <button className="ghost" onClick={() => void refreshAll()}>刷新</button>
@@ -170,7 +171,7 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
 
       {error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
 
-      {section === "audit" ? <Audit client={client} onError={(reason) => setError(describeError(reason))} /> : section === "configuration" ? <Configuration client={client} onError={(reason) => setError(describeError(reason))} /> : section === "candidates" ? <Candidates client={client} onError={(reason) => setError(describeError(reason))} onJobCreated={(jobID) => { setSection("jobs"); setSelectedID(jobID); void loadJobs(); }} /> : <div className="workspace">
+      {section === "audit" ? <Audit client={client} onError={(reason) => setError(describeError(reason))} /> : section === "readiness" ? <Readiness client={client} onError={(reason) => setError(describeError(reason))} /> : section === "configuration" ? <Configuration client={client} onError={(reason) => setError(describeError(reason))} /> : section === "candidates" ? <Candidates client={client} onError={(reason) => setError(describeError(reason))} onJobCreated={(jobID) => { setSection("jobs"); setSelectedID(jobID); void loadJobs(); }} /> : <div className="workspace">
         <aside className="job-sidebar">
           <div className="sidebar-heading">
             <div><p className="eyebrow">DURABLE JOBS</p><h2>任务</h2></div>

@@ -164,6 +164,29 @@ func TestAuditListUsesExactFiltersAndStableCursor(t *testing.T) {
 	}
 }
 
+func TestLiveReadinessUsesExactLocalOnlyInputs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v2/readiness/live" ||
+			query.Get("source") != "U2" || query.Get("target") != "MTEAM" ||
+			query.Get("downloader") != "box" || query.Get("target_downloader") != "seedbox" ||
+			query.Get("image_host") != "imgbb" || query.Get("screenshot_profile") != "default" {
+			t.Fatalf("request = %s %s query=%v", request.Method, request.URL.Path, query)
+		}
+		_, _ = response.Write([]byte(`{"ok":false,"status":"blocked","configuration_ready":false,"external_calls_performed":false,"live_upload_authorized":false,"source":"U2","target":"MTEAM","checks":[],"required_confirmations":[],"blockers":[{"code":"site_configuration_required","message":"missing","component":"site.U2"}],"next_actions":[],"resume_state":{"accept_rules":{},"confirm_upload":false},"summary":"local only"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--api-url", server.URL, "readiness", "live", "--source", "u2", "--target", "mteam",
+		"--downloader", "box", "--target-downloader", "seedbox", "--image-host", "imgbb", "--screenshot-profile", "default",
+	}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"external_calls_performed": false`) ||
+		!strings.Contains(output.String(), `"live_upload_authorized": false`) || !strings.Contains(output.String(), `"confirm_upload": false`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func testStreams(output io.Writer, input io.Reader) Streams {
 	if input == nil {
 		input = strings.NewReader("")

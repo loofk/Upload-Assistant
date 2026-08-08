@@ -66,6 +66,34 @@ describe("App authentication boundary", () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v2\/audit-events\?/), expect.objectContaining({credentials: "same-origin"}));
   });
 
+  it("shows a local-only readiness handoff without implying live authorization", async () => {
+    sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+        : path.startsWith("/api/v2/readiness/live?") ? {
+          ok: true, status: "configuration_ready", configuration_ready: true,
+          external_calls_performed: false, live_upload_authorized: false, source: "U2", target: "MTEAM",
+          checks: [{key: "rules.U2", status: "ready", summary: "active rule", evidence: {fingerprint: "a".repeat(64)}}],
+          required_confirmations: [{site_code: "U2", fingerprint: "a".repeat(64), obligation_ids: ["manual-review"]}],
+          blockers: [], next_actions: [], resume_state: {accept_rules: {U2: {fingerprint: "a".repeat(64), accepted: false}}, confirm_upload: false},
+          summary: "本地配置已就绪；未执行任何外部调用。",
+        } : {};
+      return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", {name: "就绪检查"}));
+    expect(await screen.findByRole("heading", {name: "真实环境就绪检查"})).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", {name: "执行本地检查"}));
+    expect(await screen.findByRole("heading", {name: "本地配置已就绪"})).toBeInTheDocument();
+    expect(screen.getByText("manual-review")).toBeInTheDocument();
+    expect(screen.getAllByText("否")).toHaveLength(2);
+    expect(screen.getByText("false")).toBeInTheDocument();
+    const readinessCall = fetchMock.mock.calls.find(([path]) => String(path).startsWith("/api/v2/readiness/live?"));
+    expect(String(readinessCall?.[0])).not.toContain("confirm_upload");
+  });
+
 	it("shows Deluge Web endpoint and password-only credential contract", async () => {
 		sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
 		const operations = {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: false, tags: false, skip_checking: false};

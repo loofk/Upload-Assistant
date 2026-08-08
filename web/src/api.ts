@@ -16,6 +16,7 @@ import type {
   JobSummaryEnvelope,
   NotificationListEnvelope,
 	AuditEventListEnvelope,
+	LiveReadinessReport,
   JsonValue,
   PathMapping,
   RuleRevision,
@@ -121,6 +122,18 @@ export class ApiClient {
     if (options.resourceID) query.set("resource_id", options.resourceID);
     if (options.cursor) query.set("cursor", options.cursor);
     return this.request(`/api/v2/audit-events?${query.toString()}`);
+  }
+
+  async getLiveReadiness(input: {
+    source: "U2" | "CHD"; target: "MTEAM"; downloader: string;
+    targetDownloader?: string; imageHost: string; screenshotProfile: string;
+  }): Promise<LiveReadinessReport> {
+    const query = new URLSearchParams({
+      source: input.source, target: input.target, downloader: input.downloader,
+      image_host: input.imageHost, screenshot_profile: input.screenshotProfile,
+    });
+    if (input.targetDownloader) query.set("target_downloader", input.targetDownloader);
+    return this.request(`/api/v2/readiness/live?${query.toString()}`);
   }
 
   async getSummary(jobID: string): Promise<JobSummaryEnvelope> {

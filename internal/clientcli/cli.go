@@ -185,6 +185,8 @@ func (r runner) execute(ctx context.Context, args []string) (json.RawMessage, er
 		return r.notifications(ctx, args[1:])
 	case "audit":
 		return r.audit(ctx, args[1:])
+	case "readiness":
+		return r.readiness(ctx, args[1:])
 	default:
 		return nil, fmt.Errorf("unknown CLI command %q", args[0])
 	}
@@ -566,6 +568,34 @@ func (r runner) audit(ctx context.Context, args []string) (json.RawMessage, erro
 	return r.request(ctx, http.MethodGet, "/api/v2/audit-events", query, nil, nil, true)
 }
 
+func (r runner) readiness(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 || args[0] != "live" {
+		return nil, errors.New("usage: readiness live --source U2|CHD --target MTEAM --downloader NAME [--target-downloader NAME] --image-host NAME --screenshot-profile NAME")
+	}
+	flags := newFlags("readiness live")
+	source := flags.String("source", "", "source site code")
+	target := flags.String("target", "", "target site code")
+	downloader := flags.String("downloader", "", "source downloader name")
+	targetDownloader := flags.String("target-downloader", "", "target downloader name; defaults to source downloader")
+	imageHost := flags.String("image-host", "", "image host name")
+	screenshotProfile := flags.String("screenshot-profile", "", "screenshot profile name")
+	if err := parseFlags(flags, args[1:]); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(*source) == "" || strings.TrimSpace(*target) == "" || strings.TrimSpace(*downloader) == "" || strings.TrimSpace(*imageHost) == "" || strings.TrimSpace(*screenshotProfile) == "" {
+		return nil, errors.New("source, target, downloader, image-host, and screenshot-profile are required")
+	}
+	query := url.Values{
+		"source":             []string{strings.ToUpper(strings.TrimSpace(*source))},
+		"target":             []string{strings.ToUpper(strings.TrimSpace(*target))},
+		"downloader":         []string{strings.TrimSpace(*downloader)},
+		"image_host":         []string{strings.TrimSpace(*imageHost)},
+		"screenshot_profile": []string{strings.TrimSpace(*screenshotProfile)},
+	}
+	setQuery(query, "target_downloader", *targetDownloader)
+	return r.request(ctx, http.MethodGet, "/api/v2/readiness/live", query, nil, nil, true)
+}
+
 func (r runner) shell(ctx context.Context) error {
 	_, _ = io.WriteString(r.streams.Err, "Upload Assistant 交互 CLI。输入 help 查看命令，exit 退出。\n")
 	scanner := bufio.NewScanner(io.LimitReader(r.streams.In, 4<<20))
@@ -827,6 +857,7 @@ Usage:
   upload-assistant cli [global options] integrations list COLLECTION
   upload-assistant cli [global options] notifications [--limit N]
   upload-assistant cli [global options] audit list [filters]
+  upload-assistant cli [global options] readiness live --source U2|CHD --target MTEAM --downloader NAME --image-host NAME --screenshot-profile NAME
   upload-assistant cli [global options] shell
 
 Global options:
@@ -840,6 +871,7 @@ Safety:
   Live upload confirmation is never inferred. Use exact repeated
   --accept-rule SITE=FINGERPRINT values and --confirm-upload. Supply manual
   obligations as --obligation SITE:ID=EVIDENCE. The service revalidates every
-  rule, duplicate, confirmation, and seeding gate.
+  rule, duplicate, confirmation, and seeding gate. The readiness command only
+  checks local configuration and never calls an external service or authorizes upload.
 `
 }

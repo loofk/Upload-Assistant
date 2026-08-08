@@ -6,6 +6,7 @@ export interface Blocker {
   code: string;
   message?: string;
   site_code?: string;
+  component?: string;
   details?: JsonValue;
 }
 
@@ -102,6 +103,35 @@ export interface AuditEventListEnvelope {
   next_cursor: string;
   blockers: Blocker[];
   next_actions: NextAction[];
+}
+
+export interface LiveReadinessCheck {
+  key: string;
+  status: "ready" | "blocked";
+  summary: string;
+  evidence?: Record<string, JsonValue>;
+}
+
+export interface LiveRuleConfirmation {
+  site_code: string;
+  fingerprint: string;
+  obligation_ids: string[];
+}
+
+export interface LiveReadinessReport {
+  ok: boolean;
+  status: "configuration_ready" | "blocked";
+  configuration_ready: boolean;
+  external_calls_performed: false;
+  live_upload_authorized: false;
+  source: "U2" | "CHD";
+  target: "MTEAM";
+  checks: LiveReadinessCheck[];
+  required_confirmations: LiveRuleConfirmation[];
+  blockers: Blocker[];
+  next_actions: NextAction[];
+  resume_state: {accept_rules: Record<string, JsonValue>; confirm_upload: false};
+  summary: string;
 }
 
 export interface JobListEnvelope {

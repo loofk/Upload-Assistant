@@ -36,6 +36,7 @@ upload-assistant cli jobs summary <job-id>
 upload-assistant cli candidates list --source U2 --target MTEAM
 upload-assistant cli integrations list downloaders
 upload-assistant cli audit list --resource-type downloader --resource-id box
+upload-assistant cli readiness live --source U2 --target MTEAM --downloader box --image-host imgbb --screenshot-profile default
 upload-assistant cli shell
 ```
 
@@ -55,6 +56,12 @@ upload-assistant cli jobs resume <job-id> \
 ```
 
 live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新提交源站和目标站的精确规则 fingerprint；CLI 只是减少误操作，服务端仍会重新验证规则、人工 obligation、查重、不可变上传包与做种 gate。
+
+## 真实环境就绪交接
+
+在进行任何站点、下载器或图床联网探测前，先调用 `GET /api/v2/readiness/live`，或使用 Web 顶部「就绪检查」和 CLI `readiness live`。当前完整参考路径限定为 U2/CHD → MTEAM。该只读检查仅验证：已审批激活的规则 fingerprint 与阻塞 obligations、站点凭据字段是否存在、源/目标下载器、图床、截图策略、`/downloads` 挂载以及 MediaInfo/FFmpeg/FFprobe/mkbrr 是否可用。
+
+就绪报告固定返回 `external_calls_performed=false`、`live_upload_authorized=false`，其 `resume_state.confirm_upload` 也固定为 `false`。即使 `configuration_ready=true`，也只表示本地配置可以进入受控外部验证，不代表凭据真实有效、站点无重复、资源可下载或用户同意上传。agent 应展示报告中的 blocker、next_actions、精确规则 fingerprint 与 obligation IDs，再分别取得联网探测授权；最终 live 上传仍必须在不可变上传包和最终查重可审阅后取得显式 `accept_rules` 与 `confirm_upload`。
 
 ## 审计读取
 
@@ -126,6 +133,6 @@ docker compose -f docker-compose.go.yml config --quiet
 make verify-go-v2-local
 ```
 
-`verify-go-v2-local` 会创建名称和卷均隔离的临时 Compose 栈，使用随机数据库密码和临时管理员，验证 linux/amd64、非 root、主密钥权限、健康检查、安全响应头、鉴权拒绝、OpenAPI/tool/AgentSkill、中文 Web、原生 CLI、迁移完整性、任务幂等与服务重启后的任务持久性，然后精确删除临时栈和卷。机器可读结果写入 `tmp/go-v2-local-ready.json`，报告不会包含临时凭据。
+`verify-go-v2-local` 会创建名称和卷均隔离的临时 Compose 栈，使用随机数据库密码和临时管理员，验证 linux/amd64、非 root、主密钥权限、健康检查、安全响应头、鉴权拒绝、OpenAPI/tool/AgentSkill、中文 Web、原生 CLI、安全阻塞的 live 就绪交接、迁移完整性、任务幂等与服务重启后的任务持久性，然后精确删除临时栈和卷。机器可读结果写入 `tmp/go-v2-local-ready.json`，报告不会包含临时凭据。
 
 上述测试使用本地 fixture、`httptest` 或隔离 Compose，不会访问真实站点、下载器或图床。报告中的 `live_validation.status=blocked_external` 是有意保留的真实边界。真实盒子闭环必须另行完成受控 live 验证，并保留源/目标 torrent hash、内容路径、规则指纹、查重、上传、注入、做种和 summary 证据。

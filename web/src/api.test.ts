@@ -113,4 +113,27 @@ describe("ApiClient safety defaults", () => {
       resource_type: "downloader", resource_id: "box", cursor: "opaque",
     });
   });
+
+  it("requests a local-only live readiness report without confirmation fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: false, status: "blocked", configuration_ready: false,
+      external_calls_performed: false, live_upload_authorized: false,
+      source: "U2", target: "MTEAM", checks: [], required_confirmations: [], blockers: [], next_actions: [],
+      resume_state: {accept_rules: {}, confirm_upload: false}, summary: "local only",
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("ua_test-token-value-that-is-long-enough").getLiveReadiness({
+      source: "U2", target: "MTEAM", downloader: "box", targetDownloader: "seedbox",
+      imageHost: "imgbb", screenshotProfile: "default",
+    });
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URLSearchParams(path.split("?")[1]);
+    expect(path.split("?")[0]).toBe("/api/v2/readiness/live");
+    expect(Object.fromEntries(query)).toEqual({
+      source: "U2", target: "MTEAM", downloader: "box", target_downloader: "seedbox",
+      image_host: "imgbb", screenshot_profile: "default",
+    });
+    expect(init.method).toBeUndefined();
+    expect(path).not.toContain("confirm_upload");
+  });
 });

@@ -19,6 +19,8 @@ Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use `uplo
 
 The native CLI returns the same structured JSON as the API. Use `jobs summary`, `jobs steps`, `jobs events`, and `jobs artifacts` for job audit reads; use `audit list` for redacted global configuration and external-action records. Use `jobs pause`, `jobs resume`, `jobs retry`, and `jobs cancel` only for the matching operator intent. The interactive `shell` uses the same command parser and safety checks. For live consent, pass exact `--accept-rule SITE=FINGERPRINT` and `--obligation SITE:ID=EVIDENCE` values; `--confirm-upload` never infers them.
 
+Before any external probe or controlled live workflow, call `GET /api/v2/readiness/live` (or CLI `readiness live`) with the requested U2/CHD source, MTEAM target, downloader, image host, and screenshot profile. It checks local configuration only. It never contacts a tracker, downloader, image host, or media manager; it always returns `external_calls_performed=false`, `live_upload_authorized=false`, and `resume_state.confirm_upload=false`. Show the operator its blockers, next actions, exact rule fingerprints, and obligation IDs. Never treat `configuration_ready=true` as credential validation, duplicate clearance, network-probe consent, rule acceptance, or upload consent.
+
 ## Choose an Operation
 
 - List jobs or read one job before deciding whether to create work.
@@ -31,12 +33,13 @@ The native CLI returns the same structured JSON as the API. Use `jobs summary`, 
 
 ## Run a Retorrent Workflow
 
-1. Create the job without setting `accept_rules` or `confirm_upload` unless the user explicitly supplied that exact consent for this job.
-2. Poll with bounded intervals and report durable step transitions. Do not hide or reinterpret blockers.
-3. Require the exact active rule fingerprint and every unresolved manual obligation before accepting rules.
-4. Require explicit live-upload confirmation only after the user can review the immutable upload package, duplicate result, active rules, and remaining obligations.
-5. After upload, continue through target torrent download, configured target-downloader injection, seeding verification, and final summary.
-6. Call the job complete only when the API reports `status=complete`, `ok=true`, no blockers, and a persisted `summary_file`.
+1. Run the local-only live readiness check and resolve local blockers. Obtain separate operator authorization before any external probe.
+2. Create the job without setting `accept_rules` or `confirm_upload` unless the user explicitly supplied that exact consent for this job.
+3. Poll with bounded intervals and report durable step transitions. Do not hide or reinterpret blockers.
+4. Require the exact active rule fingerprint and every unresolved manual obligation before accepting rules.
+5. Require explicit live-upload confirmation only after the user can review the immutable upload package, duplicate result, active rules, and remaining obligations.
+6. After upload, continue through target torrent download, configured target-downloader injection, seeding verification, and final summary.
+7. Call the job complete only when the API reports `status=complete`, `ok=true`, no blockers, and a persisted `summary_file`.
 
 When an operator wants stepwise control, use `execution_mode=step` or `stop_after_step`. A paused job is an expected control boundary, not a failure.
 

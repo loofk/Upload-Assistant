@@ -59,6 +59,26 @@
         "responses": {"200": {"description": "Compact AI tool definitions", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ToolsResponse"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/readiness/live": {
+      "get": {
+        "operationId": "getLiveReadiness",
+        "description": "Read-only local configuration preflight. It performs no tracker, downloader, image-host, or media-manager calls and never authorizes live upload.",
+        "parameters": [
+          {"name": "source", "in": "query", "required": true, "schema": {"type": "string", "enum": ["U2", "CHD"]}},
+          {"name": "target", "in": "query", "required": true, "schema": {"type": "string", "const": "MTEAM"}},
+          {"name": "downloader", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
+          {"name": "target_downloader", "in": "query", "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "Defaults to downloader."}},
+          {"name": "image_host", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
+          {"name": "screenshot_profile", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}}
+        ],
+        "responses": {
+          "200": {"description": "Machine-readable local live-configuration handoff without external execution", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LiveReadinessReport"}}}},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "401": {"$ref": "#/components/responses/Problem"},
+          "403": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
     "/api/v2/candidates/daily": {
       "get": {
         "operationId": "listDailyCandidates",
@@ -814,6 +834,31 @@
           "has_more": {"type": "boolean"}, "next_cursor": {"type": "string"},
           "blockers": {"type": "array", "maxItems": 0, "items": {"$ref": "#/components/schemas/Blocker"}},
           "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
+      "LiveReadinessCheck": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "status", "summary"],
+        "properties": {"key": {"type": "string"}, "status": {"type": "string", "enum": ["ready", "blocked"]}, "summary": {"type": "string"}, "evidence": {"type": "object", "additionalProperties": true}}
+      },
+      "LiveRuleConfirmation": {
+        "type": "object", "additionalProperties": false,
+        "required": ["site_code", "fingerprint", "obligation_ids"],
+        "properties": {"site_code": {"type": "string"}, "fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "obligation_ids": {"type": "array", "items": {"type": "string"}}}
+      },
+      "LiveReadinessReport": {
+        "type": "object", "additionalProperties": false,
+        "required": ["ok", "status", "configuration_ready", "external_calls_performed", "live_upload_authorized", "source", "target", "checks", "required_confirmations", "blockers", "next_actions", "resume_state", "summary"],
+        "properties": {
+          "ok": {"type": "boolean"}, "status": {"type": "string", "enum": ["configuration_ready", "blocked"]},
+          "configuration_ready": {"type": "boolean"}, "external_calls_performed": {"type": "boolean", "const": false},
+          "live_upload_authorized": {"type": "boolean", "const": false}, "source": {"type": "string", "enum": ["U2", "CHD"]}, "target": {"type": "string", "const": "MTEAM"},
+          "checks": {"type": "array", "items": {"$ref": "#/components/schemas/LiveReadinessCheck"}},
+          "required_confirmations": {"type": "array", "items": {"$ref": "#/components/schemas/LiveRuleConfirmation"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}},
+          "resume_state": {"type": "object", "required": ["accept_rules", "confirm_upload"], "properties": {"accept_rules": {"type": "object", "additionalProperties": true}, "confirm_upload": {"type": "boolean", "const": false}}},
+          "summary": {"type": "string"}
         }
       },
       "Artifact": {"type": "object", "required": ["id", "job_id", "kind", "storage_backend", "storage_path", "filename", "size_bytes", "sha256", "metadata", "expires_at", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "storage_backend": {"type": "string"}, "storage_path": {"type": "string"}, "filename": {"type": "string"}, "mime_type": {"type": "string"}, "size_bytes": {"type": "integer"}, "sha256": {"type": "string"}, "metadata": {"type": "object"}, "expires_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}}},
