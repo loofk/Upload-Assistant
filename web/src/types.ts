@@ -82,6 +82,28 @@ export interface AuditEvent {
   created_at: string;
 }
 
+export interface GlobalAuditEvent {
+  id: string;
+  actor_type: string;
+  actor_id?: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  trace_id?: string;
+  payload: Record<string, JsonValue>;
+  created_at: string;
+}
+
+export interface AuditEventListEnvelope {
+  ok: true;
+  status: "ready";
+  audit_events: GlobalAuditEvent[];
+  has_more: boolean;
+  next_cursor: string;
+  blockers: Blocker[];
+  next_actions: NextAction[];
+}
+
 export interface JobListEnvelope {
   ok: true;
   status: "ready";

@@ -83,6 +83,7 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		"/api/v2/schedules/daily-candidates", "/api/v2/schedules/daily-candidates/{schedule_id}",
 		"/api/v2/schedules/daily-candidates/{schedule_id}/runs",
 		"/api/v2/notifications",
+		"/api/v2/audit-events",
 		"/api/v2/notification-channels", "/api/v2/notification-channels/{name}",
 		"/api/v2/media-managers", "/api/v2/media-managers/{name}",
 		"/api/v2/media-managers/{name}/probe", "/api/v2/media-managers/{name}/lookup",
@@ -121,8 +122,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 36 {
-		t.Fatalf("tool count = %d, want 36", len(tools))
+	if len(tools) != 37 {
+		t.Fatalf("tool count = %d, want 37", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {

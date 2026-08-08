@@ -44,6 +44,28 @@ describe("App authentication boundary", () => {
     expect(new Headers(downloaderCall?.[1]?.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
   });
 
+  it("shows recursively redacted global configuration and action audits", async () => {
+    sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      const payload = path.startsWith("/api/v2/jobs?") ? {ok: true, status: "ready", jobs: [], has_more: false, next_cursor: ""}
+        : path.startsWith("/api/v2/audit-events?") ? {ok: true, status: "ready", has_more: false, next_cursor: "", blockers: [], next_actions: [], audit_events: [{
+          id: "88888888-8888-4888-8888-888888888888", actor_type: "worker", actor_id: "fixture",
+          action: "downloader.torrent.add", resource_type: "downloader", resource_id: "box",
+          payload: {configuration_sha256: "a".repeat(64), api_key: "[REDACTED]"}, created_at: "2026-08-08T00:00:00Z",
+        }]}
+        : {};
+      return Promise.resolve(new Response(JSON.stringify(payload), {status: 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", {name: "审计"}));
+    expect(await screen.findByRole("heading", {name: "全局审计"})).toBeInTheDocument();
+    expect(await screen.findByText("downloader.torrent.add")).toBeInTheDocument();
+    expect(screen.getByText("downloader · box")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v2\/audit-events\?/), expect.objectContaining({credentials: "same-origin"}));
+  });
+
 	it("shows Deluge Web endpoint and password-only credential contract", async () => {
 		sessionStorage.setItem("ua.v2.api-token", "ua_test-token-value-that-is-long-enough");
 		const operations = {probe: true, add_torrent: true, inspect: true, list_files: true, set_limits: true, wait_complete: true, category: false, tags: false, skip_checking: false};

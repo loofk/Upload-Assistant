@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
+	"github.com/loofk/upload-assistant/v2/internal/auditlog"
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
 	"github.com/loofk/upload-assistant/v2/internal/candidates"
 	"github.com/loofk/upload-assistant/v2/internal/clientcli"
@@ -151,6 +152,7 @@ func serve(args []string) error {
 	secretStore := security.NewSecretStore(pool, keyring)
 	integrationStore := integrations.NewStore(pool, secretStore)
 	mediaManager := mediamanagers.NewManager(integrationStore, nil)
+	auditLogStore := auditlog.NewStore(pool)
 	legacyService, err := legacy.NewService(pool, secretStore, integrationStore, cfg.LegacyDir, logger)
 	if err != nil {
 		return fmt.Errorf("initialize legacy migration service: %w", err)
@@ -241,6 +243,7 @@ func serve(args []string) error {
 		Schedules:     scheduleStore,
 		Legacy:        legacyService,
 		MediaManagers: mediaManager,
+		AuditLog:      auditLogStore,
 		DataDir:       cfg.DataDir,
 		Logger:        logger,
 		Build:         buildinfo.Current(),

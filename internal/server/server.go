@@ -30,6 +30,7 @@ type Dependencies struct {
 	Schedules     ScheduleService
 	Legacy        LegacyMigrationService
 	MediaManagers MediaManagerService
+	AuditLog      AuditLogService
 	DataDir       string
 	Logger        *slog.Logger
 	Build         buildinfo.Info
@@ -105,6 +106,9 @@ func New(deps Dependencies) http.Handler {
 	}
 	if deps.MediaManagers != nil {
 		registerMediaManagerRoutes(mux, deps.MediaManagers)
+	}
+	if deps.AuditLog != nil {
+		registerAuditLogRoutes(mux, deps.AuditLog)
 	}
 	return requestLogger(deps.Logger, securityHeaders(authenticate(deps.Auth, mux)))
 }

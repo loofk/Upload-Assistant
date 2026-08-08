@@ -15,6 +15,7 @@ import type {
   JobStatus,
   JobSummaryEnvelope,
   NotificationListEnvelope,
+	AuditEventListEnvelope,
   JsonValue,
   PathMapping,
   RuleRevision,
@@ -107,6 +108,19 @@ export class ApiClient {
 
   async listNotifications(): Promise<NotificationListEnvelope> {
     return this.request("/api/v2/notifications?limit=25");
+  }
+
+  async listAuditEvents(options: {
+    actorType?: string; action?: string; resourceType?: string; resourceID?: string;
+    limit?: number; cursor?: string;
+  } = {}): Promise<AuditEventListEnvelope> {
+    const query = new URLSearchParams({limit: String(options.limit ?? 50)});
+    if (options.actorType) query.set("actor_type", options.actorType);
+    if (options.action) query.set("action", options.action);
+    if (options.resourceType) query.set("resource_type", options.resourceType);
+    if (options.resourceID) query.set("resource_id", options.resourceID);
+    if (options.cursor) query.set("cursor", options.cursor);
+    return this.request(`/api/v2/audit-events?${query.toString()}`);
   }
 
   async getSummary(jobID: string): Promise<JobSummaryEnvelope> {

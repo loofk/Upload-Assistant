@@ -17,14 +17,14 @@ Use the service as an auditable workflow controller. Treat every rule, duplicate
 
 Prefer native HTTP or OpenAPI tools. If a shell is the only transport, use `upload-assistant cli` with `UA_API_URL` and `UA_API_TOKEN_FILE`; `UA_API_TOKEN` is also supported for a controlled process environment. Never put tokens in command arguments, URLs, logs, reports, or repository files. Never search the filesystem for credentials. The CLI blocks non-loopback plaintext HTTP unless the operator explicitly allows it.
 
-The native CLI returns the same structured JSON as the API. Use `jobs summary`, `jobs steps`, `jobs events`, and `jobs artifacts` for audit reads; use `jobs pause`, `jobs resume`, `jobs retry`, and `jobs cancel` only for the matching operator intent. The interactive `shell` uses the same command parser and safety checks. For live consent, pass exact `--accept-rule SITE=FINGERPRINT` and `--obligation SITE:ID=EVIDENCE` values; `--confirm-upload` never infers them.
+The native CLI returns the same structured JSON as the API. Use `jobs summary`, `jobs steps`, `jobs events`, and `jobs artifacts` for job audit reads; use `audit list` for redacted global configuration and external-action records. Use `jobs pause`, `jobs resume`, `jobs retry`, and `jobs cancel` only for the matching operator intent. The interactive `shell` uses the same command parser and safety checks. For live consent, pass exact `--accept-rule SITE=FINGERPRINT` and `--obligation SITE:ID=EVIDENCE` values; `--confirm-upload` never infers them.
 
 ## Choose an Operation
 
 - List jobs or read one job before deciding whether to create work.
 - Create a retorrent job only from an explicit source URL and target site request. Use a fresh idempotency key for a new intent.
 - Create or read daily candidate jobs when the operator wants recommendations. Treat schedules and every notification channel as discovery only.
-- Read status and summary for normal progress. Read events and verified artifacts for an audit.
+- Read status and summary for normal progress. Read job events and verified artifacts for a workflow integrity audit. Read `/api/v2/audit-events` for global configuration or external-action history; it is redacted and paginated but is not the per-job hash chain.
 - Resume only with the values named by `blockers`, `next_actions`, and `resume_state`.
 - Change rules, downloaders, image hosts, notification channels, Sonarr/Radarr instances, screenshot profiles, or site credentials only when the operator explicitly asks.
 - Preview or execute legacy configuration migration only when the operator explicitly asks.

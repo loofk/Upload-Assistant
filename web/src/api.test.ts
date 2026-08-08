@@ -95,4 +95,22 @@ describe("ApiClient safety defaults", () => {
     expect(JSON.parse(String(init.body))).toEqual({source_fingerprint: fingerprint, confirm_import: true});
     expect(String(init.body)).not.toContain("password");
   });
+
+  it("lists global audit events with exact filters and an opaque cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true, status: "ready", audit_events: [], has_more: false, next_cursor: "", blockers: [], next_actions: [],
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("ua_test-token-value-that-is-long-enough").listAuditEvents({
+      actorType: "worker", action: "downloader.torrent.add", resourceType: "downloader",
+      resourceID: "box", limit: 20, cursor: "opaque",
+    });
+    const [path] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URLSearchParams(path.split("?")[1]);
+    expect(path.split("?")[0]).toBe("/api/v2/audit-events");
+    expect(Object.fromEntries(query)).toEqual({
+      limit: "20", actor_type: "worker", action: "downloader.torrent.add",
+      resource_type: "downloader", resource_id: "box", cursor: "opaque",
+    });
+  });
 });

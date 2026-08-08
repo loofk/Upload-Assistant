@@ -126,6 +126,25 @@
         "responses": {"200": {"description": "Redacted in-app and external delivery audit", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationListEnvelope"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/audit-events": {
+      "get": {
+        "operationId": "listAuditEvents",
+        "parameters": [
+          {"name": "actor_type", "in": "query", "schema": {"type": "string", "maxLength": 100}},
+          {"name": "action", "in": "query", "schema": {"type": "string", "maxLength": 100}},
+          {"name": "resource_type", "in": "query", "schema": {"type": "string", "maxLength": 100}},
+          {"name": "resource_id", "in": "query", "schema": {"type": "string", "maxLength": 200}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string", "description": "Opaque stable pagination cursor returned by the previous page."}}
+        ],
+        "responses": {
+          "200": {"description": "Recursively redacted global configuration and external-action audit events", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuditEventListEnvelope"}}}},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "401": {"$ref": "#/components/responses/Problem"},
+          "403": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
     "/api/v2/jobs": {
       "get": {
         "operationId": "listJobs",
@@ -776,6 +795,27 @@
       },
       "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object", "description": "The raw durable snapshot is never returned. The API exposes only {redacted:true,sha256:<digest>}."}, "output_summary": {"type": "object", "description": "Recursively redacted step output evidence."}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
       "Event": {"type": "object", "required": ["id", "job_id", "sequence", "type", "actor_type", "payload", "hash", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "sequence": {"type": "integer"}, "type": {"type": "string"}, "actor_type": {"type": "string"}, "actor_id": {"type": "string"}, "payload": {"type": "object"}, "previous_hash": {"type": "string"}, "hash": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}},
+      "AuditEvent": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "actor_type", "action", "resource_type", "payload", "created_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "actor_type": {"type": "string"}, "actor_id": {"type": "string"},
+          "action": {"type": "string"}, "resource_type": {"type": "string"}, "resource_id": {"type": "string"},
+          "trace_id": {"type": "string", "format": "uuid"}, "payload": {"type": "object", "additionalProperties": true},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "AuditEventListEnvelope": {
+        "type": "object", "additionalProperties": false,
+        "required": ["ok", "status", "audit_events", "has_more", "next_cursor", "blockers", "next_actions"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true}, "status": {"type": "string", "const": "ready"},
+          "audit_events": {"type": "array", "items": {"$ref": "#/components/schemas/AuditEvent"}},
+          "has_more": {"type": "boolean"}, "next_cursor": {"type": "string"},
+          "blockers": {"type": "array", "maxItems": 0, "items": {"$ref": "#/components/schemas/Blocker"}},
+          "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}
+        }
+      },
       "Artifact": {"type": "object", "required": ["id", "job_id", "kind", "storage_backend", "storage_path", "filename", "size_bytes", "sha256", "metadata", "expires_at", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "storage_backend": {"type": "string"}, "storage_path": {"type": "string"}, "filename": {"type": "string"}, "mime_type": {"type": "string"}, "size_bytes": {"type": "integer"}, "sha256": {"type": "string"}, "metadata": {"type": "object"}, "expires_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}}},
       "EndpointConfig": {"type": "object", "additionalProperties": false, "required": ["endpoint"], "properties": {"endpoint": {"type": "string", "format": "uri"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 30}, "options": {"type": "object", "description": "Non-secret adapter options only.", "additionalProperties": true}}},
       "PathMapping": {"type": "object", "additionalProperties": false, "required": ["remote_path", "local_path"], "properties": {"remote_path": {"type": "string", "pattern": "^/"}, "local_path": {"type": "string", "pattern": "^/"}, "priority": {"type": "integer"}}},

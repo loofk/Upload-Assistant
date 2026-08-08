@@ -183,6 +183,8 @@ func (r runner) execute(ctx context.Context, args []string) (json.RawMessage, er
 		return r.integrations(ctx, args[1:])
 	case "notifications":
 		return r.notifications(ctx, args[1:])
+	case "audit":
+		return r.audit(ctx, args[1:])
 	default:
 		return nil, fmt.Errorf("unknown CLI command %q", args[0])
 	}
@@ -541,6 +543,29 @@ func (r runner) notifications(ctx context.Context, args []string) (json.RawMessa
 	return r.request(ctx, http.MethodGet, "/api/v2/notifications", url.Values{"limit": []string{strconv.Itoa(*limit)}}, nil, nil, true)
 }
 
+func (r runner) audit(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 || args[0] != "list" {
+		return nil, errors.New("usage: audit list [--actor-type TYPE] [--action ACTION] [--resource-type TYPE] [--resource-id ID] [--limit N] [--cursor CURSOR]")
+	}
+	flags := newFlags("audit list")
+	actorType := flags.String("actor-type", "", "exact actor type")
+	action := flags.String("action", "", "exact audited action")
+	resourceType := flags.String("resource-type", "", "exact resource type")
+	resourceID := flags.String("resource-id", "", "exact resource identifier")
+	limit := flags.Int("limit", 50, "result limit")
+	cursor := flags.String("cursor", "", "pagination cursor")
+	if err := parseFlags(flags, args[1:]); err != nil {
+		return nil, err
+	}
+	query := url.Values{"limit": []string{strconv.Itoa(*limit)}}
+	setQuery(query, "actor_type", *actorType)
+	setQuery(query, "action", *action)
+	setQuery(query, "resource_type", *resourceType)
+	setQuery(query, "resource_id", *resourceID)
+	setQuery(query, "cursor", *cursor)
+	return r.request(ctx, http.MethodGet, "/api/v2/audit-events", query, nil, nil, true)
+}
+
 func (r runner) shell(ctx context.Context) error {
 	_, _ = io.WriteString(r.streams.Err, "Upload Assistant 交互 CLI。输入 help 查看命令，exit 退出。\n")
 	scanner := bufio.NewScanner(io.LimitReader(r.streams.In, 4<<20))
@@ -801,6 +826,7 @@ Usage:
   upload-assistant cli [global options] rules active SITE
   upload-assistant cli [global options] integrations list COLLECTION
   upload-assistant cli [global options] notifications [--limit N]
+  upload-assistant cli [global options] audit list [filters]
   upload-assistant cli [global options] shell
 
 Global options:

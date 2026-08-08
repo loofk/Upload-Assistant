@@ -141,6 +141,29 @@ func TestAPIFailureIsReturnedAsStableJSON(t *testing.T) {
 	}
 }
 
+func TestAuditListUsesExactFiltersAndStableCursor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v2/audit-events" ||
+			query.Get("actor_type") != "worker" || query.Get("action") != "downloader.torrent.add" ||
+			query.Get("resource_type") != "downloader" || query.Get("resource_id") != "box" ||
+			query.Get("limit") != "20" || query.Get("cursor") != "opaque" {
+			t.Fatalf("request = %s %s query=%v", request.Method, request.URL.Path, query)
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"ready","audit_events":[],"has_more":false,"next_cursor":"","blockers":[],"next_actions":[]}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--api-url", server.URL, "audit", "list", "--actor-type", "worker",
+		"--action", "downloader.torrent.add", "--resource-type", "downloader",
+		"--resource-id", "box", "--limit", "20", "--cursor", "opaque",
+	}, testStreams(&output, nil))
+	if err != nil || !strings.Contains(output.String(), `"audit_events": []`) {
+		t.Fatalf("Run() err=%v output=%s", err, output.String())
+	}
+}
+
 func testStreams(output io.Writer, input io.Reader) Streams {
 	if input == nil {
 		input = strings.NewReader("")

@@ -35,6 +35,7 @@ upload-assistant cli jobs list --limit 20
 upload-assistant cli jobs summary <job-id>
 upload-assistant cli candidates list --source U2 --target MTEAM
 upload-assistant cli integrations list downloaders
+upload-assistant cli audit list --resource-type downloader --resource-id box
 upload-assistant cli shell
 ```
 
@@ -54,6 +55,12 @@ upload-assistant cli jobs resume <job-id> \
 ```
 
 live 上传只能用显式 `--confirm-upload`，且同一次命令必须重新提交源站和目标站的精确规则 fingerprint；CLI 只是减少误操作，服务端仍会重新验证规则、人工 obligation、查重、不可变上传包与做种 gate。
+
+## 审计读取
+
+- `GET /api/v2/jobs/{job_id}/events` 是单个任务的 append-only hash 链；配合 steps、artifacts 与 summary 可验证每个转种边界和证据文件。
+- `GET /api/v2/audit-events` 是配置变更、远程下载器/图床动作、通知、迁移和 Sonarr/Radarr 等全局动作的脱敏审计，可按 `actor_type`、`action`、`resource_type`、`resource_id` 精确过滤，并使用不透明 cursor 稳定翻页。该全局日志不会被描述为任务 hash 链。
+- Web 顶部「审计」和 CLI `audit list` 读取同一接口。API 返回前会递归脱敏 credential、cookie、token、passkey、announce URL 等敏感字段；需要证明某个任务完整性时仍应回到该任务的事件链和 artifact SHA-256。
 
 旧版配置迁移使用独立的只读挂载。默认读取宿主机 `./data`，可在启动前设置：
 
