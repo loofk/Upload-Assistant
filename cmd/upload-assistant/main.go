@@ -144,6 +144,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize target torrent adapters: %w", err)
 	}
+	targetUploadRegistry, err := sites.NewTargetUploadRegistry(mteamClient)
+	if err != nil {
+		return fmt.Errorf("initialize target upload adapters: %w", err)
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	jobRunner := worker.New(
@@ -166,6 +170,7 @@ func serve(args []string) error {
 			torrentmaker.NewMkbrr(cfg.MkbrrBinary, filepath.Join(cfg.DataDir, "tmp"), 0),
 			artifactStore,
 		),
+		worker.WithTargetUploads(targetUploadRegistry, targetDuplicateRegistry, ruleStore, artifactStore),
 	)
 	go jobRunner.Run(ctx)
 

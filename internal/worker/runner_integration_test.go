@@ -70,7 +70,8 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 				"confirmed": true, "evidence": "Fixture confirms target-side upload obligations were reviewed.",
 			}},
 		}},
-		"downloader": map[string]any{"name": "fixture-box", "save_path": "/remote/downloads"},
+		"downloader":     map[string]any{"name": "fixture-box", "save_path": "/remote/downloads"},
+		"confirm_upload": true,
 	})
 	job, err := service.CreateJob(ctx, workflow.CreateJobInput{
 		Kind: "retorrent", ExecutionMode: workflow.ExecutionAuto, Input: input,
@@ -140,6 +141,11 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		Torrent: targetTorrentMetainfo("https://fake.tracker", "MTEAM", 13, nil),
 		Tool:    "mkbrr", Version: "mkbrr version: v1.23.0", Verification: "100.00%",
 	}}
+	targetUploader := &fakeTargetUploader{result: sites.TargetUploadEvidence{
+		SiteCode: "MTEAM", Adapter: "mteam_api", ConfigurationSHA256: strings.Repeat("c", 64),
+		TorrentID: "98765", DetailsURL: "https://kp.m-team.cc/details/98765",
+		ResponseSHA256: strings.Repeat("e", 64), SubmittedAt: time.Unix(3, 0).UTC(),
+	}}
 	runner := New(
 		service, "fixture-worker", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithRuleProvider(integrationRuleProvider{revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule}}),
@@ -170,6 +176,9 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 		WithTargetPackages(mustTargetPackageRegistry(t), artifactStore),
 		WithTargetDuplicateChecks(targetDuplicates, artifactStore),
 		WithTargetTorrents(targetTorrentProfiles, targetTorrentMaker, artifactStore),
+		WithTargetUploads(targetUploader, targetDuplicates, integrationRuleProvider{
+			revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule},
+		}, artifactStore),
 	)
 	for iteration := 0; iteration < 6; iteration++ {
 		if err := runner.RunOnce(ctx); err != nil {
@@ -313,6 +322,20 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
 	if err != nil || len(storedArtifacts) != 10 || storedArtifacts[8].Kind != "target_torrent" || storedArtifacts[9].Kind != "target_torrent_receipt" {
 		t.Fatalf("target-torrent artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("target upload RunOnce() error = %v", err)
+	}
+	job, err = service.GetJob(ctx, job.ID)
+	if err != nil || job.Status != workflow.JobQueued || job.CurrentStep != "target_torrent_download" {
+		t.Fatalf("target-upload job status/current/error = %s/%s/%v", job.Status, job.CurrentStep, err)
+	}
+	storedArtifacts, err = service.ListArtifacts(ctx, job.ID)
+	if err != nil || len(storedArtifacts) != 12 || storedArtifacts[10].Kind != "preupload_duplicate_check" || storedArtifacts[11].Kind != "target_upload_receipt" {
+		t.Fatalf("target-upload artifacts/error = %#v/%v", storedArtifacts, err)
+	}
+	if targetDuplicates.calls != 2 || targetUploader.calls != 1 || !targetUploader.request.Confirmed {
+		t.Fatalf("target upload calls = duplicates:%d uploader:%d confirmed:%t", targetDuplicates.calls, targetUploader.calls, targetUploader.request.Confirmed)
 	}
 	events, err := service.ListEvents(ctx, job.ID, 0, 200)
 	if err != nil || workflow.VerifyEventChain(events) != nil {
