@@ -41,6 +41,25 @@ type replayJobService struct {
 	err   error
 }
 
+type attentionJobService struct {
+	JobService
+	job         workflow.Job
+	resumeState json.RawMessage
+	resumeCalls int
+}
+
+func (service *attentionJobService) GetJob(context.Context, string) (workflow.Job, error) {
+	return service.job, nil
+}
+
+func (service *attentionJobService) ResumeJob(_ context.Context, _ string, state json.RawMessage, _ workflow.Actor) (workflow.Job, error) {
+	service.resumeCalls++
+	service.resumeState = append(json.RawMessage(nil), state...)
+	service.job.Status = workflow.JobQueued
+	service.job.Blockers = json.RawMessage(`[]`)
+	return service.job, nil
+}
+
 func (service *replayJobService) ReplayJob(_ context.Context, _ string, input workflow.ReplayJobInput) (workflow.Job, error) {
 	service.input = input
 	return service.job, service.err
@@ -225,6 +244,47 @@ func TestResumeReconciliationReturnsStableConflict(t *testing.T) {
 	writeWorkflowError(response, fmt.Errorf("%w: blocker target_upload_outcome_unknown must be reconciled", workflow.ErrReconciliation))
 	if response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"reconciliation_required"`)) {
 		t.Fatalf("reconciliation status/body = %d/%s", response.Code, response.Body.String())
+	}
+}
+
+func TestJobAttentionMakesUnknownRemoteOutcomeNonExecutable(t *testing.T) {
+	jobID := "44444444-4444-4444-8444-444444444444"
+	service := &attentionJobService{job: workflow.Job{
+		ID: jobID, Status: workflow.JobBlocked, CurrentStep: "target_upload",
+		Blockers:    json.RawMessage(`[{"code":"target_upload_outcome_unknown","message":"remote result unknown","site_code":"MTEAM"}]`),
+		NextActions: json.RawMessage(`[]`), ResumeState: json.RawMessage(`{"reconciliation":{}}`),
+	}}
+	request := httptest.NewRequest(http.MethodGet, "/attention", nil)
+	request.SetPathValue("job_id", jobID)
+	request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{UserID: "operator", Role: "operator", TokenScopes: []string{"jobs:read"}}))
+	response := httptest.NewRecorder()
+	(jobsAPI{service: service}).attention(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"id":"provide_reconciliation"`)) || bytes.Contains(response.Body.Bytes(), []byte(`"executable":true`)) {
+		t.Fatalf("attention response = %d/%s", response.Code, response.Body.String())
+	}
+}
+
+func TestJobActionRequiresFreshIssueAndExplicitRepairApproval(t *testing.T) {
+	jobID := "44444444-4444-4444-8444-444444444444"
+	service := &attentionJobService{job: workflow.Job{
+		ID: jobID, Status: workflow.JobFailed, CurrentStep: "media_info",
+		Blockers: json.RawMessage(`[]`), NextActions: json.RawMessage(`[]`), ResumeState: json.RawMessage(`{"keep":"evidence"}`),
+	}}
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/actions", strings.NewReader(body))
+		request.SetPathValue("job_id", jobID)
+		request = request.WithContext(security.WithPrincipal(request.Context(), security.Principal{UserID: "operator", Role: "operator", TokenScopes: []string{"jobs:write"}}))
+		response := httptest.NewRecorder()
+		(jobsAPI{service: service}).performAction(response, request)
+		return response
+	}
+	response := call(`{"action_id":"approve_safe_repair","expected_status":"failed","expected_step":"media_info","expected_blocker_code":"step_execution_failed"}`)
+	if response.Code != http.StatusBadRequest || service.resumeCalls != 0 {
+		t.Fatalf("unconfirmed repair = %d/%s calls=%d", response.Code, response.Body.String(), service.resumeCalls)
+	}
+	response = call(`{"action_id":"approve_safe_repair","expected_status":"failed","expected_step":"media_info","expected_blocker_code":"step_execution_failed","confirmed":true}`)
+	if response.Code != http.StatusOK || service.resumeCalls != 1 || string(service.resumeState) != `{"keep":"evidence"}` {
+		t.Fatalf("confirmed repair = %d/%s calls=%d state=%s", response.Code, response.Body.String(), service.resumeCalls, service.resumeState)
 	}
 }
 

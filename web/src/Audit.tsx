@@ -34,8 +34,8 @@ export default function Audit({client, onError}: {client: ApiClient; onError: (r
   };
 
   return <main className="audit-pane">
-    <header className="audit-header">
-      <div><p className="eyebrow">GLOBAL AUDIT LOG</p><h1>全局审计</h1><p>查看配置变更与外部动作的脱敏记录。任务步骤、artifact hash 与事件 hash 链请在对应任务中查看。</p></div>
+    <header className="audit-header content-toolbar">
+      <p>配置变更与外部动作；任务步骤和证据仍在对应任务中查看。</p>
       <button className="secondary" onClick={() => void load()} disabled={loading}>刷新审计</button>
     </header>
     <form className="audit-filters" onSubmit={filter}>

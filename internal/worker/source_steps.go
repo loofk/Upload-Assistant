@@ -56,6 +56,9 @@ func (executor sourceInspectExecutor) Execute(ctx context.Context, execution Exe
 	}
 	info, err := executor.provider.Inspect(ctx, reference)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, sourceAdapterBlock(err, reference, "inspect_source")
 	}
 	result := map[string]any{"source_info": info}
@@ -103,6 +106,9 @@ func (executor sourceTorrentExecutor) Execute(ctx context.Context, execution Exe
 	}
 	download, err := executor.provider.Download(ctx, reference)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, sourceAdapterBlock(err, reference, "download_source_torrent")
 	}
 	file, err := executor.artifacts.Write(ctx, artifacts.Scope{

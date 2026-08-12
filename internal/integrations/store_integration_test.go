@@ -218,6 +218,16 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	if err != nil || runtimeImageHost.Credentials["api_key"] != "encrypted-image-key" || runtimeImageHost.EndpointConfig.Endpoint != "https://api.imgbb.com/1/upload" {
 		t.Fatalf("GetRuntimeImageHost() runtime/error = %#v/%v", runtimeImageHost, err)
 	}
+	if _, err := store.UpsertImageHost(ctx, imageHost.Name, ImageHostInput{
+		Adapter: "imgbb", Enabled: &enabled, Priority: 15,
+		Config: EndpointConfig{Endpoint: "https://api.imgbb.com/1/upload"},
+	}, actor); err != nil {
+		t.Fatalf("UpsertImageHost() did not preserve an existing ImgBB key: %v", err)
+	}
+	runtimeImageHost, err = store.GetRuntimeImageHost(ctx, imageHost.Name)
+	if err != nil || runtimeImageHost.Credentials["api_key"] != "encrypted-image-key" {
+		t.Fatalf("GetRuntimeImageHost() lost preserved ImgBB key: %#v/%v", runtimeImageHost, err)
+	}
 	if err := store.RecordImageHostHealth(ctx, imageHost.Name, "ready", map[string]any{"adapter": "imgbb"}, actor); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +237,24 @@ func TestStoreEncryptedIntegrationConfiguration(t *testing.T) {
 	}
 	if err := store.AuditImageHostAction(ctx, imageHost.Name, "image.upload", map[string]any{"source_sha256": "fixture"}, actor); err != nil {
 		t.Fatal(err)
+	}
+	pixhost, err := store.UpsertImageHost(ctx, "pixhost-"+nameSuffix, ImageHostInput{
+		Adapter: "pixhost", Enabled: &enabled, Priority: 20,
+		Config: EndpointConfig{Endpoint: "https://api.pixhost.to/images"},
+	}, actor)
+	if err != nil || len(pixhost.CredentialFields) != 0 {
+		t.Fatalf("UpsertImageHost() keyless pixhost/error = %#v/%v", pixhost, err)
+	}
+	pixhostRuntime, err := store.GetRuntimeImageHost(ctx, pixhost.Name)
+	if err != nil || len(pixhostRuntime.Credentials) != 0 || pixhostRuntime.Adapter != "pixhost" {
+		t.Fatalf("GetRuntimeImageHost() keyless pixhost/error = %#v/%v", pixhostRuntime, err)
+	}
+	if _, err := store.UpsertImageHost(ctx, "pixhost-secret-"+nameSuffix, ImageHostInput{
+		Adapter: "pixhost", Enabled: &enabled,
+		Config:      EndpointConfig{Endpoint: "https://api.pixhost.to/images"},
+		Credentials: map[string]string{"api_key": "must-not-be-stored"},
+	}, actor); !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpsertImageHost() accepted credentials for Pixhost: %v", err)
 	}
 
 	notificationChannel, err := store.UpsertNotificationChannel(ctx, "discord-"+nameSuffix, NotificationChannelInput{

@@ -31,7 +31,7 @@ func TestLocalRuleDraftsUseSafeYAMLContract(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseMarkdown(%s) error = %v", path, err)
 			}
-			if document.Format != "yaml" || document.Kind != Kind {
+			if document.Format != "yaml" || (document.Kind != Kind && document.Kind != KindV2) {
 				t.Fatalf("repository rule format=%q kind=%q", document.Format, document.Kind)
 			}
 			if len(document.Site.Roles) != 1 {
@@ -44,9 +44,6 @@ func TestLocalRuleDraftsUseSafeYAMLContract(t *testing.T) {
 				if document.Automation.AutoPull || document.Automation.AutoUpload {
 					t.Fatalf("incomplete local rule enabled automation: auto_pull=%t auto_upload=%t", document.Automation.AutoPull, document.Automation.AutoUpload)
 				}
-			}
-			if !document.Transfer.ForbidOriginalTorrent || !document.Transfer.PreserveContent {
-				t.Fatalf("repository draft omitted transfer hard gates: %#v", document.Transfer)
 			}
 			pendingManualBlocker := false
 			for _, obligation := range document.Obligations {

@@ -451,7 +451,7 @@ func (s *Store) ListAttempts(ctx context.Context, jobID string, filter ListAttem
 	}
 	query := `
 		SELECT sa.id::text, js.job_id::text, js.id::text, js.step_key, js.position,
-		       sa.attempt, sa.status, COALESCE(sa.adapter, ''), COALESCE(sa.adapter_version, ''),
+		       sa.attempt, sa.trace_id::text, sa.status, COALESCE(sa.adapter, ''), COALESCE(sa.adapter_version, ''),
 		       sa.input_snapshot, sa.output_summary, COALESCE(sa.error_code, ''),
 		       COALESCE(sa.error_message, ''), sa.started_at, sa.finished_at
 		FROM step_attempts sa
@@ -476,7 +476,7 @@ func (s *Store) ListAttempts(ctx context.Context, jobID string, filter ListAttem
 		var finishedAt pgtype.Timestamptz
 		if err := rows.Scan(
 			&attempt.ID, &attempt.JobID, &attempt.StepID, &attempt.StepKey, &attempt.StepPosition,
-			&attempt.Number, &attempt.Status, &attempt.Adapter, &attempt.AdapterVersion,
+			&attempt.Number, &attempt.TraceID, &attempt.Status, &attempt.Adapter, &attempt.AdapterVersion,
 			&attempt.InputSnapshot, &attempt.OutputSummary, &attempt.ErrorCode, &errorDetails,
 			&attempt.StartedAt, &finishedAt,
 		); err != nil {
@@ -675,7 +675,7 @@ func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Durat
 	err = tx.QueryRow(ctx, `
 		SELECT id::text, status, COALESCE(lease_owner, '')
 		FROM jobs
-		WHERE status = 'queued'
+		WHERE (status = 'queued' AND (not_before IS NULL OR not_before <= now()))
 		   OR (status = 'running' AND lease_expires_at < now())
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
@@ -756,7 +756,7 @@ func (s *Store) ClaimNextJob(ctx context.Context, owner string, lease time.Durat
 	if _, err := tx.Exec(ctx, `
 		UPDATE jobs
 		SET status = 'running', lease_owner = $2, lease_expires_at = now() + $3::interval,
-		    heartbeat_at = now(), started_at = COALESCE(started_at, now()), updated_at = now()
+		    heartbeat_at = now(), not_before = NULL, started_at = COALESCE(started_at, now()), updated_at = now()
 		WHERE id = $1`, id, owner, intervalLiteral(lease)); err != nil {
 		return Job{}, fmt.Errorf("claim job: %w", err)
 	}
@@ -907,11 +907,13 @@ func (s *Store) StartCurrentStep(ctx context.Context, jobID, owner string, actor
 	err = tx.QueryRow(ctx, `
 		INSERT INTO step_attempts(job_step_id, attempt, status, input_snapshot)
 		VALUES ($1, $2, 'running', $3)
-		RETURNING id::text, started_at`, step.ID, attemptNumber, inputSnapshot).Scan(&attempt.ID, &attempt.StartedAt)
+		RETURNING id::text, trace_id::text, started_at`, step.ID, attemptNumber, inputSnapshot).Scan(&attempt.ID, &attempt.TraceID, &attempt.StartedAt)
 	if err != nil {
 		return Step{}, Attempt{}, fmt.Errorf("insert step attempt: %w", err)
 	}
 	attempt.StepID = step.ID
+	attempt.JobID = jobID
+	attempt.StepKey = step.Key
 	attempt.Number = attemptNumber
 	attempt.Status = StepRunning
 	if _, err := tx.Exec(ctx, `
@@ -1068,6 +1070,68 @@ func (s *Store) FailStep(
 	return s.stopStep(ctx, jobID, owner, attemptID, StepFailed, blockers, nextActions, json.RawMessage(`{}`), "step.failed", actor)
 }
 
+func (s *Store) DeferStep(
+	ctx context.Context,
+	jobID, owner, attemptID string,
+	notBefore time.Time,
+	reason string,
+	resumeState json.RawMessage,
+	actor Actor,
+) (Job, error) {
+	if notBefore.IsZero() || !notBefore.After(time.Now().UTC().Add(-time.Second)) {
+		return Job{}, fmt.Errorf("deferred step requires a future not_before")
+	}
+	if len(resumeState) == 0 {
+		resumeState = json.RawMessage(`{}`)
+	}
+	canonical, err := canonicalJSON(resumeState)
+	if err != nil {
+		return Job{}, fmt.Errorf("canonicalize deferred resume state: %w", err)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Job{}, fmt.Errorf("begin defer step transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var stepID, stepKey, leaseOwner string
+	var jobStatus JobStatus
+	var attemptStatus StepStatus
+	if err := tx.QueryRow(ctx, `SELECT step.id::text,step.step_key,COALESCE(job.lease_owner,''),job.status,attempt.status
+		FROM step_attempts attempt JOIN job_steps step ON step.id=attempt.job_step_id
+		JOIN jobs job ON job.id=step.job_id WHERE attempt.id=$1 AND job.id=$2
+		FOR UPDATE OF job,step,attempt`, attemptID, jobID).Scan(&stepID, &stepKey, &leaseOwner, &jobStatus, &attemptStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Job{}, ErrNotFound
+		}
+		return Job{}, fmt.Errorf("lock deferred step: %w", err)
+	}
+	if jobStatus != JobRunning || leaseOwner != owner || attemptStatus != StepRunning {
+		return Job{}, fmt.Errorf("%w: job attempt is not running for this worker", ErrConflict)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE step_attempts SET status='paused',error_code='site_access_deferred',
+		error_message=$2,finished_at=now() WHERE id=$1`, attemptID, strings.TrimSpace(reason)); err != nil {
+		return Job{}, fmt.Errorf("close deferred attempt: %w", err)
+	}
+	nextActions, _ := json.Marshal([]map[string]any{{"action": "wait_for_site_access", "not_before": notBefore.UTC(), "reason": strings.TrimSpace(reason)}})
+	if _, err := tx.Exec(ctx, `UPDATE job_steps SET status='ready',blockers='[]',next_actions=$2,resume_state=$3,
+		started_at=NULL,finished_at=NULL,updated_at=now() WHERE id=$1`, stepID, nextActions, canonical); err != nil {
+		return Job{}, fmt.Errorf("reset deferred step: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET status='queued',blockers='[]',next_actions=$2,resume_state=$3,
+		not_before=$4,lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,updated_at=now() WHERE id=$1`, jobID, nextActions, canonical, notBefore.UTC()); err != nil {
+		return Job{}, fmt.Errorf("queue deferred job: %w", err)
+	}
+	if _, err := appendEvent(ctx, tx, jobID, stepID, attemptID, "step.deferred", actor, map[string]any{
+		"step_key": stepKey, "reason": strings.TrimSpace(reason), "not_before": notBefore.UTC(),
+	}); err != nil {
+		return Job{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, fmt.Errorf("commit deferred step: %w", err)
+	}
+	return s.GetJob(ctx, jobID)
+}
+
 func (s *Store) stopStep(
 	ctx context.Context,
 	jobID, owner, attemptID string,
@@ -1176,6 +1240,104 @@ func (s *Store) ResumeJob(ctx context.Context, jobID string, resumeState json.Ra
 		return Job{}, fmt.Errorf("resume state must be valid JSON")
 	}
 	return s.transitionJob(ctx, jobID, actor, []JobStatus{JobPaused, JobBlocked, JobFailed}, JobQueued, "job.resumed", resumeState)
+}
+
+func (s *Store) ReviseTargetPackage(ctx context.Context, jobID string, input ReviseTargetPackageInput) (Job, error) {
+	expectedSHA := strings.ToLower(strings.TrimSpace(input.ExpectedPackageSHA256))
+	if digest, err := hex.DecodeString(expectedSHA); err != nil || len(digest) != sha256.Size {
+		return Job{}, fmt.Errorf("expected package SHA-256 is invalid")
+	}
+	var options map[string]any
+	if err := json.Unmarshal(input.Options, &options); err != nil || options == nil {
+		return Job{}, fmt.Errorf("target package revision options must be a JSON object")
+	}
+	canonicalOptions, err := canonicalJSON(input.Options)
+	if err != nil {
+		return Job{}, fmt.Errorf("canonicalize target package revision: %w", err)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Job{}, fmt.Errorf("begin target package revision: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var status JobStatus
+	var kind string
+	var blockers, resumeState json.RawMessage
+	if err := tx.QueryRow(ctx, `SELECT status,kind,blockers,resume_state FROM jobs WHERE id=$1 FOR UPDATE`, jobID).Scan(&status, &kind, &blockers, &resumeState); errors.Is(err, pgx.ErrNoRows) {
+		return Job{}, ErrNotFound
+	} else if err != nil {
+		return Job{}, fmt.Errorf("lock target package job: %w", err)
+	}
+	if kind != "retorrent" || (status != JobPaused && status != JobBlocked && status != JobFailed) {
+		return Job{}, fmt.Errorf("%w: target package can only be revised on a stopped retorrent job", ErrConflict)
+	}
+	if unsafe, err := unsafeReplayBlocker(blockers); err != nil {
+		return Job{}, err
+	} else if unsafe != "" {
+		return Job{}, fmt.Errorf("%w: %s must be reconciled before any package revision", ErrReconciliation, unsafe)
+	}
+	var packageStepID, packageOutput string
+	var packagePosition int
+	var packageStatus StepStatus
+	if err := tx.QueryRow(ctx, `SELECT id::text,position,status,output_summary::text FROM job_steps WHERE job_id=$1 AND step_key='target_package' FOR UPDATE`, jobID).Scan(&packageStepID, &packagePosition, &packageStatus, &packageOutput); err != nil {
+		return Job{}, fmt.Errorf("lock target package step: %w", err)
+	}
+	if packageStatus != StepComplete {
+		return Job{}, fmt.Errorf("%w: target package has not completed", ErrConflict)
+	}
+	var packageEvidence struct {
+		SHA256 string `json:"package_sha256"`
+	}
+	if json.Unmarshal([]byte(packageOutput), &packageEvidence) != nil || !strings.EqualFold(packageEvidence.SHA256, expectedSHA) {
+		return Job{}, fmt.Errorf("%w: target package changed; refresh the preview", ErrConflict)
+	}
+	var completedUploads int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM job_steps WHERE job_id=$1 AND step_key='target_upload' AND status='complete'`, jobID).Scan(&completedUploads); err != nil {
+		return Job{}, err
+	}
+	if completedUploads > 0 {
+		return Job{}, fmt.Errorf("%w: target upload already completed and its package cannot be revised", ErrConflict)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(resumeState, &state); err != nil || state == nil {
+		state = map[string]any{}
+	}
+	state["target_package"] = options
+	state["confirm_upload"] = false
+	delete(state, "target_package_requirements")
+	delete(state, "reconciliation")
+	updatedState, err := json.Marshal(state)
+	if err != nil {
+		return Job{}, err
+	}
+	updatedState, err = canonicalJSON(updatedState)
+	if err != nil {
+		return Job{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE job_steps SET
+		status=CASE WHEN position=$3 THEN 'ready' ELSE 'pending' END,
+		input_snapshot='{}',output_summary='{}',blockers='[]',next_actions='[]',resume_state='{}',
+		started_at=NULL,finished_at=NULL,updated_at=now()
+		WHERE job_id=$1 AND position >= $2`, jobID, packagePosition, packagePosition); err != nil {
+		return Job{}, fmt.Errorf("reset target package downstream steps: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET status='queued',current_step_key='target_package',blockers='[]',next_actions='[]',
+		resume_state=$2,summary='{}',not_before=NULL,lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
+		finished_at=NULL,updated_at=now() WHERE id=$1`, jobID, updatedState); err != nil {
+		return Job{}, fmt.Errorf("queue target package revision: %w", err)
+	}
+	if _, err := appendEvent(ctx, tx, jobID, packageStepID, "", "target_package.revision_requested", input.Actor, map[string]any{
+		"previous_package_sha256": expectedSHA,
+		"options_sha256":          sha256Hex(canonicalOptions),
+		"confirm_upload_reset":    true,
+		"downstream_invalidated":  true,
+	}); err != nil {
+		return Job{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, fmt.Errorf("commit target package revision: %w", err)
+	}
+	return s.GetJob(ctx, jobID)
 }
 
 type reconciliationInput struct {
@@ -1554,7 +1716,7 @@ func buildStepInputSnapshot(
 const jobSelect = `
 	SELECT id::text, COALESCE(replay_of_job_id::text, ''), kind, status, execution_mode, COALESCE(current_step_key, ''),
 	       input, blockers, next_actions, resume_state, summary,
-	       created_at, updated_at, started_at, finished_at
+	       created_at, updated_at, started_at, finished_at, not_before
 	FROM jobs`
 
 const stepSelect = `
@@ -1565,11 +1727,11 @@ const stepSelect = `
 
 func scanJob(row pgx.Row) (Job, error) {
 	var job Job
-	var startedAt, finishedAt pgtype.Timestamptz
+	var startedAt, finishedAt, notBefore pgtype.Timestamptz
 	err := row.Scan(
 		&job.ID, &job.ReplayOfJobID, &job.Kind, &job.Status, &job.ExecutionMode, &job.CurrentStep,
 		&job.Input, &job.Blockers, &job.NextActions, &job.ResumeState, &job.Summary,
-		&job.CreatedAt, &job.UpdatedAt, &startedAt, &finishedAt,
+		&job.CreatedAt, &job.UpdatedAt, &startedAt, &finishedAt, &notBefore,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
@@ -1579,6 +1741,7 @@ func scanJob(row pgx.Row) (Job, error) {
 	}
 	job.StartedAt = timePointer(startedAt)
 	job.FinishedAt = timePointer(finishedAt)
+	job.NotBefore = timePointer(notBefore)
 	return job, nil
 }
 

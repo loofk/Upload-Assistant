@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -98,6 +99,155 @@ func TestManagerUploadsPTPImgContract(t *testing.T) {
 	}
 	if evidence.Result.URL != "https://ptpimg.me/abc123.png" || evidence.Result.RemoteID != "abc123" {
 		t.Fatalf("upload evidence = %#v", evidence)
+	}
+}
+
+func TestManagerUploadsPixhostWithoutCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images" || r.URL.RawQuery != "" {
+			t.Fatalf("pixhost request path/query = %q/%q", r.URL.Path, r.URL.RawQuery)
+		}
+		if err := r.ParseMultipartForm(12 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("content_type") != "0" || r.FormValue("max_th_size") != "350" {
+			t.Fatalf("pixhost fields = %#v", r.MultipartForm.Value)
+		}
+		file, header, err := r.FormFile("img")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = file.Close()
+		if header.Filename != "fixture.png" {
+			t.Fatalf("pixhost filename = %q", header.Filename)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"name": "fixture.png", "show_url": "https://pixhost.to/show/8582/563_fixture.png",
+			"th_url": "https://t1.pixhost.to/thumbs/8582/563_fixture.png",
+		})
+	}))
+	defer server.Close()
+	store := runtimeStore("pixhost", server.URL+"/images", nil)
+	evidence, err := NewManager(store, nil).Upload(context.Background(), "primary", fixtureImage(), workflow.Actor{Type: "test", ID: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Result.URL != "https://img1.pixhost.to/images/8582/563_fixture.png" ||
+		evidence.Result.ViewerURL != "https://pixhost.to/show/8582/563_fixture.png" ||
+		evidence.Result.ThumbnailURL != "https://t1.pixhost.to/thumbs/8582/563_fixture.png" || evidence.Result.RemoteID != "563_fixture.png" {
+		t.Fatalf("pixhost upload evidence = %#v", evidence)
+	}
+	tampered := evidence
+	tampered.Result.URL = "https://img2.pixhost.to/images/8582/563_fixture.png"
+	if err := ValidateUploadEvidence(tampered, fixtureImage()); err == nil {
+		t.Fatal("tampered Pixhost direct URL was accepted")
+	}
+}
+
+func TestManagerUploadsImgboxWithEphemeralTokensAndNoAPIKey(t *testing.T) {
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		if r.UserAgent() != "Upload-Assistant/2" || r.URL.RawQuery != "" {
+			t.Fatalf("imgbox request exposed unexpected user agent/query = %q/%q", r.UserAgent(), r.URL.RawQuery)
+		}
+		switch r.URL.Path {
+		case "/":
+			if r.Method != http.MethodGet {
+				t.Fatalf("imgbox entry method = %s", r.Method)
+			}
+			http.SetCookie(w, &http.Cookie{Name: "imgbox-session", Value: "fixture-session", Path: "/", HttpOnly: true})
+			_, _ = w.Write([]byte(`<html><head><meta content="fixture-csrf" name="csrf-token"></head></html>`))
+		case "/ajax/token/generate":
+			if r.Method != http.MethodPost || r.Header.Get("X-CSRF-Token") != "fixture-csrf" {
+				t.Fatalf("imgbox token method/csrf = %s/%q", r.Method, r.Header.Get("X-CSRF-Token"))
+			}
+			cookie, err := r.Cookie("imgbox-session")
+			if err != nil || cookie.Value != "fixture-session" {
+				t.Fatalf("imgbox token cookie = %#v/%v", cookie, err)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if r.FormValue("gallery") != "true" || r.FormValue("comments_enabled") != "0" {
+				t.Fatalf("imgbox token fields = %#v", r.Form)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token_id": 17, "token_secret": "token-secret", "gallery_id": nil, "gallery_secret": nil,
+			})
+		case "/upload/process":
+			if r.Method != http.MethodPost || r.Header.Get("X-CSRF-Token") != "fixture-csrf" {
+				t.Fatalf("imgbox upload method/csrf = %s/%q", r.Method, r.Header.Get("X-CSRF-Token"))
+			}
+			if err := r.ParseMultipartForm(12 << 20); err != nil {
+				t.Fatal(err)
+			}
+			if r.FormValue("token_id") != "17" || r.FormValue("token_secret") != "token-secret" ||
+				r.FormValue("gallery_id") != "null" || r.FormValue("gallery_secret") != "null" ||
+				r.FormValue("content_type") != "1" || r.FormValue("thumbnail_size") != "100r" {
+				t.Fatalf("imgbox upload fields = %#v", r.MultipartForm.Value)
+			}
+			file, _, err := r.FormFile("files[]")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = file.Close()
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]string{{
+				"original_url": "https://images2.imgbox.com/aa/bb/original.png",
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	store := runtimeStore("imgbox", server.URL, nil)
+	evidence, err := NewManager(store, nil).Upload(context.Background(), "primary", fixtureImage(), workflow.Actor{Type: "test", ID: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestCount.Load() != 3 || evidence.Result.URL != "https://images2.imgbox.com/aa/bb/original.png" ||
+		evidence.Result.ViewerURL != "" || evidence.Result.ThumbnailURL != "" || evidence.Result.RemoteID != "original.png" {
+		t.Fatalf("imgbox request count/evidence = %d/%#v", requestCount.Load(), evidence)
+	}
+	tampered := evidence
+	tampered.Result.ViewerURL = "https://viewer.imgbox.com/AbCd1234"
+	if err := ValidateUploadEvidence(tampered, fixtureImage()); err == nil {
+		t.Fatal("tampered Imgbox viewer URL was accepted")
+	}
+}
+
+func TestAnonymousImageHostsRejectOversizeImageBeforeIntentOrNetwork(t *testing.T) {
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requestCount.Add(1) }))
+	defer server.Close()
+	image := fixtureImage()
+	image.Bytes = make([]byte, maxAnonymousImageBytes+1)
+	copy(image.Bytes, []byte("\x89PNG\r\n\x1a\n"))
+	digest := sha256.Sum256(image.Bytes)
+	image.SHA256 = hex.EncodeToString(digest[:])
+	for _, adapter := range []string{"imgbox", "pixhost"} {
+		store := runtimeStore(adapter, server.URL, nil)
+		_, err := NewManager(store, nil).Upload(context.Background(), "primary", image, workflow.Actor{Type: "test", ID: "image"})
+		if err == nil || len(store.actions) != 0 {
+			t.Fatalf("%s oversize error/actions = %v/%#v", adapter, err, store.actions)
+		}
+	}
+	if requestCount.Load() != 0 {
+		t.Fatalf("oversize images performed %d external requests", requestCount.Load())
+	}
+}
+
+func TestImgboxRejectsWebPBeforeIntentOrNetwork(t *testing.T) {
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requestCount.Add(1) }))
+	defer server.Close()
+	body := []byte("RIFF\x04\x00\x00\x00WEBP")
+	digest := sha256.Sum256(body)
+	image := Image{Filename: "fixture.webp", MIMEType: "image/webp", Bytes: body, SHA256: hex.EncodeToString(digest[:])}
+	store := runtimeStore("imgbox", server.URL, nil)
+	_, err := NewManager(store, nil).Upload(context.Background(), "primary", image, workflow.Actor{Type: "test", ID: "image"})
+	if err == nil || len(store.actions) != 0 || requestCount.Load() != 0 {
+		t.Fatalf("imgbox WebP error/actions/requests = %v/%#v/%d", err, store.actions, requestCount.Load())
 	}
 }
 

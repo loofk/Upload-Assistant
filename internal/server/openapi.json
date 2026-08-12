@@ -59,6 +59,28 @@
         "responses": {"200": {"description": "Compact AI tool definitions", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ToolsResponse"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/operational-logs": {"get": {"operationId": "listOperationalLogs", "description":"Returns lightweight summaries without attributes; fetch one log context for full recursively-redacted evidence. Uses an opaque (occurred_at,id) cursor and never computes an exact total.","parameters": [{"name":"level","in":"query","schema":{"type":"string"}},{"name":"component","in":"query","schema":{"type":"string"}},{"name":"q","in":"query","description":"Trigram-indexed summary search over message, error, action, detail, method, route and request ID.","schema":{"type":"string"}},{"name":"error_code","in":"query","schema":{"type":"string"}},{"name":"status_code","in":"query","schema":{"type":"integer","minimum":100,"maximum":599}},{"name":"request_id","in":"query","schema":{"type":"string"}},{"name":"trace_id","in":"query","schema":{"type":"string","format":"uuid"}},{"name":"job_id","in":"query","schema":{"type":"string","format":"uuid"}},{"name":"attempt_id","in":"query","schema":{"type":"string","format":"uuid"}},{"name":"from","in":"query","schema":{"type":"string","format":"date-time"}},{"name":"to","in":"query","schema":{"type":"string","format":"date-time"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":500}},{"name":"cursor","in":"query","description":"Opaque cursor returned by the previous page.","schema":{"type":"string"}}], "responses": {"200":{"description":"Stable paginated lightweight operational-log summaries","content":{"application/json":{"schema":{"$ref":"#/components/schemas/OperationalLogListEnvelope"}}}},"400":{"$ref":"#/components/responses/Problem"},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/operational-logs/{log_id}/context": {"get":{"operationId":"getOperationalLogContext","parameters":[{"name":"log_id","in":"path","required":true,"schema":{"type":"integer","minimum":1}}],"responses":{"200":{"description":"Selected log with bounded same-trace logs and audit actions","content":{"application/json":{"schema":{"type":"object"}}}},"404":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/operational-logs/stream": {"get": {"operationId":"streamOperationalLogs","description":"Filtered lightweight summary SSE; full attributes remain available only from the per-log context endpoint.","parameters":[{"name":"Last-Event-ID","in":"header","schema":{"type":"integer"}},{"name":"level","in":"query","schema":{"type":"string"}},{"name":"component","in":"query","schema":{"type":"string"}},{"name":"q","in":"query","schema":{"type":"string"}},{"name":"error_code","in":"query","schema":{"type":"string"}},{"name":"status_code","in":"query","schema":{"type":"integer","minimum":100,"maximum":599}}],"responses":{"200":{"description":"SSE stream with monotonic IDs and resumable delivery","content":{"text/event-stream":{"schema":{"type":"string"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/operational-logs/export": {"get": {"operationId":"exportOperationalLogs","parameters":[{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":10000}}],"responses":{"200":{"description":"Bounded NDJSON operational-log export","content":{"application/x-ndjson":{"schema":{"type":"string"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/incidents": {"get":{"operationId":"listIncidents","parameters":[{"name":"status","in":"query","schema":{"type":"string","enum":["open","acknowledged","resolved"]}},{"name":"severity","in":"query","schema":{"type":"string","enum":["info","warning","critical"]}},{"name":"kind","in":"query","schema":{"type":"string"}},{"name":"job_id","in":"query","schema":{"type":"string","format":"uuid"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200}},{"name":"cursor","in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"Actionable incident aggregates","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/incidents/{incident_id}": {"get":{"operationId":"getIncident","parameters":[{"$ref":"#/components/parameters/IncidentID"}],"responses":{"200":{"description":"Incident evidence and correlations","content":{"application/json":{"schema":{"type":"object"}}}},"404":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/incidents/{incident_id}/acknowledge": {"post":{"operationId":"acknowledgeIncident","parameters":[{"$ref":"#/components/parameters/IncidentID"}],"responses":{"200":{"description":"Incident acknowledged and audited","content":{"application/json":{"schema":{"type":"object"}}}},"409":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/incidents/{incident_id}/resolve": {"post":{"operationId":"resolveIncident","parameters":[{"$ref":"#/components/parameters/IncidentID"}],"responses":{"200":{"description":"Incident resolved and audited","content":{"application/json":{"schema":{"type":"object"}}}},"409":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/llm-providers": {"get":{"operationId":"listLLMProviders","responses":{"200":{"description":"Provider metadata without secret values","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/llm-providers/{provider_id}": {"put":{"operationId":"putLLMProvider","parameters":[{"$ref":"#/components/parameters/ProviderID"}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/LLMProviderInput"}}}},"responses":{"200":{"description":"Provider configured without probing","content":{"application/json":{"schema":{"type":"object"}}}},"400":{"$ref":"#/components/responses/Problem"},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/llm-providers/{provider_id}/probe": {"post":{"operationId":"probeLLMProvider","description":"Explicit two-stage external provider probe. catalog performs GET /v1/models; inference validates the configured protocol, model and buffered-or-SSE transport.","parameters":[{"$ref":"#/components/parameters/ProviderID"},{"name":"stage","in":"query","required":false,"schema":{"type":"string","enum":["catalog","inference"],"default":"catalog"}}],"responses":{"200":{"description":"Explicit probe result","content":{"application/json":{"schema":{"type":"object"}}}},"502":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/diagnostics": {"get":{"operationId":"listDiagnostics","responses":{"200":{"description":"Immutable diagnostic runs","content":{"application/json":{"schema":{"type":"object"}}}}}},"post":{"operationId":"createDiagnostic","description":"Queues a diagnosis for exactly one existing job_id, incident_id, or operational log_id. UUID targets must be complete; request/trace prefixes are correlation evidence, not diagnostic targets.","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["provider_id"],"oneOf":[{"required":["job_id"]},{"required":["incident_id"]},{"required":["log_id"]}],"properties":{"provider_id":{"type":"string","format":"uuid"},"job_id":{"type":"string","format":"uuid"},"incident_id":{"type":"string","format":"uuid"},"log_id":{"type":"integer","minimum":1}}}}}},"responses":{"202":{"description":"Evidence snapshot queued for diagnosis","content":{"application/json":{"schema":{"type":"object"}}}},"400":{"$ref":"#/components/responses/Problem"},"409":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/diagnostics/{diagnostic_id}": {"get":{"operationId":"getDiagnostic","parameters":[{"$ref":"#/components/parameters/DiagnosticID"}],"responses":{"200":{"description":"Validated result and immutable evidence hash","content":{"application/json":{"schema":{"type":"object"}}}},"404":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/diagnostics/{diagnostic_id}/messages": {"post":{"operationId":"createDiagnosticMessage","parameters":[{"$ref":"#/components/parameters/DiagnosticID"}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["question"],"properties":{"question":{"type":"string","maxLength":2000}}}}}},"responses":{"202":{"description":"Bounded follow-up queued against unchanged evidence","content":{"application/json":{"schema":{"type":"object"}}}},"409":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/operations/overview": {"get":{"operationId":"getOperationsOverview","responses":{"200":{"description":"Local capacity, queue, incident, and backup overview","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/operations/settings": {"get":{"operationId":"getOperationsSettings","responses":{"200":{"description":"Operations thresholds and retention","content":{"application/json":{"schema":{"type":"object"}}}}}},"put":{"operationId":"putOperationsSettings","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/OperationsSettings"}}}},"responses":{"200":{"description":"Audited operations settings","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/api-tokens": {"get":{"operationId":"listAPITokens","responses":{"200":{"description":"Caller token metadata without plaintext","content":{"application/json":{"schema":{"type":"object"}}}}}},"post":{"operationId":"createAPIToken","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["name","scopes"],"properties":{"name":{"type":"string","maxLength":64},"scopes":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}},"expires_in_days":{"type":"integer","minimum":1,"maximum":365,"default":30}}}}}},"responses":{"201":{"description":"Token plaintext shown once","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/api-tokens/{token_id}": {"delete":{"operationId":"revokeAPIToken","parameters":[{"$ref":"#/components/parameters/TokenID"}],"responses":{"200":{"description":"Token immediately revoked and audited","content":{"application/json":{"schema":{"type":"object"}}}},"404":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/backups/policy": {"get":{"operationId":"getBackupPolicy","responses":{"200":{"description":"Age recipient and backup schedule metadata","content":{"application/json":{"schema":{"type":"object"}}}}}},"put":{"operationId":"putBackupPolicy","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/BackupPolicyInput"}}}},"responses":{"200":{"description":"Audited policy; generated private identity is shown once","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/backups/runs": {"get":{"operationId":"listBackupRuns","responses":{"200":{"description":"Encrypted backup run metadata","content":{"application/json":{"schema":{"type":"object"}}}},"403":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/backups": {"post":{"operationId":"createBackupRun","responses":{"201":{"description":"Encrypted backup completed","content":{"application/json":{"schema":{"type":"object"}}}},"202":{"description":"Backup deferred for an active write job","content":{"application/json":{"schema":{"type":"object"}}}},"409":{"$ref":"#/components/responses/Problem"}}}},
+    "/api/v2/backups/{backup_id}/verify": {"post":{"operationId":"verifyBackupRun","parameters":[{"$ref":"#/components/parameters/BackupID"}],"responses":{"200":{"description":"Encrypted bundle checksum and age envelope verified","content":{"application/json":{"schema":{"type":"object"}}}},"409":{"$ref":"#/components/responses/Problem"}}}},
     "/api/v2/readiness/live": {
       "get": {
         "operationId": "getLiveReadiness",
@@ -151,7 +173,7 @@
     "/api/v2/notifications/{notification_id}/reconcile": {
       "post": {
         "operationId": "reconcileNotification",
-        "description": "Resolves an outcome_unknown external notification. verified_not_delivered explicitly permits one queued retry; verified_delivered records the observed Discord message without another webhook call.",
+        "description": "Resolves an outcome_unknown external notification. verified_not_delivered explicitly permits one queued retry; verified_delivered never calls the endpoint again. Telegram/Discord bind an exact numeric message id; enterprise WeChat/Feishu expose no message id.",
         "parameters": [{"name": "notification_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationReconciliationRequest"}}}},
         "responses": {"200": {"description": "Notification reconciled without an implicit remote retry", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
@@ -215,6 +237,40 @@
         "operationId": "getJobSummary",
         "parameters": [{"$ref": "#/components/parameters/JobID"}],
         "responses": {"200": {"description": "Job summary and evidence", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobSummaryEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/attention": {
+      "get": {
+        "operationId": "getJobAttention",
+        "description": "Returns one operator-facing final issue and only the solutions valid for the current durable state.",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "responses": {"200": {"description": "Current issue and safe solutions", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobAttentionEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/actions": {
+      "post": {
+        "operationId": "performJobAction",
+        "description": "Applies only an advertised executable action bound to the exact current status, step, and primary blocker. It cannot approve rules, override duplicates, reconcile remote writes, confirm upload, or waive seeding.",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobActionRequest"}}}},
+        "responses": {"200": {"description": "Action applied", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/upload-preview": {
+      "get": {
+        "operationId": "getUploadPreview",
+        "description": "Integrity-verifies and returns the generated target package for operator review before live upload.",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "responses": {"200": {"description": "Readable immutable upload-package revision", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadPreviewEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/jobs/{job_id}/upload-preview/revisions": {
+      "post": {
+        "operationId": "reviseUploadPreview",
+        "description": "Queues a new immutable package revision, retains prior evidence, invalidates downstream steps, and resets confirm_upload=false.",
+        "parameters": [{"$ref": "#/components/parameters/JobID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadPreviewRevisionRequest"}}}},
+        "responses": {"202": {"description": "Package regeneration queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/api/v2/jobs/{job_id}/steps": {
@@ -300,8 +356,65 @@
     "/api/v2/sites": {
       "get": {"operationId": "listSites", "responses": {"200": {"description": "Site adapters and active rule fingerprints", "content": {"application/json": {"schema": {"type": "object"}}}}}}
     },
+    "/api/v2/sites/{site_code}": {
+      "put": {
+        "operationId": "putSite",
+        "description": "Create or update site display metadata, aliases, tags, and enabled state. Aliases never replace the canonical site code in workflow requests; a configured site does not imply runtime adapter support.",
+        "parameters": [{"$ref": "#/components/parameters/SiteCode"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name", "adapter", "enabled", "aliases", "tags"], "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 100}, "adapter": {"type": "string", "enum": ["config_only", "nexusphp", "mteam_api", "ttg"]}, "enabled": {"type": "boolean"}, "aliases": {"type": "array", "items": {"type": "string", "maxLength": 64}}, "tags": {"type": "array", "items": {"type": "string", "maxLength": 32}}}}}}},
+        "responses": {"200": {"description": "Site metadata saved and audited", "content": {"application/json": {"schema": {"type": "object"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/sites/{site_code}/access-policy": {
+      "get": {
+        "operationId": "getSiteAccessPolicy",
+        "description": "Returns the fail-closed effective policy merged from an active approved v2 rule and stricter operator limits.",
+        "parameters": [{"$ref": "#/components/parameters/SiteCode"}],
+        "responses": {"200": {"description": "Effective site access policy", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SiteAccessPolicyEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      },
+      "put": {
+        "operationId": "putSiteAccessPolicy",
+        "description": "Configures operator limits but cannot authorize a v1, forbidden, or undetermined rule or relax rule-derived restrictions.",
+        "parameters": [{"$ref": "#/components/parameters/SiteCode"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SiteAccessPolicyInput"}}}},
+        "responses": {"200": {"description": "Effective site access policy", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SiteAccessPolicyEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/sites/{site_code}/rules": {
       "get": {"operationId": "listSiteRuleRevisions", "parameters": [{"$ref": "#/components/parameters/SiteCode"}], "responses": {"200": {"description": "Rule revision history", "content": {"application/json": {"schema": {"type": "object"}}}}}}
+    },
+    "/api/v2/sites/{site_code}/rule-sources": {
+      "get": {
+        "operationId": "getSiteRuleSources",
+        "description": "Read the ordered HTTPS rule-page source set, per-source authentication mode, and redacted Cookie-presence metadata. Secret values and captured rule text are never returned.",
+        "parameters": [{"$ref": "#/components/parameters/SiteCode"}],
+        "responses": {"200": {"description": "Configured source set", "content": {"application/json": {"schema": {"type": "object", "properties": {"source_set": {"$ref": "#/components/schemas/RuleSourceSet"}}}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      },
+      "put": {
+        "operationId": "putSiteRuleSources",
+        "description": "Save 1..20 exact HTTPS rule-page URLs, their evidence IDs/scopes, per-source none/site_cookie authentication mode, and explicit completeness/Cookie-host confirmations. Cookie-host confirmation is required only for site_cookie sources. This performs no external call.",
+        "parameters": [{"$ref": "#/components/parameters/SiteCode"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleSourceSetInput"}}}},
+        "responses": {"200": {"description": "Source set saved and audited", "content": {"application/json": {"schema": {"type": "object", "properties": {"source_set": {"$ref": "#/components/schemas/RuleSourceSet"}}}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/sites/{site_code}/rule-collection-runs": {
+      "post": {
+        "operationId": "createSiteRuleCollectionRun",
+        "description": "Explicitly queue one manual source refresh. Public sources are fetched without credentials; site_cookie sources decrypt and send the existing Cookie only to confirmed exact hosts. The worker shares the normal interval/quota/cooldown/concurrency policy, stores bounded normalized evidence, streams provider inference, imports an immutable draft, and never approves or activates it.",
+        "parameters": [{"$ref": "#/components/parameters/SiteCode"}, {"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["source_set_fingerprint", "provider_id", "confirm"], "properties": {"source_set_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "provider_id": {"type": "string", "format": "uuid"}, "confirm": {"type": "boolean", "const": true}}}}}},
+        "responses": {"202": {"description": "Collection queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleCollectionEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/sites/{site_code}/rule-collection-runs/latest": {
+      "get": {"operationId": "getLatestSiteRuleCollectionRun", "parameters": [{"$ref": "#/components/parameters/SiteCode"}], "responses": {"200": {"description": "Latest run or status=empty", "content": {"application/json": {"schema": {"type": "object"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/site-rule-collection-runs/{run_id}": {
+      "get": {"operationId": "getSiteRuleCollectionRun", "parameters": [{"name": "run_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Collection status and bounded source evidence", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleCollectionEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/site-rule-collection-runs/{run_id}/stream": {
+      "get": {"operationId": "streamSiteRuleCollectionRun", "description": "SSE status stream with heartbeats; it observes the durable worker and never starts another collection or provider call.", "parameters": [{"name": "run_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "SSE progress stream", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/sites/{site_code}/rules/active": {
       "get": {"operationId": "getActiveSiteRules", "parameters": [{"$ref": "#/components/parameters/SiteCode"}], "responses": {"200": {"description": "Active approved rule revision", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
@@ -314,22 +427,77 @@
         "responses": {"201": {"description": "Immutable draft imported", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/site-rules/analyze": {
+      "post": {
+        "operationId": "analyzeSiteRuleText",
+        "description": "Explicitly sends operator-pasted rule text or the server-bound immutable original of source_revision_id to a configured provider enabled for rule_analysis and returns a validated editable v2 Markdown draft. Inputs larger than one model-call budget are split on source lines, extracted sequentially, and conservatively merged within one configured total timeout. Each call allows up to 8192 completion tokens. Successful SSE is parsed and hashed incrementally without retaining raw reasoning events; normalized SSE output and successful buffered responses are limited to 8 MiB, failed buffered responses to 1 MiB, and each aggregate SSE event to 1 MiB. Only a normal protocol completion is accepted; token-limit and incomplete outputs are rejected without JSON repair. Classified transient SSE error events and pre-stream HTTP 502/503/504/520-524 gateway failures receive one same-transport retry within the total timeout; permanent provider errors are not retried. Provider failures return stable codes such as provider_timeout, provider_output_truncated, or provider_stream_error. Operational logs retain request/response structure, byte counts, hashes, usage and bounded redacted SSE error evidence, never prompt or model-output content. It never imports, approves, activates, or authorizes the rule.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SiteRuleAnalysisInput"}}}},
+        "responses": {"200": {"description": "Validated editable rule draft", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}, "503": {"$ref": "#/components/responses/Problem"}, "504": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/site-rules/analyze/stream": {
+      "post": {
+        "operationId": "streamSiteRuleAnalysis",
+        "description": "Web-oriented SSE form of site rule analysis. It flushes an initial event and periodic progress heartbeats while the configured provider runs, then emits analysis-result or analysis-error. Idempotency-Key is required; same-actor replays with the same input share the in-flight call or receive its bounded cached result, while key reuse with different input is rejected. The external inference and rule safety semantics are identical to /api/v2/site-rules/analyze.",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SiteRuleAnalysisInput"}}}},
+        "responses": {"200": {"description": "SSE progress and terminal event stream", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "403": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/site-rules/analyze/result": {
+      "get": {
+        "operationId": "getSiteRuleAnalysisResult",
+        "description": "Read the in-flight or completed result for the current actor and Idempotency-Key after a Web SSE connection is interrupted by a transport time limit. This never starts or repeats provider inference. Returns 202 while analysis is running, the validated draft on completion, or the original structured provider failure.",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "responses": {"200": {"description": "Completed validated rule draft", "content": {"application/json": {"schema": {"type": "object"}}}}, "202": {"description": "The original provider call is still running", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "401": {"$ref": "#/components/responses/Problem"}, "403": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}, "504": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/site-rules/{revision_id}": {
       "get": {"operationId": "getSiteRuleRevision", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Rule revision", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/site-rules/{revision_id}/markdown": {
       "get": {"operationId": "getSiteRuleMarkdown", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Checksum-verified Markdown", "content": {"text/markdown": {"schema": {"type": "string"}}}}}}
     },
+    "/api/v2/site-rules/{revision_id}/review": {
+      "get": {"operationId": "getSiteRuleReview", "description": "Read the three executable hard-gate review sections (upload, download, category-aware naming), localized facts, source conflicts, advisories, persisted decisions, blockers, and progress for the exact revision fingerprint.", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Rule review workspace", "content": {"application/json": {"schema": {"type": "object"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/site-rules/{revision_id}/review/{section}": {
+      "put": {
+        "operationId": "putSiteRuleReviewSection",
+        "description": "Persist one human section decision bound to the exact current fingerprint. A needs_changes decision requires a comment and blocks approval.",
+        "parameters": [{"$ref": "#/components/parameters/RevisionID"}, {"name": "section", "in": "path", "required": true, "schema": {"type": "string", "enum": ["upload_limit", "download_limit", "naming"]}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["fingerprint", "decision"], "properties": {"fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "decision": {"type": "string", "enum": ["confirmed", "needs_changes"]}, "comment": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "Section decision saved and audited", "content": {"application/json": {"schema": {"type": "object"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/api/v2/site-rules/{revision_id}/corrections/{section}": {
+      "post": {
+        "operationId": "correctSiteRuleHardGate",
+        "description": "Derive a new immutable draft with explicitly corrected upload-limit, download-limit, or category naming data. Review comments are audit-only and are never interpreted as executable configuration. The source revision remains unchanged, section confirmations reset for the new fingerprint, and the result is neither approved nor activated.",
+        "parameters": [{"$ref": "#/components/parameters/RevisionID"}, {"name": "section", "in": "path", "required": true, "schema": {"type": "string", "enum": ["upload_limit", "download_limit", "naming"]}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["fingerprint", "data", "comment"], "properties": {"fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "data": {"type": "object", "description": "Section-specific corrected executable data. upload_limit accepts upload and seedbox_upload; naming accepts the complete naming object."}, "comment": {"type": "string", "minLength": 1, "maxLength": 4000}}}}}},
+        "responses": {"201": {"description": "Corrected immutable draft created or reused by fingerprint", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/site-rules/{revision_id}/approve": {
       "post": {
         "operationId": "approveSiteRuleRevision",
         "parameters": [{"$ref": "#/components/parameters/RevisionID"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["fingerprint"], "properties": {"fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "comment": {"type": "string"}}}}}},
-        "responses": {"200": {"description": "Rule revision approved", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
+        "responses": {"200": {"description": "Complete rule revision approved after all three executable hard gates were confirmed for the exact fingerprint", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/api/v2/site-rules/{revision_id}/activate": {
       "post": {"operationId": "activateSiteRuleRevision", "parameters": [{"$ref": "#/components/parameters/RevisionID"}], "responses": {"200": {"description": "Approved revision activated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "409": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/site-rules/{revision_id}/discard": {
+      "post": {
+        "operationId": "discardSiteRuleDraft",
+        "description": "Remove one pending draft from the maintenance workspace by marking it retired. Immutable source, fingerprint, review evidence, and audit history are retained.",
+        "parameters": [{"$ref": "#/components/parameters/RevisionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["fingerprint", "confirm"], "properties": {"fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "confirm": {"type": "boolean", "const": true}}}}}},
+        "responses": {"200": {"description": "Draft retired and retained for audit", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleEnvelope"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
     },
     "/api/v2/sites/{site_code}/credentials": {
       "get": {"operationId": "listSiteCredentials", "parameters": [{"$ref": "#/components/parameters/SiteCode"}], "responses": {"200": {"description": "Credential metadata without secret values", "content": {"application/json": {"schema": {"type": "object"}}}}}}
@@ -373,11 +541,33 @@
     "/api/v2/downloaders/{name}/probe": {
       "post": {"operationId": "probeDownloader", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "responses": {"200": {"description": "Authenticated downloader version probe", "content": {"application/json": {"schema": {"type": "object"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
+    "/api/v2/downloaders/{name}/snapshot": {
+      "get": {
+        "operationId": "getDownloaderSnapshot",
+        "description": "Explicit read-only dashboard snapshot. Concurrent reads are coalesced and briefly cached. Torrent save paths, tracker URLs and credentials are excluded.",
+        "parameters": [
+          {"$ref": "#/components/parameters/ResourceName"},
+          {"name": "filter", "in": "query", "schema": {"type": "string", "enum": ["all", "downloading", "seeding", "active", "paused", "checking", "error", "completed"], "default": "all"}},
+          {"name": "query", "in": "query", "schema": {"type": "string", "maxLength": 200}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 100}}
+        ],
+        "responses": {"200": {"description": "Bounded live downloader snapshot", "content": {"application/json": {"schema": {"type": "object", "required": ["ok", "status", "snapshot", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean", "const": true}, "status": {"type": "string", "const": "ready"}, "snapshot": {"$ref": "#/components/schemas/DownloaderDashboardSnapshot"}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}}}}}}, "400": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/downloaders/{name}/torrents": {
       "post": {"operationId": "addDownloaderTorrent", "description": "Persists an add-intent audit before the remote write. Ambiguous or partial results return a blocked response with expected hash evidence and must be reconciled by read-only inspection before any further add.", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AddTorrentRequest"}}}}, "responses": {"200": {"description": "Torrent added with hash evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"description": "Downloader add requires reconciliation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloaderAddReconciliationResponse"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/downloaders/{name}/torrents/{hash}": {
       "get": {"operationId": "inspectDownloaderTorrent", "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}], "responses": {"200": {"description": "Torrent state and mapped path evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "404": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/downloaders/{name}/torrents/{hash}/files": {
+      "get": {
+        "operationId": "listDownloaderTorrentFiles",
+        "description": "Explicitly read one torrent's files. The response page is bounded even when the downloader returns a larger file set.",
+        "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}, {"name": "offset", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}}],
+        "responses": {"200": {"description": "Bounded file evidence", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}
+      }
     },
     "/api/v2/downloaders/{name}/torrents/{hash}/limits": {
       "post": {"operationId": "setDownloaderTorrentLimits", "description": "Persists a limit-write intent before applying remote limits, then reads both limits back. Ambiguous writes, mismatched read-back, or result-audit failures return a blocked reconciliation response and must not be retried blindly.", "parameters": [{"$ref": "#/components/parameters/ResourceName"}, {"$ref": "#/components/parameters/TorrentHash"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SetTorrentLimitsRequest"}}}}, "responses": {"200": {"description": "Per-torrent limits applied and observed", "content": {"application/json": {"schema": {"type": "object"}}}}, "409": {"description": "Downloader limit write requires reconciliation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloaderLimitsReconciliationResponse"}}}}, "502": {"$ref": "#/components/responses/Problem"}}}
@@ -393,11 +583,29 @@
         "responses": {"200": {"description": "Image host configured", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/Problem"}}
       }
     },
+    "/api/v2/image-hosts/{name}/probe": {
+      "post": {
+        "operationId": "probeImageHost",
+        "description": "Explicit external-write probe that uploads one built-in 100x100 PNG compatible with normal thumbnail pipelines. The remote host may retain the image. The upload intent and bounded receipt evidence are audited and ambiguous outcomes are never retried automatically.",
+        "parameters": [{"$ref": "#/components/parameters/ResourceName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["confirm_upload"], "properties": {"confirm_upload": {"type": "boolean", "const": true}}}}}},
+        "responses": {"200": {"description": "Test image uploaded and receipt validated"}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"description": "Remote upload outcome is unknown"}, "502": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
     "/api/v2/notification-channels": {
       "get": {"operationId": "listNotificationChannels", "responses": {"200": {"description": "Notification channels with credential field names only", "content": {"application/json": {"schema": {"type": "object"}}}}}}
     },
     "/api/v2/notification-channels/{name}": {
       "put": {"operationId": "putNotificationChannel", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotificationChannelInput"}}}}, "responses": {"200": {"description": "Notification channel configured"}, "400": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/notification-channels/{name}/probe": {
+      "post": {
+        "operationId": "probeNotificationChannel",
+        "description": "Explicitly send one durable test message. The delivery intent is persisted before the external write, automatic retry is disabled, and an ambiguous result remains reconcilable through the notification record.",
+        "parameters": [{"$ref": "#/components/parameters/ResourceName"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["confirm_delivery"], "properties": {"confirm_delivery": {"type": "boolean", "const": true}}}}}},
+        "responses": {"200": {"description": "Test notification delivered with a validated receipt"}, "400": {"$ref": "#/components/responses/Problem"}, "409": {"description": "Delivery outcome is unknown and requires reconciliation"}, "502": {"$ref": "#/components/responses/Problem"}}
+      }
     },
     "/api/v2/media-managers": {
       "get": {"operationId": "listMediaManagers", "responses": {"200": {"description": "Sonarr and Radarr instances with credential field names only", "content": {"application/json": {"schema": {"type": "object"}}}}}}
@@ -416,6 +624,9 @@
     },
     "/api/v2/metadata-providers/{name}": {
       "put": {"operationId": "putMetadataProvider", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MetadataProviderInput"}}}}, "responses": {"200": {"description": "Metadata provider configured"}, "400": {"$ref": "#/components/responses/Problem"}}}
+    },
+    "/api/v2/metadata-providers/{name}/probe": {
+      "post": {"operationId": "probeMetadataProvider", "description": "Explicitly execute one read-only production-contract lookup against a stable public reference. The response returns hashes and call metadata only, never titles or descriptions. Transport, DNS, TLS, timeout, authentication, rate-limit, invalid-response and missing-output failures use safe stable error codes; an unreachable workers.dev PTGen endpoint recommends a reachable custom domain.", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "responses": {"200": {"description": "Metadata query contract validated"}, "400": {"$ref": "#/components/responses/Problem"}, "429": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}, "504": {"$ref": "#/components/responses/Problem"}}}
     },
     "/api/v2/metadata-providers/{name}/resolve": {
       "post": {"operationId": "resolveExternalMetadata", "parameters": [{"$ref": "#/components/parameters/ResourceName"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MetadataResolveRequest"}}}}, "responses": {"200": {"description": "Normalized IDs, bounded description, and hash evidence"}, "400": {"$ref": "#/components/responses/Problem"}, "502": {"$ref": "#/components/responses/Problem"}}}
@@ -470,6 +681,11 @@
     },
     "parameters": {
       "JobID": {"name": "job_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "IncidentID": {"name":"incident_id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
+      "ProviderID": {"name":"provider_id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
+      "DiagnosticID": {"name":"diagnostic_id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
+      "TokenID": {"name":"token_id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
+      "BackupID": {"name":"backup_id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
       "ArtifactID": {"name": "artifact_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "ImportID": {"name": "import_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
       "RevisionID": {"name": "revision_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
@@ -488,6 +704,18 @@
         "required": ["ok", "status", "service", "version"],
         "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}, "service": {"type": "string"}, "version": {"type": "string"}, "checks": {"type": "object", "additionalProperties": {"type": "string"}}}
       },
+      "OperationalLogSummary": {"type":"object","required":["id","occurred_at","level","component","message"],"description":"Lightweight recursively-redacted scalar summary. Large attributes are intentionally omitted.","properties":{"id":{"type":"integer","format":"int64"},"occurred_at":{"type":"string","format":"date-time"},"level":{"type":"string","enum":["debug","info","warn","error"]},"component":{"type":"string"},"message":{"type":"string"},"request_id":{"type":"string"},"trace_id":{"type":"string","format":"uuid"},"job_id":{"type":"string","format":"uuid"},"method":{"type":"string"},"route":{"type":"string"},"status_code":{"type":"integer"},"duration_ms":{"type":"integer","format":"int64"},"response_bytes":{"type":"integer","format":"int64"},"error_code":{"type":"string"},"action":{"type":"string","maxLength":255},"error_detail":{"type":"string","maxLength":4000}}},
+      "OperationalLogListEnvelope": {"type":"object","required":["ok","status","operational_logs","has_more","next_cursor","blockers","next_actions"],"properties":{"ok":{"type":"boolean","const":true},"status":{"type":"string","const":"ready"},"operational_logs":{"type":"array","items":{"$ref":"#/components/schemas/OperationalLogSummary"}},"has_more":{"type":"boolean"},"next_cursor":{"type":"string"},"blockers":{"type":"array","items":{}},"next_actions":{"type":"array","items":{}}}},
+      "LLMProviderInput": {"type":"object","additionalProperties":false,"required":["name","base_url","model","data_level","reasoning_effort","use_cases","json_mode","streaming_enabled","enabled","outbound_consent"],"properties":{"name":{"type":"string","maxLength":64},"base_url":{"type":"string","format":"uri","description":"A root URL is normalized to /v1; an explicit path is preserved."},"model":{"type":"string","maxLength":200},"data_level":{"type":"string","enum":["local","remote"]},"api_mode":{"type":"string","enum":["chat_completions","responses"],"default":"chat_completions"},"reasoning_effort":{"type":"string","enum":["default","none","minimal","low","medium","high","xhigh","max"]},"use_cases":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["incident_diagnosis","rule_analysis"]}},"json_mode":{"type":"boolean"},"streaming_enabled":{"type":"boolean","default":true,"description":"Use SSE for inference so long-running compatible providers expose progress and avoid buffered gateway idle limits."},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600,"default":60},"enabled":{"type":"boolean"},"outbound_consent":{"type":"boolean"},"api_key":{"type":"string","writeOnly":true}}},
+      "SiteRuleAnalysisInput": {"type":"object","additionalProperties":false,"required":["provider_id"],"oneOf":[{"required":["source_revision_id"]},{"required":["site_code","display_name","roles","source_url","source_scope","source_complete","source_text"]}],"properties":{"provider_id":{"type":"string","format":"uuid"},"source_revision_id":{"type":"string","format":"uuid","description":"Bind analysis to the immutable Markdown original stored for this revision; client source fields are ignored."},"site_code":{"type":"string","pattern":"^[A-Z0-9][A-Z0-9_-]{1,31}$"},"display_name":{"type":"string","minLength":1,"maxLength":200},"roles":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","enum":["source","target"]}},"source_url":{"type":"string","format":"uri","pattern":"^https://"},"source_scope":{"type":"string","minLength":1,"maxLength":500},"source_complete":{"type":"boolean"},"source_text":{"type":"string","minLength":1,"maxLength":8388608}}},
+      "RuleSource": {"type":"object","additionalProperties":false,"required":["id","url","scope"],"properties":{"id":{"type":"string","pattern":"^[a-z0-9][a-z0-9_-]{0,63}$"},"url":{"type":"string","format":"uri","pattern":"^https://","maxLength":2048},"scope":{"type":"string","minLength":1,"maxLength":500},"auth_mode":{"type":"string","enum":["none","site_cookie"],"default":"site_cookie","description":"Authentication for this exact source. none sends no site credential; site_cookie sends only the encrypted site Cookie."}}},
+      "RuleSourceSetInput": {"type":"object","additionalProperties":false,"required":["sources","scope_confirmed","cookie_hosts_confirmed"],"properties":{"sources":{"type":"array","minItems":1,"maxItems":20,"items":{"$ref":"#/components/schemas/RuleSource"}},"scope_confirmed":{"type":"boolean"},"cookie_hosts_confirmed":{"type":"boolean"}}},
+      "RuleSourceSet": {"allOf":[{"$ref":"#/components/schemas/RuleSourceSetInput"},{"type":"object","required":["site_code","fingerprint","cookie_configured","cookie_required"],"properties":{"site_code":{"type":"string"},"fingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},"cookie_configured":{"type":"boolean"},"cookie_required":{"type":"boolean","description":"True only when at least one source uses site_cookie."},"updated_at":{"type":"string","format":"date-time"}}}]},
+      "RuleCollectionDocument": {"type":"object","required":["id","source_id","url","scope","auth_mode","status"],"properties":{"id":{"type":"string","format":"uuid"},"source_id":{"type":"string"},"url":{"type":"string","format":"uri"},"scope":{"type":"string"},"auth_mode":{"type":"string","enum":["none","site_cookie"]},"status":{"type":"string","enum":["pending","fetching","ready","failed"]},"http_status":{"type":"integer"},"content_type":{"type":"string"},"size_bytes":{"type":"integer","format":"int64"},"text_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"error_code":{"type":"string"},"error_detail":{"type":"string"},"captured_at":{"type":"string","format":"date-time"}}},
+      "RuleCollectionRun": {"type":"object","required":["id","site_code","source_set_fingerprint","provider_id","status","not_before","documents","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"site_code":{"type":"string"},"source_set_fingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},"provider_id":{"type":"string","format":"uuid"},"provider_config_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$","description":"Non-secret fingerprint of the exact endpoint/model/protocol/data-boundary/credential-version contract bound when queued."},"status":{"type":"string","enum":["queued","fetching","analyzing","ready","failed"]},"not_before":{"type":"string","format":"date-time"},"rule_revision_id":{"type":"string","format":"uuid"},"error_code":{"type":"string"},"error_detail":{"type":"string"},"documents":{"type":"array","items":{"$ref":"#/components/schemas/RuleCollectionDocument"}},"created_at":{"type":"string","format":"date-time"},"started_at":{"type":"string","format":"date-time"},"completed_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"}}},
+      "RuleCollectionEnvelope": {"type":"object","required":["ok","status","run_id","run","blockers","next_actions"],"properties":{"ok":{"type":"boolean"},"status":{"type":"string"},"run_id":{"type":"string","format":"uuid"},"rule_revision_id":{"type":"string","format":"uuid"},"run":{"$ref":"#/components/schemas/RuleCollectionRun"},"blockers":{"type":"array","items":{}},"next_actions":{"type":"array","items":{}}}},
+      "OperationsSettings": {"type":"object","additionalProperties":false,"required":["log_retention_days","diagnostic_retention_days","filesystem_warning_percent","filesystem_critical_percent","recovery_hysteresis_percent","database_budget_bytes","queue_warning_count","queue_warning_age_seconds","notification_cooldown_seconds","auto_diagnostic_incident_kinds"],"properties":{"log_retention_days":{"type":"integer","minimum":1,"maximum":365},"diagnostic_retention_days":{"type":"integer","minimum":1,"maximum":730},"filesystem_warning_percent":{"type":"number","minimum":1,"maximum":99},"filesystem_critical_percent":{"type":"number","minimum":1,"maximum":100},"recovery_hysteresis_percent":{"type":"number","minimum":1,"maximum":25},"database_budget_bytes":{"type":"integer","minimum":1},"queue_warning_count":{"type":"integer","minimum":1},"queue_warning_age_seconds":{"type":"integer","minimum":1},"notification_cooldown_seconds":{"type":"integer","minimum":60},"auto_diagnostic_incident_kinds":{"type":"array","maxItems":32,"items":{"type":"string","maxLength":100}},"auto_diagnostic_provider_id":{"type":"string","format":"uuid"}}},
+      "BackupPolicyInput": {"type":"object","additionalProperties":false,"required":["enabled","schedule","retention_count"],"properties":{"enabled":{"type":"boolean"},"recipient":{"type":"string","pattern":"^age1[0-9a-z]+$"},"schedule":{"type":"string","default":"30 3 * * *"},"retention_count":{"type":"integer","minimum":1,"maximum":100,"default":7},"generate_identity":{"type":"boolean","description":"Generate an X25519 identity; its private value is returned once and never stored."}}},
       "JobStatus": {"type": "string", "enum": ["draft", "queued", "running", "paused", "blocked", "failed", "complete", "cancelled"]},
       "StepStatus": {"type": "string", "enum": ["pending", "ready", "running", "paused", "blocked", "failed", "complete", "skipped", "cancelled"]},
       "Blocker": {
@@ -614,7 +842,7 @@
       },
       "RetorrentImageHost": {
         "type": "object", "additionalProperties": false,
-        "properties": {"name": {"type": "string", "default": "default", "description": "Configured imgbb/PTPimg integration name."}}
+        "properties": {"name": {"type": "string", "default": "default", "description": "Configured ImgBB, PTPimg, Imgbox, or Pixhost integration name."}}
       },
       "RetorrentMetadataProviders": {
         "type": "object", "additionalProperties": false,
@@ -785,12 +1013,8 @@
           "confirmed": {"type": "boolean", "const": true},
           "evidence_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
           "observed_at": {"type": "string", "format": "date-time"},
-          "message_id": {"type": "string", "pattern": "^[0-9]{1,30}$", "description": "Required only for verified_delivered."}
-        },
-        "oneOf": [
-          {"not": {"required": ["message_id"]}, "properties": {"decision": {"const": "verified_not_delivered"}}},
-          {"required": ["message_id"], "properties": {"decision": {"const": "verified_delivered"}}}
-        ]
+          "message_id": {"type": "string", "pattern": "^[0-9]{1,30}$", "description": "Required for verified_delivered on Telegram/Discord; omit for enterprise WeChat/Feishu and for verified_not_delivered. The server validates against the configured adapter."}
+        }
       },
       "NotificationEnvelope": {
         "type": "object", "required": ["ok", "status", "notification_id", "notification", "blockers", "next_actions"],
@@ -815,7 +1039,9 @@
         "additionalProperties": false,
         "properties": {
           "name": {"type": "string", "maxLength": 255, "description": "Explicit reviewed MTEAM release-name override."},
+          "naming_profile": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$", "description": "Explicit resource-class naming profile selected from the active target rule."},
           "small_descr": {"type": "string", "maxLength": 255},
+          "description": {"type": "string", "maxLength": 1000000, "description": "Explicit operator-reviewed BBCode description override."},
           "category": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Current MTEAM category id when the adapter cannot infer it safely."},
           "category_evidence": {"type": "string", "maxLength": 500, "description": "Human-readable reason or current category-page evidence for an explicit category."},
           "standard": {"type": "integer", "enum": [1, 2, 3, 5, 6, 7], "description": "MTEAM resolution id; normally derived from MediaInfo."},
@@ -967,6 +1193,15 @@
         "required": ["ok", "status", "job_id", "blockers", "next_actions", "resume_state", "summary", "job"],
         "properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "replay_of_job_id": {"type": "string", "format": "uuid"}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "job": {"$ref": "#/components/schemas/Job"}}
       },
+      "AttentionIssue": {"type": "object", "additionalProperties": false, "required": ["code", "title", "summary", "severity"], "properties": {"code": {"type": "string"}, "title": {"type": "string"}, "summary": {"type": "string"}, "current_step": {"type": "string"}, "site_code": {"type": "string"}, "severity": {"type": "string", "enum": ["info", "warning", "error"]}}},
+      "AttentionAction": {"type": "object", "additionalProperties": false, "required": ["id", "label", "description", "kind", "executable", "requires_confirmation"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "description": {"type": "string"}, "kind": {"type": "string"}, "executable": {"type": "boolean"}, "requires_confirmation": {"type": "boolean"}, "href": {"type": "string"}}},
+      "JobAttention": {"type": "object", "additionalProperties": false, "required": ["status", "needs_action", "solutions"], "properties": {"status": {"type": "string"}, "needs_action": {"type": "boolean"}, "issue": {"$ref": "#/components/schemas/AttentionIssue"}, "solutions": {"type": "array", "items": {"$ref": "#/components/schemas/AttentionAction"}}}},
+      "JobAttentionEnvelope": {"type": "object", "required": ["ok", "status", "job_id", "attention", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean", "const": true}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "attention": {"$ref": "#/components/schemas/JobAttention"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}},
+      "JobActionRequest": {"type": "object", "additionalProperties": false, "required": ["action_id", "expected_status"], "properties": {"action_id": {"type": "string", "enum": ["resume_job", "retry_step", "approve_safe_repair"]}, "expected_status": {"$ref": "#/components/schemas/JobStatus"}, "expected_step": {"type": "string"}, "expected_blocker_code": {"type": "string"}, "confirmed": {"type": "boolean", "default": false}}},
+      "UploadPreviewRevisionFields": {"type": "object", "additionalProperties": false, "required": ["name", "small_descr", "category", "standard", "anonymous", "description"], "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 255}, "naming_profile": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"}, "small_descr": {"type": "string", "minLength": 1, "maxLength": 255}, "category": {"type": "integer", "minimum": 1, "maximum": 100000}, "category_evidence": {"type": "string", "maxLength": 500}, "standard": {"type": "integer", "enum": [1, 2, 3, 5, 6, 7]}, "anonymous": {"type": "boolean"}, "description": {"type": "string", "minLength": 1, "maxLength": 1000000}}},
+      "UploadPreviewRevisionRequest": {"type": "object", "additionalProperties": false, "required": ["expected_package_sha256", "fields"], "properties": {"expected_package_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "fields": {"$ref": "#/components/schemas/UploadPreviewRevisionFields"}}},
+      "PreparedTargetPackage": {"type": "object", "required": ["schema_version", "target", "adapter", "source", "metadata_links", "form_fields", "description", "mediainfo", "content", "evidence", "decisions", "warnings", "manual_review_required", "generated_at"], "properties": {"schema_version": {"type": "integer"}, "target": {"type": "string"}, "adapter": {"type": "string"}, "source": {"type": "object"}, "metadata_links": {"type": "object", "additionalProperties": {"type": "string"}}, "form_fields": {"type": "object"}, "description": {"type": "string"}, "mediainfo": {}, "content": {"type": "object"}, "evidence": {"type": "object"}, "decisions": {"type": "array", "items": {"type": "object"}}, "warnings": {"type": "array", "items": {"type": "string"}}, "manual_review_required": {"type": "boolean"}, "generated_at": {"type": "string", "format": "date-time"}}},
+      "UploadPreviewEnvelope": {"type": "object", "required": ["ok", "status", "job_id", "package_revision", "package_artifact", "package", "can_revise", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean", "const": true}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "package_revision": {"type": "integer", "minimum": 1}, "package_artifact": {"$ref": "#/components/schemas/Artifact"}, "package": {"$ref": "#/components/schemas/PreparedTargetPackage"}, "can_revise": {"type": "boolean"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}},
       "JobListEnvelope": {
         "type": "object", "additionalProperties": false,
         "required": ["ok", "status", "jobs", "has_more", "next_cursor", "blockers", "next_actions"],
@@ -980,8 +1215,8 @@
       },
       "JobSummaryEnvelope": {
         "type": "object",
-        "required": ["ok", "status", "job_id", "kind", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
-		"properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "replay_of_job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string", "enum": ["retorrent", "daily_candidates"]}, "current_step": {"type": "string"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+        "required": ["ok", "status", "job_id", "kind", "attention", "blockers", "next_actions", "resume_state", "summary", "steps", "artifacts"],
+		"properties": {"ok": {"type": "boolean"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "job_id": {"type": "string", "format": "uuid"}, "replay_of_job_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string", "enum": ["retorrent", "daily_candidates"]}, "current_step": {"type": "string"}, "attention": {"$ref": "#/components/schemas/JobAttention"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "summary": {"$ref": "#/components/schemas/JobSummaryValue"}, "steps": {"type": "array", "items": {"$ref": "#/components/schemas/Step"}}, "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
       },
       "Step": {"type": "object", "required": ["id", "job_id", "key", "position", "status", "required", "input_snapshot", "output_summary", "blockers", "next_actions", "resume_state"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "key": {"type": "string"}, "position": {"type": "integer"}, "status": {"$ref": "#/components/schemas/StepStatus"}, "required": {"type": "boolean"}, "gate_kind": {"type": "string"}, "input_snapshot": {"type": "object", "description": "The raw durable snapshot is never returned. The API exposes only {redacted:true,sha256:<digest>}."}, "output_summary": {"type": "object", "description": "Recursively redacted step output evidence."}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}, "resume_state": {"type": "object"}, "started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}},
       "StepAttempt": {
@@ -1056,7 +1291,10 @@
       "Artifact": {"type": "object", "required": ["id", "job_id", "kind", "storage_backend", "storage_path", "filename", "size_bytes", "sha256", "metadata", "expires_at", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "step_id": {"type": "string", "format": "uuid"}, "attempt_id": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "storage_backend": {"type": "string"}, "storage_path": {"type": "string"}, "filename": {"type": "string"}, "mime_type": {"type": "string"}, "size_bytes": {"type": "integer"}, "sha256": {"type": "string"}, "metadata": {"type": "object"}, "expires_at": {"type": "string", "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}}},
       "EndpointConfig": {"type": "object", "additionalProperties": false, "required": ["endpoint"], "properties": {"endpoint": {"type": "string", "format": "uri"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 30}, "options": {"type": "object", "description": "Non-secret adapter options only.", "additionalProperties": true}}},
       "PathMapping": {"type": "object", "additionalProperties": false, "required": ["remote_path", "local_path"], "properties": {"remote_path": {"type": "string", "pattern": "^/"}, "local_path": {"type": "string", "pattern": "^/"}, "priority": {"type": "integer"}}},
-		"DownloaderAdapterCapability": {"type": "object", "additionalProperties": false, "required": ["adapter", "display_name", "runtime_supported", "credential_fields", "operations"], "properties": {"adapter": {"type": "string", "enum": ["qbittorrent", "transmission", "deluge", "rtorrent"]}, "display_name": {"type": "string"}, "runtime_supported": {"type": "boolean"}, "credential_fields": {"type": "array", "items": {"type": "string"}}, "operations": {"type": "object", "additionalProperties": false, "required": ["probe", "add_torrent", "inspect", "list_files", "set_limits", "wait_complete", "category", "tags", "skip_checking"], "properties": {"probe": {"type": "boolean"}, "add_torrent": {"type": "boolean"}, "inspect": {"type": "boolean"}, "list_files": {"type": "boolean"}, "set_limits": {"type": "boolean"}, "wait_complete": {"type": "boolean"}, "category": {"type": "boolean"}, "tags": {"type": "boolean"}, "skip_checking": {"type": "boolean"}}}, "constraints": {"type": "array", "items": {"type": "string"}}, "unavailable_reason": {"type": "string"}}},
+		"DownloaderAdapterCapability": {"type": "object", "additionalProperties": false, "required": ["adapter", "display_name", "runtime_supported", "credential_fields", "operations"], "properties": {"adapter": {"type": "string", "enum": ["qbittorrent", "transmission", "deluge", "rtorrent"]}, "display_name": {"type": "string"}, "runtime_supported": {"type": "boolean"}, "credential_fields": {"type": "array", "items": {"type": "string"}}, "operations": {"type": "object", "additionalProperties": false, "required": ["probe", "add_torrent", "inspect", "list_torrents", "list_files", "set_limits", "wait_complete", "category", "tags", "skip_checking"], "properties": {"probe": {"type": "boolean"}, "add_torrent": {"type": "boolean"}, "inspect": {"type": "boolean"}, "list_torrents": {"type": "boolean"}, "list_files": {"type": "boolean"}, "set_limits": {"type": "boolean"}, "wait_complete": {"type": "boolean"}, "category": {"type": "boolean"}, "tags": {"type": "boolean"}, "skip_checking": {"type": "boolean"}}}, "constraints": {"type": "array", "items": {"type": "string"}}, "unavailable_reason": {"type": "string"}}},
+		"DownloaderDashboardSummary": {"type": "object", "additionalProperties": false, "required": ["total", "downloading", "seeding", "paused", "checking", "errors", "active", "download_speed", "upload_speed"], "properties": {"total": {"type": "integer", "minimum": 0}, "downloading": {"type": "integer", "minimum": 0}, "seeding": {"type": "integer", "minimum": 0}, "paused": {"type": "integer", "minimum": 0}, "checking": {"type": "integer", "minimum": 0}, "errors": {"type": "integer", "minimum": 0}, "active": {"type": "integer", "minimum": 0}, "download_speed": {"type": "integer", "minimum": 0}, "upload_speed": {"type": "integer", "minimum": 0}}},
+		"DownloaderDashboardTorrent": {"type": "object", "additionalProperties": false, "required": ["hash", "name", "state", "state_group", "progress", "total_size", "amount_left", "downloaded", "uploaded", "download_speed", "upload_speed", "download_limit", "upload_limit", "limits_available", "ratio", "added_on", "completion_on", "time_active", "seeding_time"], "properties": {"hash": {"type": "string", "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"}, "name": {"type": "string"}, "state": {"type": "string"}, "state_group": {"type": "string", "enum": ["downloading", "seeding", "paused", "checking", "error", "completed"]}, "progress": {"type": "number", "minimum": 0, "maximum": 1}, "total_size": {"type": "integer", "minimum": 0}, "amount_left": {"type": "integer", "minimum": 0}, "downloaded": {"type": "integer", "minimum": 0}, "uploaded": {"type": "integer", "minimum": 0}, "download_speed": {"type": "integer", "minimum": 0}, "upload_speed": {"type": "integer", "minimum": 0}, "download_limit": {"type": "integer", "minimum": 0}, "upload_limit": {"type": "integer", "minimum": 0}, "limits_available": {"type": "boolean", "description": "False when the list transport cannot safely read per-torrent limits without an unbounded number of remote calls."}, "ratio": {"type": "number", "minimum": 0}, "category": {"type": "string"}, "tags": {"type": "string"}, "added_on": {"type": "integer", "minimum": 0}, "completion_on": {"type": "integer", "minimum": 0}, "time_active": {"type": "integer", "minimum": 0}, "seeding_time": {"type": "integer", "minimum": 0}}},
+		"DownloaderDashboardSnapshot": {"type": "object", "additionalProperties": false, "required": ["downloader_name", "adapter", "network_class", "fetched_at", "summary", "torrents", "filtered_total", "offset", "limit", "has_more"], "properties": {"downloader_name": {"type": "string"}, "adapter": {"type": "string", "enum": ["qbittorrent", "transmission", "deluge", "rtorrent"]}, "network_class": {"type": "string", "enum": ["unknown", "home", "seedbox"]}, "fetched_at": {"type": "string", "format": "date-time"}, "summary": {"$ref": "#/components/schemas/DownloaderDashboardSummary"}, "torrents": {"type": "array", "maxItems": 200, "items": {"$ref": "#/components/schemas/DownloaderDashboardTorrent"}}, "filtered_total": {"type": "integer", "minimum": 0}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "has_more": {"type": "boolean"}}},
 		"AdapterCapability": {
 			"type": "object", "additionalProperties": false,
 			"required": ["id", "kind", "adapter", "display_name", "runtime_supported", "operations", "credential_fields", "safety_gates", "constraints"],
@@ -1074,12 +1312,15 @@
 				"count": {"type": "integer", "minimum": 0}, "adapters": {"type": "array", "items": {"$ref": "#/components/schemas/AdapterCapability"}}, "blockers": {"type": "array"}, "next_actions": {"type": "array"}
 			}
 		},
-      "DownloaderInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["qbittorrent", "rtorrent", "deluge", "transmission"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}, "path_mappings": {"type": "array", "items": {"$ref": "#/components/schemas/PathMapping"}}}},
+      "DownloaderInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["qbittorrent", "rtorrent", "deluge", "transmission"]}, "enabled": {"type": "boolean", "default": true}, "network_class": {"type": "string", "enum": ["unknown", "home", "seedbox"], "default": "unknown", "description": "Operator-reviewed network type; never inferred from the name, host, or IP."}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}, "path_mappings": {"type": "array", "items": {"$ref": "#/components/schemas/PathMapping"}}}},
       "AddTorrentRequest": {"type": "object", "additionalProperties": false, "required": ["torrent_base64"], "properties": {"torrent_base64": {"type": "string", "contentEncoding": "base64", "writeOnly": true}, "save_path": {"type": "string"}, "category": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "apply_labels": {"type": "boolean", "default": true, "description": "Must be explicitly false, with empty category/tags, when adapter capabilities do not support labels."}, "skip_checking": {"type": "boolean"}, "paused": {"type": "boolean"}, "upload_limit": {"type": "integer", "minimum": 0}, "download_limit": {"type": "integer", "minimum": 0}}},
       "SetTorrentLimitsRequest": {"type": "object", "additionalProperties": false, "required": ["download_limit", "upload_limit"], "properties": {"download_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}, "upload_limit": {"type": "integer", "minimum": 0, "description": "Bytes per second; zero disables the limit."}}},
-      "ImageHostInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string"}, "enabled": {"type": "boolean", "default": true}, "priority": {"type": "integer", "default": 100}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}}},
-      "NotificationChannelConfig": {"type": "object", "additionalProperties": false, "properties": {"timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 15}, "options": {"type": "object", "description": "Non-secret adapter options only.", "additionalProperties": true}}},
-      "NotificationChannelInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "const": "discord_webhook"}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/NotificationChannelConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"webhook_url": {"type": "string", "format": "uri", "writeOnly": true}}}}},
+      "ImageHostInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["imgbb", "ptpimg", "imgbox", "pixhost"]}, "enabled": {"type": "boolean", "default": true}, "priority": {"type": "integer", "default": 100}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "description": "Encrypted at rest and never returned. api_key is required for ImgBB/PTPimg and omitted for Imgbox/Pixhost.", "additionalProperties": {"type": "string", "writeOnly": true}}}},
+      "NotificationChannelConfig": {"type": "object", "additionalProperties": false, "properties": {"timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 15}, "event_types": {"type": "array", "uniqueItems": true, "description": "Only explicitly listed high-level job events are delivered. Empty or omitted keeps the channel schedule-only.", "items": {"type": "string", "enum": ["job.created", "job.paused", "job.resumed", "job.cancelled", "job.completed", "step.blocked", "step.failed", "step.deferred", "target_package.revision_requested", "job.reconciliation_acknowledged"]}}, "options": {"type": "object", "description": "Non-secret adapter options only.", "additionalProperties": true}}},
+      "NotificationChannelInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["telegram_bot", "wecom_bot", "feishu_bot", "discord_webhook"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/NotificationChannelConfig"}, "credentials": {"type": "object", "description": "telegram_bot accepts bot_token and chat_id; webhook adapters accept webhook_url. Values are encrypted and never returned.", "additionalProperties": {"type": "string", "writeOnly": true}}}},
+      "SiteAccessPolicyInput": {"type": "object", "additionalProperties": false, "required": ["enabled", "general_min_interval_seconds", "general_max_requests_per_hour", "search_min_interval_seconds", "search_max_requests_per_hour", "max_concurrency"], "properties": {"enabled": {"type": "boolean"}, "general_min_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}, "general_max_requests_per_hour": {"type": "integer", "minimum": 1, "maximum": 3600}, "search_min_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}, "search_max_requests_per_hour": {"type": "integer", "minimum": 1, "maximum": 3600}, "max_concurrency": {"type": "integer", "minimum": 1, "maximum": 4}}},
+      "SiteAccessPolicy": {"type": "object", "required": ["site_code", "enabled", "service_access", "search_access", "general_min_interval_seconds", "general_max_requests_per_hour", "search_min_interval_seconds", "search_max_requests_per_hour", "max_concurrency", "rule_schema_version", "active_requests", "general_used_this_hour", "search_used_this_hour", "blockers"], "properties": {"site_code": {"type": "string"}, "enabled": {"type": "boolean"}, "service_access": {"type": "string", "enum": ["allowed", "forbidden", "undetermined"]}, "search_access": {"type": "string", "enum": ["allowed", "forbidden", "undetermined"]}, "general_min_interval_seconds": {"type": "integer"}, "general_max_requests_per_hour": {"type": "integer"}, "search_min_interval_seconds": {"type": "integer"}, "search_max_requests_per_hour": {"type": "integer"}, "max_concurrency": {"type": "integer"}, "rule_revision_id": {"type": "string", "format": "uuid"}, "rule_fingerprint": {"type": "string"}, "rule_schema_version": {"type": "integer"}, "policy_fingerprint": {"type": "string"}, "operator_policy": {"$ref": "#/components/schemas/SiteAccessPolicyInput"}, "active_requests": {"type": "integer"}, "general_used_this_hour": {"type": "integer"}, "search_used_this_hour": {"type": "integer"}, "general_cooldown_until": {"type": "string", "format": "date-time"}, "search_cooldown_until": {"type": "string", "format": "date-time"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}}},
+      "SiteAccessPolicyEnvelope": {"type": "object", "required": ["ok", "status", "site_code", "access_policy", "blockers", "next_actions"], "properties": {"ok": {"type": "boolean"}, "status": {"type": "string", "enum": ["ready", "blocked"]}, "site_code": {"type": "string"}, "access_policy": {"$ref": "#/components/schemas/SiteAccessPolicy"}, "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/Blocker"}}, "next_actions": {"type": "array", "items": {"$ref": "#/components/schemas/NextAction"}}}},
       "MediaManagerInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["sonarr", "radarr"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"api_key": {"type": "string", "writeOnly": true}}}}},
       "MediaManagerLookupRequest": {"type": "object", "additionalProperties": false, "properties": {"tvdb_id": {"type": "integer", "minimum": 1}, "tmdb_id": {"type": "integer", "minimum": 1}, "path": {"type": "string"}, "title": {"type": "string"}}},
       "MetadataProviderInput": {"type": "object", "additionalProperties": false, "required": ["adapter", "config"], "properties": {"adapter": {"type": "string", "enum": ["tmdb", "ptgen"]}, "enabled": {"type": "boolean", "default": true}, "config": {"$ref": "#/components/schemas/EndpointConfig"}, "credentials": {"type": "object", "additionalProperties": false, "properties": {"api_key": {"type": "string", "writeOnly": true}}}}},

@@ -198,9 +198,281 @@ func (r runner) execute(ctx context.Context, args []string) (json.RawMessage, er
 		return r.audit(ctx, args[1:])
 	case "readiness":
 		return r.readiness(ctx, args[1:])
+	case "operations":
+		return r.operations(ctx, args[1:])
+	case "logs":
+		return r.logs(ctx, args[1:])
+	case "incidents":
+		return r.incidents(ctx, args[1:])
+	case "diagnostics":
+		return r.diagnostics(ctx, args[1:])
+	case "providers":
+		return r.providers(ctx, args[1:])
+	case "backups":
+		return r.backups(ctx, args[1:])
+	case "tokens":
+		return r.tokens(ctx, args[1:])
 	default:
 		return nil, fmt.Errorf("unknown CLI command %q", args[0])
 	}
+}
+
+func (r runner) operations(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 || args[0] == "overview" {
+		return r.request(ctx, http.MethodGet, "/api/v2/operations/overview", nil, nil, nil, true)
+	}
+	if args[0] != "settings" {
+		return nil, errors.New("usage: operations overview|settings get|put --file JSON")
+	}
+	if len(args) < 2 || args[1] == "get" {
+		return r.request(ctx, http.MethodGet, "/api/v2/operations/settings", nil, nil, nil, true)
+	}
+	if args[1] == "put" {
+		body, err := bodyFromFileFlag("operations settings put", args[2:])
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodPut, "/api/v2/operations/settings", nil, body, nil, true)
+	}
+	return nil, errors.New("usage: operations settings get|put --file JSON")
+}
+
+func (r runner) logs(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 || args[0] != "list" {
+		return nil, errors.New("usage: logs list [--level LEVEL] [--component NAME] [--query TEXT] [--job-id UUID] [--limit N]")
+	}
+	flags := newFlags("logs list")
+	level := flags.String("level", "", "comma-separated levels")
+	component := flags.String("component", "", "component")
+	keyword := flags.String("query", "", "keyword")
+	jobID := flags.String("job-id", "", "job UUID")
+	traceID := flags.String("trace-id", "", "trace UUID")
+	limit := flags.Int("limit", 100, "result limit")
+	if err := parseFlags(flags, args[1:]); err != nil {
+		return nil, err
+	}
+	query := url.Values{"limit": []string{strconv.Itoa(*limit)}}
+	setQuery(query, "level", *level)
+	setQuery(query, "component", *component)
+	setQuery(query, "q", *keyword)
+	setQuery(query, "job_id", *jobID)
+	setQuery(query, "trace_id", *traceID)
+	return r.request(ctx, http.MethodGet, "/api/v2/operational-logs", query, nil, nil, true)
+}
+
+func (r runner) incidents(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 {
+		return nil, errors.New("usage: incidents list|get|acknowledge|resolve")
+	}
+	switch args[0] {
+	case "list":
+		flags := newFlags("incidents list")
+		status := flags.String("status", "", "incident status")
+		severity := flags.String("severity", "", "severity")
+		limit := flags.Int("limit", 50, "result limit")
+		if err := parseFlags(flags, args[1:]); err != nil {
+			return nil, err
+		}
+		query := url.Values{"limit": []string{strconv.Itoa(*limit)}}
+		setQuery(query, "status", *status)
+		setQuery(query, "severity", *severity)
+		return r.request(ctx, http.MethodGet, "/api/v2/incidents", query, nil, nil, true)
+	case "get", "acknowledge", "resolve":
+		if len(args) != 2 {
+			return nil, fmt.Errorf("usage: incidents %s <incident-id>", args[0])
+		}
+		id, err := validUUID(args[1], "incident ID")
+		if err != nil {
+			return nil, err
+		}
+		method := http.MethodGet
+		suffix := ""
+		if args[0] != "get" {
+			method = http.MethodPost
+			suffix = "/" + args[0]
+		}
+		return r.request(ctx, method, "/api/v2/incidents/"+id+suffix, nil, nil, nil, true)
+	default:
+		return nil, fmt.Errorf("unknown incidents command %q", args[0])
+	}
+}
+
+func (r runner) diagnostics(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 {
+		return nil, errors.New("usage: diagnostics list|get|create|message")
+	}
+	switch args[0] {
+	case "list":
+		return r.request(ctx, http.MethodGet, "/api/v2/diagnostics", url.Values{"limit": []string{"50"}}, nil, nil, true)
+	case "get":
+		if len(args) != 2 {
+			return nil, errors.New("usage: diagnostics get <diagnostic-id>")
+		}
+		id, err := validUUID(args[1], "diagnostic ID")
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodGet, "/api/v2/diagnostics/"+id, nil, nil, nil, true)
+	case "create":
+		flags := newFlags("diagnostics create")
+		provider := flags.String("provider", "", "provider UUID")
+		job := flags.String("job-id", "", "job UUID")
+		incident := flags.String("incident-id", "", "incident UUID")
+		if err := parseFlags(flags, args[1:]); err != nil {
+			return nil, err
+		}
+		if _, err := validUUID(*provider, "provider ID"); err != nil {
+			return nil, err
+		}
+		if *job == "" && *incident == "" {
+			return nil, errors.New("--job-id or --incident-id is required")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/diagnostics", nil, map[string]any{"provider_id": *provider, "job_id": *job, "incident_id": *incident}, nil, true)
+	case "message":
+		if len(args) < 2 {
+			return nil, errors.New("usage: diagnostics message <diagnostic-id> --question TEXT")
+		}
+		id, err := validUUID(args[1], "diagnostic ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("diagnostics message")
+		question := flags.String("question", "", "bounded operator question")
+		if err = parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(*question) == "" {
+			return nil, errors.New("--question is required")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/diagnostics/"+id+"/messages", nil, map[string]string{"question": *question}, nil, true)
+	default:
+		return nil, fmt.Errorf("unknown diagnostics command %q", args[0])
+	}
+}
+
+func (r runner) providers(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 || args[0] == "list" {
+		return r.request(ctx, http.MethodGet, "/api/v2/llm-providers", nil, nil, nil, true)
+	}
+	if len(args) < 2 {
+		return nil, errors.New("usage: providers put|probe <provider-id> [--stage catalog|inference]")
+	}
+	id, err := validUUID(args[1], "provider ID")
+	if err != nil {
+		return nil, err
+	}
+	switch args[0] {
+	case "probe":
+		flags := newFlags("providers probe")
+		stage := flags.String("stage", "catalog", "catalog discovers models; inference performs one bounded completion")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if *stage != "catalog" && *stage != "inference" {
+			return nil, errors.New("--stage must be catalog or inference")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/llm-providers/"+id+"/probe", url.Values{"stage": []string{*stage}}, nil, nil, true)
+	case "put":
+		body, err := bodyFromFileFlag("providers put", args[2:])
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodPut, "/api/v2/llm-providers/"+id, nil, body, nil, true)
+	default:
+		return nil, fmt.Errorf("unknown providers command %q", args[0])
+	}
+}
+
+func (r runner) backups(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 {
+		return nil, errors.New("usage: backups policy|get-runs|create|verify")
+	}
+	switch args[0] {
+	case "runs":
+		return r.request(ctx, http.MethodGet, "/api/v2/backups/runs", nil, nil, nil, true)
+	case "create":
+		return r.request(ctx, http.MethodPost, "/api/v2/backups", nil, nil, nil, true)
+	case "verify":
+		if len(args) != 2 {
+			return nil, errors.New("usage: backups verify <backup-id>")
+		}
+		id, err := validUUID(args[1], "backup ID")
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/backups/"+id+"/verify", nil, nil, nil, true)
+	case "policy":
+		if len(args) < 2 || args[1] == "get" {
+			return r.request(ctx, http.MethodGet, "/api/v2/backups/policy", nil, nil, nil, true)
+		}
+		if args[1] == "put" {
+			body, err := bodyFromFileFlag("backups policy put", args[2:])
+			if err != nil {
+				return nil, err
+			}
+			return r.request(ctx, http.MethodPut, "/api/v2/backups/policy", nil, body, nil, true)
+		}
+		fallthrough
+	default:
+		return nil, errors.New("usage: backups policy get|put --file JSON | runs | create | verify UUID")
+	}
+}
+
+func (r runner) tokens(ctx context.Context, args []string) (json.RawMessage, error) {
+	if len(args) == 0 || args[0] == "list" {
+		return r.request(ctx, http.MethodGet, "/api/v2/api-tokens", nil, nil, nil, true)
+	}
+	switch args[0] {
+	case "create":
+		flags := newFlags("tokens create")
+		name := flags.String("name", "", "token name")
+		scopes := flags.String("scopes", "", "comma-separated scope subset")
+		days := flags.Int("expires-days", 30, "expiry in days")
+		if err := parseFlags(flags, args[1:]); err != nil {
+			return nil, err
+		}
+		scopeList := []string{}
+		for _, scope := range strings.Split(*scopes, ",") {
+			if value := strings.TrimSpace(scope); value != "" {
+				scopeList = append(scopeList, value)
+			}
+		}
+		if *name == "" || len(scopeList) == 0 {
+			return nil, errors.New("--name and --scopes are required")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/api-tokens", nil, map[string]any{"name": *name, "scopes": scopeList, "expires_in_days": *days}, nil, true)
+	case "revoke":
+		if len(args) != 2 {
+			return nil, errors.New("usage: tokens revoke <token-id>")
+		}
+		id, err := validUUID(args[1], "token ID")
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodDelete, "/api/v2/api-tokens/"+id, nil, nil, nil, true)
+	default:
+		return nil, fmt.Errorf("unknown tokens command %q", args[0])
+	}
+}
+
+func bodyFromFileFlag(name string, args []string) (map[string]any, error) {
+	flags := newFlags(name)
+	file := flags.String("file", "", "JSON input file")
+	if err := parseFlags(flags, args); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(*file) == "" {
+		return nil, errors.New("--file is required")
+	}
+	body, err := readBoundedFile(*file, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var value map[string]any
+	if err = json.Unmarshal(body, &value); err != nil {
+		return nil, fmt.Errorf("invalid JSON input: %w", err)
+	}
+	return value, nil
 }
 
 func (r runner) request(ctx context.Context, method, requestPath string, query url.Values, body any, headers map[string]string, authenticated bool) (json.RawMessage, error) {
@@ -209,7 +481,7 @@ func (r runner) request(ctx context.Context, method, requestPath string, query u
 
 func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel")
+		return nil, errors.New("usage: jobs list|get|summary|attention|preview|revise-preview|action|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel")
 	}
 	switch args[0] {
 	case "list":
@@ -226,7 +498,7 @@ func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error
 		setQuery(query, "kind", *kind)
 		setQuery(query, "cursor", *cursor)
 		return r.request(ctx, http.MethodGet, "/api/v2/jobs", query, nil, nil, true)
-	case "get", "summary", "steps", "artifacts":
+	case "get", "summary", "attention", "preview", "steps", "artifacts":
 		if len(args) != 2 {
 			return nil, fmt.Errorf("usage: jobs %s <job-id>", args[0])
 		}
@@ -235,10 +507,60 @@ func (r runner) jobs(ctx context.Context, args []string) (json.RawMessage, error
 			return nil, err
 		}
 		suffix := ""
-		if args[0] != "get" {
+		if args[0] == "preview" {
+			suffix = "/upload-preview"
+		} else if args[0] != "get" {
 			suffix = "/" + args[0]
 		}
 		return r.request(ctx, http.MethodGet, "/api/v2/jobs/"+id+suffix, nil, nil, nil, true)
+	case "action":
+		if len(args) < 2 {
+			return nil, errors.New("usage: jobs action <job-id> --action ID --expected-status STATUS [--expected-step STEP] [--expected-blocker CODE] [--confirm]")
+		}
+		id, err := validUUID(args[1], "job ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("jobs action")
+		actionID := flags.String("action", "", "advertised executable action id")
+		expectedStatus := flags.String("expected-status", "", "exact current job status")
+		expectedStep := flags.String("expected-step", "", "exact current step")
+		expectedBlocker := flags.String("expected-blocker", "", "exact current primary blocker code")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm a safe repair")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(*actionID) == "" || strings.TrimSpace(*expectedStatus) == "" {
+			return nil, errors.New("--action and --expected-status are required")
+		}
+		body := map[string]any{"action_id": strings.TrimSpace(*actionID), "expected_status": strings.TrimSpace(*expectedStatus), "expected_step": strings.TrimSpace(*expectedStep), "expected_blocker_code": strings.TrimSpace(*expectedBlocker), "confirmed": *confirmed}
+		return r.request(ctx, http.MethodPost, "/api/v2/jobs/"+id+"/actions", nil, body, nil, true)
+	case "revise-preview":
+		if len(args) < 2 {
+			return nil, errors.New("usage: jobs revise-preview <job-id> --expected-sha SHA256 --fields-file JSON_FILE")
+		}
+		id, err := validUUID(args[1], "job ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("jobs revise-preview")
+		expectedSHA := flags.String("expected-sha", "", "exact current target package SHA-256")
+		fieldsFile := flags.String("fields-file", "", "JSON file containing reviewed editable fields")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if !validLowerSHA256(*expectedSHA) || strings.TrimSpace(*fieldsFile) == "" {
+			return nil, errors.New("--expected-sha must be a lowercase SHA-256 and --fields-file is required")
+		}
+		fieldsBody, err := readBoundedFile(*fieldsFile, 2<<20)
+		if err != nil {
+			return nil, err
+		}
+		fields := map[string]any{}
+		if err := json.Unmarshal(fieldsBody, &fields); err != nil {
+			return nil, fmt.Errorf("invalid preview fields JSON: %w", err)
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/jobs/"+id+"/upload-preview/revisions", nil, map[string]any{"expected_package_sha256": *expectedSHA, "fields": fields}, nil, true)
 	case "events":
 		flags := newFlags("jobs events")
 		after := flags.Int64("after", 0, "event cursor")
@@ -576,7 +898,7 @@ func (r runner) candidates(ctx context.Context, args []string) (json.RawMessage,
 
 func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: rules list|active|get|import|approve|activate ...")
+		return nil, errors.New("usage: rules list|active|access|access-set|sources|sources-set|collect|collection|get|import|analyze|approve|activate|discard ...")
 	}
 	switch args[0] {
 	case "list", "active":
@@ -601,6 +923,107 @@ func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, erro
 			return nil, err
 		}
 		return r.request(ctx, http.MethodGet, "/api/v2/site-rules/"+id, nil, nil, nil, true)
+	case "access":
+		if len(args) != 2 {
+			return nil, errors.New("usage: rules access <site-code>")
+		}
+		site, err := validSite(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodGet, "/api/v2/sites/"+site+"/access-policy", nil, nil, nil, true)
+	case "access-set":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules access-set <site-code> --general-interval N --general-hourly N --search-interval N --search-hourly N --concurrency N --confirm")
+		}
+		site, err := validSite(args[1])
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules access-set")
+		enabled := flags.Bool("enabled", true, "enable service access policy")
+		generalInterval := flags.Int("general-interval", 0, "general request minimum interval seconds")
+		generalHourly := flags.Int("general-hourly", 0, "general request hourly quota")
+		searchInterval := flags.Int("search-interval", 0, "search minimum interval seconds")
+		searchHourly := flags.Int("search-hourly", 0, "search hourly quota")
+		concurrency := flags.Int("concurrency", 1, "maximum site concurrency")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm access policy")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if !*confirmed || *generalInterval < 1 || *generalHourly < 1 || *searchInterval < 1 || *searchHourly < 1 || *concurrency < 1 {
+			return nil, errors.New("all positive access limits and --confirm are required")
+		}
+		body := map[string]any{"enabled": *enabled, "general_min_interval_seconds": *generalInterval, "general_max_requests_per_hour": *generalHourly, "search_min_interval_seconds": *searchInterval, "search_max_requests_per_hour": *searchHourly, "max_concurrency": *concurrency}
+		return r.request(ctx, http.MethodPut, "/api/v2/sites/"+site+"/access-policy", nil, body, nil, true)
+	case "sources":
+		if len(args) != 2 {
+			return nil, errors.New("usage: rules sources <site-code>")
+		}
+		site, err := validSite(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodGet, "/api/v2/sites/"+site+"/rule-sources", nil, nil, nil, true)
+	case "sources-set":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules sources-set <site-code> --file JSON_FILE|- --confirm")
+		}
+		site, err := validSite(args[1])
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules sources-set")
+		filename := flags.String("file", "", "JSON file with sources and explicit confirmations; - reads stdin")
+		confirmed := flags.Bool("confirm", false, "confirm external rule-page reads and inference")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if !*confirmed {
+			return nil, errors.New("source-set configuration requires --confirm")
+		}
+		body, err := readRuleSourceSetInput(*filename, r.streams.In)
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodPut, "/api/v2/sites/"+site+"/rule-sources", nil, body, nil, true)
+	case "collect":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules collect <site-code> --fingerprint SHA256 --provider UUID [--idempotency-key KEY] --confirm")
+		}
+		site, err := validSite(args[1])
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules collect")
+		fingerprint := flags.String("fingerprint", "", "exact saved source-set fingerprint")
+		provider := flags.String("provider", "", "configured rule_analysis provider UUID")
+		key := flags.String("idempotency-key", "", "stable retry key")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm authenticated external rule-page reads and inference")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		providerID, err := validUUID(*provider, "provider ID")
+		if err != nil {
+			return nil, err
+		}
+		if !validLowerSHA256(*fingerprint) || !*confirmed {
+			return nil, errors.New("exact lowercase --fingerprint and --confirm are required")
+		}
+		if strings.TrimSpace(*key) == "" {
+			*key = "cli-rule-collection-" + uuid.NewString()
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/sites/"+site+"/rule-collection-runs", nil,
+			map[string]any{"source_set_fingerprint": strings.TrimSpace(*fingerprint), "provider_id": providerID, "confirm": true}, map[string]string{"Idempotency-Key": strings.TrimSpace(*key)}, true)
+	case "collection":
+		if len(args) != 2 {
+			return nil, errors.New("usage: rules collection <run-id>")
+		}
+		id, err := validUUID(args[1], "rule collection run ID")
+		if err != nil {
+			return nil, err
+		}
+		return r.request(ctx, http.MethodGet, "/api/v2/site-rule-collection-runs/"+id, nil, nil, nil, true)
 	case "import":
 		flags := newFlags("rules import")
 		filename := flags.String("file", "", "local structured Markdown rule file")
@@ -612,6 +1035,28 @@ func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, erro
 			return nil, err
 		}
 		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/import", nil, map[string]any{"markdown": string(markdown)}, nil, true)
+	case "analyze":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules analyze <revision-id> --provider <provider-id> --confirm")
+		}
+		id, err := validUUID(args[1], "rule revision ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules analyze")
+		provider := flags.String("provider", "", "configured rule_analysis provider UUID")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm sending the immutable rule original to the provider")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		providerID, err := validUUID(*provider, "provider ID")
+		if err != nil {
+			return nil, err
+		}
+		if !*confirmed {
+			return nil, errors.New("rule analysis requires --confirm")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/analyze", nil, map[string]any{"provider_id": providerID, "source_revision_id": id}, nil, true)
 	case "approve":
 		if len(args) < 2 {
 			return nil, errors.New("usage: rules approve <revision-id> --fingerprint SHA256 [--comment TEXT] --confirm")
@@ -655,6 +1100,24 @@ func (r runner) rules(ctx context.Context, args []string) (json.RawMessage, erro
 			return nil, errors.New("rule activation requires --confirm")
 		}
 		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/"+id+"/activate", nil, map[string]any{}, nil, true)
+	case "discard":
+		if len(args) < 2 {
+			return nil, errors.New("usage: rules discard <revision-id> --fingerprint SHA256 --confirm")
+		}
+		id, err := validUUID(args[1], "rule revision ID")
+		if err != nil {
+			return nil, err
+		}
+		flags := newFlags("rules discard")
+		fingerprint := flags.String("fingerprint", "", "exact server-computed lowercase rule fingerprint")
+		confirmed := flags.Bool("confirm", false, "explicitly confirm discarding the pending draft")
+		if err := parseFlags(flags, args[2:]); err != nil {
+			return nil, err
+		}
+		if !validLowerSHA256(*fingerprint) || !*confirmed {
+			return nil, errors.New("exact lowercase --fingerprint and --confirm are required")
+		}
+		return r.request(ctx, http.MethodPost, "/api/v2/site-rules/"+id+"/discard", nil, map[string]any{"fingerprint": strings.TrimSpace(*fingerprint), "confirm": true}, nil, true)
 	default:
 		return nil, fmt.Errorf("unknown rules command %q", args[0])
 	}
@@ -687,6 +1150,56 @@ func readRuleMarkdown(filename string, input io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("rule Markdown exceeds %d bytes", rules.MaxMarkdownBytes)
 	}
 	return readBoundedRuleMarkdown(file, "file")
+}
+
+func readRuleSourceSetInput(filename string, input io.Reader) (map[string]any, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return nil, errors.New("rules sources-set requires --file")
+	}
+	var raw []byte
+	var err error
+	if filename == "-" {
+		if input == nil {
+			return nil, errors.New("rule source-set stdin is unavailable")
+		}
+		raw, err = io.ReadAll(io.LimitReader(input, (64<<10)+1))
+		if err == nil && len(raw) > 64<<10 {
+			err = errors.New("rule source-set JSON exceeds 65536 bytes")
+		}
+	} else {
+		raw, err = readBoundedFile(filename, 64<<10)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, fmt.Errorf("invalid rule source-set JSON: %w", err)
+	}
+	sources, sourcesOK := body["sources"].([]any)
+	if !sourcesOK || len(sources) < 1 || body["scope_confirmed"] != true {
+		return nil, errors.New("source-set JSON requires non-empty sources and scope_confirmed=true")
+	}
+	cookieRequired := false
+	for _, rawSource := range sources {
+		source, ok := rawSource.(map[string]any)
+		if !ok {
+			return nil, errors.New("source-set JSON contains an invalid source")
+		}
+		authMode, _ := source["auth_mode"].(string)
+		if authMode == "" {
+			authMode = "site_cookie"
+		}
+		if authMode != "none" && authMode != "site_cookie" {
+			return nil, errors.New("source auth_mode must be none or site_cookie")
+		}
+		cookieRequired = cookieRequired || authMode == "site_cookie"
+	}
+	if cookieRequired && body["cookie_hosts_confirmed"] != true {
+		return nil, errors.New("Cookie-authenticated sources require cookie_hosts_confirmed=true")
+	}
+	return body, nil
 }
 
 func readBoundedRuleMarkdown(input io.Reader, source string) ([]byte, error) {
@@ -1102,20 +1615,35 @@ Usage:
   upload-assistant cli [global options] health
   upload-assistant cli [global options] tools
   upload-assistant cli [global options] adapters [--kind KIND]
-  upload-assistant cli [global options] jobs list|get|summary|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel ...
+  upload-assistant cli [global options] jobs list|get|summary|attention|preview|revise-preview|action|steps|attempts|events|artifacts|pause|resume|retry|replay|cancel ...
   upload-assistant cli [global options] retorrent create --source-url URL --target SITE [options]
   upload-assistant cli [global options] candidates list|scan|submit ...
   upload-assistant cli [global options] sites
   upload-assistant cli [global options] rules list|active SITE
+  upload-assistant cli [global options] rules access SITE
+  upload-assistant cli [global options] rules access-set SITE --general-interval N --general-hourly N --search-interval N --search-hourly N --concurrency N --confirm
+  upload-assistant cli [global options] rules sources SITE
+  upload-assistant cli [global options] rules sources-set SITE --file JSON_FILE|- --confirm
+  upload-assistant cli [global options] rules collect SITE --fingerprint SHA256 --provider PROVIDER_ID --confirm
+  upload-assistant cli [global options] rules collection RUN_ID
   upload-assistant cli [global options] rules get REVISION_ID
   upload-assistant cli [global options] rules import --file MARKDOWN_FILE|-
   upload-assistant cli [global options] rules approve REVISION_ID --fingerprint SHA256 [--comment TEXT] --confirm
+  upload-assistant cli [global options] rules analyze REVISION_ID --provider PROVIDER_ID --confirm
   upload-assistant cli [global options] rules activate REVISION_ID --confirm
+  upload-assistant cli [global options] rules discard REVISION_ID --fingerprint SHA256 --confirm
   upload-assistant cli [global options] integrations list COLLECTION
   upload-assistant cli [global options] notifications [--limit N]
   upload-assistant cli [global options] notifications reconcile NOTIFICATION_ID --decision DECISION --evidence-sha256 SHA256 --observed-at RFC3339 --confirm [--message-id ID]
   upload-assistant cli [global options] audit list [filters]
   upload-assistant cli [global options] readiness live --source U2|CHD --target MTEAM --downloader NAME --image-host NAME --screenshot-profile NAME --tmdb-provider NAME --ptgen-provider NAME
+  upload-assistant cli [global options] operations overview|settings ...
+  upload-assistant cli [global options] logs list [filters]
+  upload-assistant cli [global options] incidents list|get|acknowledge|resolve ...
+  upload-assistant cli [global options] diagnostics list|get|create|message ...
+  upload-assistant cli [global options] providers list|put|probe PROVIDER_ID [--stage catalog|inference]
+  upload-assistant cli [global options] backups policy|runs|create|verify ...
+  upload-assistant cli [global options] tokens list|create|revoke ...
   upload-assistant cli [global options] shell
 
 Global options:

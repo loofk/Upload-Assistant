@@ -53,6 +53,9 @@ func (executor targetDuplicateExecutor) Execute(ctx context.Context, execution E
 	}
 	evidence, err := executor.checker.DuplicateCheck(ctx, target, query, execution.Actor)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, targetDuplicateRequestBlock(err, target, query)
 	}
 	if err := validateTargetDuplicateEvidence(evidence, target, query); err != nil {

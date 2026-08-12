@@ -69,6 +69,7 @@ type Job struct {
 	UpdatedAt     time.Time       `json:"updated_at"`
 	StartedAt     *time.Time      `json:"started_at,omitempty"`
 	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+	NotBefore     *time.Time      `json:"not_before,omitempty"`
 }
 
 type ListJobsFilter struct {
@@ -108,6 +109,7 @@ type Attempt struct {
 	StepKey        string          `json:"step_key,omitempty"`
 	StepPosition   int             `json:"step_position,omitempty"`
 	Number         int             `json:"number"`
+	TraceID        string          `json:"trace_id,omitempty"`
 	Status         StepStatus      `json:"status"`
 	Adapter        string          `json:"adapter,omitempty"`
 	AdapterVersion string          `json:"adapter_version,omitempty"`
@@ -202,4 +204,19 @@ type BlockStepInput struct {
 	NextActions json.RawMessage
 	ResumeState json.RawMessage
 	Actor       Actor
+}
+
+type DeferStepInput struct {
+	JobID       string
+	AttemptID   string
+	NotBefore   time.Time
+	Reason      string
+	ResumeState json.RawMessage
+	Actor       Actor
+}
+
+type ReviseTargetPackageInput struct {
+	ExpectedPackageSHA256 string
+	Options               json.RawMessage
+	Actor                 Actor
 }

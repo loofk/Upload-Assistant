@@ -107,7 +107,7 @@ func (fixture *delugeFixture) handler(w http.ResponseWriter, request *http.Reque
 		fixture.uploadKiB, _ = options["max_upload_speed"].(float64)
 		fixture.mu.Unlock()
 		result = nil
-	case "core.get_torrent_status":
+	case "core.get_torrent_status", "core.get_torrents_status":
 		fixture.mu.Lock()
 		failed := fixture.statusFailure
 		downloadKiB, uploadKiB := fixture.downloadKiB, fixture.uploadKiB
@@ -119,7 +119,7 @@ func (fixture *delugeFixture) handler(w http.ResponseWriter, request *http.Reque
 			fixture.write(w, call.ID, nil, map[string]any{"code": 3, "message": "unknown torrent"})
 			return
 		}
-		result = map[string]any{
+		status := map[string]any{
 			"hash": strings.ToUpper(fixture.hash), "name": "release", "state": "Seeding", "progress": 100,
 			"total_size": 1024, "total_done": 1024, "total_remaining": 0,
 			"total_payload_download": 1024, "total_uploaded": 2048,
@@ -129,6 +129,10 @@ func (fixture *delugeFixture) handler(w http.ResponseWriter, request *http.Reque
 			"active_time": 20, "seeding_time": 10, "message": "", "is_seed": true,
 			"files":         []any{map[string]any{"index": 0, "path": "release/video.mkv", "size": 1024, "offset": 0}},
 			"file_progress": []float64{1}, "file_priorities": []int{4},
+		}
+		result = status
+		if call.Method == "core.get_torrents_status" {
+			result = map[string]any{fixture.hash: status}
 		}
 	default:
 		fixture.write(w, call.ID, nil, map[string]any{"code": 4, "message": "unknown method"})
@@ -176,6 +180,10 @@ func TestClientProbeAddInspectFilesLimitsAndWait(t *testing.T) {
 	}
 	if result.Observed.DownloadLimit != 4096 || result.Observed.UploadLimit != 8192 || result.Observed.State != "seeding" {
 		t.Fatalf("Add() observed = %#v", result.Observed)
+	}
+	torrents, err := client.List(ctx)
+	if err != nil || len(torrents) != 1 || torrents[0].Name != "release" {
+		t.Fatalf("List() torrents/error = %#v/%v", torrents, err)
 	}
 	files, err := client.Files(ctx, hashes.V1SHA1)
 	if err != nil || len(files) != 1 || files[0].Name != "release/video.mkv" || files[0].Priority != 4 || !files[0].Seed {

@@ -21,8 +21,10 @@ import (
 )
 
 const (
-	maxResponseBytes      = 4 << 20
-	maxFilesResponseBytes = 32 << 20
+	maxResponseBytes         = 4 << 20
+	maxTorrentsResponseBytes = 32 << 20
+	maxFilesResponseBytes    = 32 << 20
+	maxTorrentCount          = 100_000
 )
 
 var (
@@ -97,6 +99,10 @@ type AddOptions struct {
 	Paused        bool
 	UploadLimit   int64
 	DownloadLimit int64
+	// SeedboxUploadLimit is interpreted only by the downloader manager after it
+	// loads the operator-reviewed downloader network class. Adapter clients must
+	// never infer seedbox status themselves.
+	SeedboxUploadLimit int64
 }
 
 type AddResult struct {
@@ -204,6 +210,30 @@ func (client *Client) Get(ctx context.Context, hash string) (Torrent, error) {
 		}
 	}
 	return Torrent{}, ErrNotFound
+}
+
+// List returns a bounded read-only snapshot of every torrent known to the
+// configured qBittorrent instance. Callers are responsible for pagination and
+// must not persist the returned names or paths in operational logs.
+func (client *Client) List(ctx context.Context) ([]Torrent, error) {
+	if err := client.Authenticate(ctx); err != nil {
+		return nil, err
+	}
+	query := url.Values{"sort": {"added_on"}, "reverse": {"true"}}
+	body, err := client.requestLimit(
+		ctx, http.MethodGet, "/api/v2/torrents/info?"+query.Encode(), nil, "", true, maxTorrentsResponseBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var torrents []Torrent
+	if err := json.Unmarshal(body, &torrents); err != nil {
+		return nil, fmt.Errorf("decode qBittorrent torrent list: %w", err)
+	}
+	if len(torrents) > maxTorrentCount {
+		return nil, fmt.Errorf("qBittorrent torrent count exceeds %d", maxTorrentCount)
+	}
+	return torrents, nil
 }
 
 func (client *Client) Files(ctx context.Context, hash string) ([]TorrentFile, error) {

@@ -310,21 +310,21 @@ func (s *Store) ReconcileNotification(ctx context.Context, id string, input Noti
 		return Notification{}, fmt.Errorf("%w: notification reconciliation decision is unsupported", ErrInvalid)
 	}
 	if input.Decision == "verified_not_delivered" && input.MessageID != "" {
-		return Notification{}, fmt.Errorf("%w: verified_not_delivered cannot include a Discord message_id", ErrInvalid)
-	}
-	if input.Decision == "verified_delivered" && !numericNotificationID(input.MessageID) {
-		return Notification{}, fmt.Errorf("%w: verified_delivered requires the exact numeric Discord message_id", ErrInvalid)
+		return Notification{}, fmt.Errorf("%w: verified_not_delivered cannot include a message_id", ErrInvalid)
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Notification{}, fmt.Errorf("begin notification reconciliation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var status, payloadSHA, channelID string
+	var status, payloadSHA, channelID, adapter string
 	var priorEvidence json.RawMessage
 	err = tx.QueryRow(ctx, `
-		SELECT status, COALESCE(payload_sha256, ''), remote_receipt, notification_channel_id::text
-		FROM notifications WHERE id = $1 FOR UPDATE`, id).Scan(&status, &payloadSHA, &priorEvidence, &channelID)
+		SELECT notification.status, COALESCE(notification.payload_sha256, ''), notification.remote_receipt,
+		       notification.notification_channel_id::text, channel.adapter
+		FROM notifications notification
+		JOIN notification_channels channel ON channel.id=notification.notification_channel_id
+		WHERE notification.id = $1 FOR UPDATE OF notification`, id).Scan(&status, &payloadSHA, &priorEvidence, &channelID, &adapter)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Notification{}, ErrNotFound
 	}
@@ -334,16 +334,31 @@ func (s *Store) ReconcileNotification(ctx context.Context, id string, input Noti
 	if status != "outcome_unknown" {
 		return Notification{}, fmt.Errorf("%w: only outcome_unknown notifications can be reconciled", ErrConflict)
 	}
+	if input.Decision == "verified_delivered" {
+		switch adapter {
+		case "discord_webhook", "telegram_bot":
+			if !numericNotificationID(input.MessageID) {
+				return Notification{}, fmt.Errorf("%w: verified_delivered requires the exact numeric message_id for %s", ErrInvalid, adapter)
+			}
+		case "wecom_bot", "feishu_bot":
+			if input.MessageID != "" {
+				return Notification{}, fmt.Errorf("%w: %s receipts do not expose a message_id", ErrInvalid, adapter)
+			}
+		default:
+			return Notification{}, fmt.Errorf("%w: notification adapter is unsupported", ErrInvalid)
+		}
+	}
 	var knownReceipt struct {
 		MessageID string `json:"message_id"`
 	}
 	if json.Unmarshal(priorEvidence, &knownReceipt) == nil && numericNotificationID(knownReceipt.MessageID) &&
 		(input.Decision != "verified_delivered" || input.MessageID != knownReceipt.MessageID) {
-		return Notification{}, fmt.Errorf("%w: a persisted Discord success receipt can only be reconciled as verified_delivered with the exact message_id", ErrInvalid)
+		return Notification{}, fmt.Errorf("%w: a persisted success receipt can only be reconciled as verified_delivered with the exact message_id", ErrInvalid)
 	}
 	priorHash := sha256.Sum256(priorEvidence)
 	receipt := map[string]any{
 		"schema_version": 1, "reconciled": true, "decision": input.Decision,
+		"adapter":         adapter,
 		"evidence_sha256": input.EvidenceSHA256, "observed_at": observedAt.UTC().Format(time.RFC3339),
 		"payload_sha256": payloadSHA, "prior_outcome_evidence_sha256": hex.EncodeToString(priorHash[:]),
 	}

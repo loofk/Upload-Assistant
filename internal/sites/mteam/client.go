@@ -42,10 +42,11 @@ type DuplicateEvidence = sites.TargetDuplicateEvidence
 
 type Client struct {
 	store      RuntimeSiteStore
+	accessGate sites.AccessGate
 	httpClient *http.Client
 }
 
-func NewClient(store RuntimeSiteStore, httpClient *http.Client) *Client {
+func NewClient(store RuntimeSiteStore, accessGate sites.AccessGate, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	} else {
@@ -58,12 +59,20 @@ func NewClient(store RuntimeSiteStore, httpClient *http.Client) *Client {
 	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return errors.New("MTEAM API redirect is not allowed")
 	}
-	return &Client{store: store, httpClient: httpClient}
+	return &Client{store: store, accessGate: accessGate, httpClient: httpClient}
 }
 
 func (*Client) SiteCode() string { return "MTEAM" }
 
 func (client *Client) DuplicateCheck(ctx context.Context, query DuplicateQuery, actor workflow.Actor) (DuplicateEvidence, error) {
+	return sites.WithAccess(ctx, client.accessGate, sites.AccessRequest{
+		SiteCode: "MTEAM", Operation: "target.duplicate_check", Class: sites.AccessSearch,
+	}, func(access *sites.AccessResult) (DuplicateEvidence, error) {
+		return client.duplicateCheck(ctx, query, actor, access)
+	})
+}
+
+func (client *Client) duplicateCheck(ctx context.Context, query DuplicateQuery, actor workflow.Actor, access *sites.AccessResult) (DuplicateEvidence, error) {
 	query.IMDbID = strings.ToLower(strings.TrimSpace(query.IMDbID))
 	if !imdbPattern.MatchString(query.IMDbID) {
 		return DuplicateEvidence{}, sites.NewAdapterError("target_duplicate_identity_required", "MTEAM duplicate check requires an IMDb id in tt1234567 form", false, nil)
@@ -106,10 +115,13 @@ func (client *Client) DuplicateCheck(ctx context.Context, query DuplicateQuery, 
 		return DuplicateEvidence{}, sites.NewAdapterError("target_duplicate_request_failed", "MTEAM duplicate-check request failed", true, nil)
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxAPIResponse+1))
 	if err != nil || len(responseBody) > maxAPIResponse {
 		return DuplicateEvidence{}, sites.NewAdapterError("target_duplicate_response_invalid", "MTEAM duplicate-check response is unreadable or too large", false, err)
 	}
+	responseDigest := sha256.Sum256(responseBody)
+	access.ResponseSHA256 = hex.EncodeToString(responseDigest[:])
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return DuplicateEvidence{}, sites.NewAdapterError("site_authentication_failed", "MTEAM rejected the API key", false, nil)
 	}

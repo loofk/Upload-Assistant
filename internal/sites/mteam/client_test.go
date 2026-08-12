@@ -20,6 +20,16 @@ type fakeRuntimeSiteStore struct {
 	details []map[string]any
 }
 
+type permissiveAccessGate struct{}
+
+func (permissiveAccessGate) Acquire(_ context.Context, request sites.AccessRequest) (sites.AccessLease, error) {
+	return sites.AccessLease{ID: "test", SiteCode: request.SiteCode, Operation: request.Operation, Class: request.Class}, nil
+}
+
+func (permissiveAccessGate) Complete(context.Context, sites.AccessLease, sites.AccessResult) error {
+	return nil
+}
+
 func (store *fakeRuntimeSiteStore) GetRuntimeSite(context.Context, string) (integrations.RuntimeSite, error) {
 	return store.runtime, nil
 }
@@ -48,7 +58,7 @@ func TestClientChecksMTeamDuplicatesWithoutCredentialLeak(t *testing.T) {
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "mteam-secret")
-	evidence, err := NewClient(store, nil).DuplicateCheck(context.Background(), DuplicateQuery{IMDbID: "TT1234567"}, workflow.Actor{Type: "test", ID: "dupe"})
+	evidence, err := NewClient(store, permissiveAccessGate{}, nil).DuplicateCheck(context.Background(), DuplicateQuery{IMDbID: "TT1234567"}, workflow.Actor{Type: "test", ID: "dupe"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +78,7 @@ func TestClientReturnsAuditedCleanResult(t *testing.T) {
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "key")
-	evidence, err := NewClient(store, nil).DuplicateCheck(context.Background(), DuplicateQuery{IMDbID: "tt7654321"}, workflow.Actor{})
+	evidence, err := NewClient(store, permissiveAccessGate{}, nil).DuplicateCheck(context.Background(), DuplicateQuery{IMDbID: "tt7654321"}, workflow.Actor{})
 	if err != nil || evidence.Duplicate || evidence.ResultCount != 0 || len(store.actions) != 1 {
 		t.Fatalf("clean evidence/error/store = %#v/%v/%#v", evidence, err, store)
 	}
@@ -76,12 +86,12 @@ func TestClientReturnsAuditedCleanResult(t *testing.T) {
 
 func TestClientFailsClosedWithoutIdentityOrAPIKey(t *testing.T) {
 	store := runtimeSiteStore("https://api.m-team.cc", "")
-	_, err := NewClient(store, nil).DuplicateCheck(context.Background(), DuplicateQuery{}, workflow.Actor{})
+	_, err := NewClient(store, permissiveAccessGate{}, nil).DuplicateCheck(context.Background(), DuplicateQuery{}, workflow.Actor{})
 	code, _, _ := sites.ErrorDetails(err)
 	if code != "target_duplicate_identity_required" {
 		t.Fatalf("missing identity error = %q/%v", code, err)
 	}
-	_, err = NewClient(store, nil).DuplicateCheck(context.Background(), DuplicateQuery{IMDbID: "tt1234567"}, workflow.Actor{})
+	_, err = NewClient(store, permissiveAccessGate{}, nil).DuplicateCheck(context.Background(), DuplicateQuery{IMDbID: "tt1234567"}, workflow.Actor{})
 	code, _, _ = sites.ErrorDetails(err)
 	if code != "site_api_key_required" {
 		t.Fatalf("missing API key error = %q/%v", code, err)

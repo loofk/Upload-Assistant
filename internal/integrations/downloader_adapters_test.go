@@ -11,7 +11,7 @@ func TestDownloaderAdapterCapabilitiesAreTruthfulAndCopied(t *testing.T) {
 		t.Fatalf("adapter count = %d, want 4", len(items))
 	}
 	qbit, ok := DownloaderAdapterCapabilityFor(" QBittorrent ")
-	if !ok || !qbit.RuntimeSupported || !qbit.Operations.WaitComplete || !qbit.Operations.SetLimits {
+	if !ok || !qbit.RuntimeSupported || !qbit.Operations.WaitComplete || !qbit.Operations.SetLimits || !qbit.Operations.ListTorrents {
 		t.Fatalf("qBittorrent capability = %#v", qbit)
 	}
 	transmission, ok := DownloaderAdapterCapabilityFor("transmission")

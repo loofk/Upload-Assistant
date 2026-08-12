@@ -69,6 +69,9 @@ func (executor targetTorrentDownloadExecutor) Execute(ctx context.Context, execu
 		ContentFingerprintSHA256: bindings.SubmittedInspection.ContentFingerprint,
 	}, execution.Actor)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, targetTorrentDownloadBlock(err, bindings)
 	}
 	inspection, err := validateDownloadedTargetTorrent(downloaded, bindings)

@@ -20,6 +20,8 @@ type Config struct {
 	ListenAddr       string
 	DatabaseURL      string
 	DataDir          string
+	DownloadsDir     string
+	BackupsDir       string
 	LegacyDir        string
 	LogLevel         string
 	ShutdownTimeout  time.Duration
@@ -33,6 +35,10 @@ type Config struct {
 	FFmpegBinary     string
 	FFprobeBinary    string
 	MkbrrBinary      string
+	PgDumpBinary     string
+	PgRestoreBinary  string
+	AgeBinary        string
+	AgeKeygenBinary  string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -46,6 +52,8 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		ListenAddr:       envOrDefault(lookup, "UA_LISTEN_ADDR", defaultListenAddr),
 		DatabaseURL:      strings.TrimSpace(envOrDefault(lookup, "UA_DATABASE_URL", "")),
 		DataDir:          filepath.Clean(envOrDefault(lookup, "UA_DATA_DIR", defaultDataDir)),
+		DownloadsDir:     filepath.Clean(envOrDefault(lookup, "UA_DOWNLOADS_DIR", "/downloads")),
+		BackupsDir:       filepath.Clean(envOrDefault(lookup, "UA_BACKUPS_DIR", "/backups")),
 		LegacyDir:        filepath.Clean(envOrDefault(lookup, "UA_LEGACY_DIR", "/legacy")),
 		LogLevel:         strings.ToLower(envOrDefault(lookup, "UA_LOG_LEVEL", "info")),
 		ShutdownTimeout:  defaultShutdown,
@@ -58,6 +66,10 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		FFmpegBinary:     envOrDefault(lookup, "UA_FFMPEG_BIN", "ffmpeg"),
 		FFprobeBinary:    envOrDefault(lookup, "UA_FFPROBE_BIN", "ffprobe"),
 		MkbrrBinary:      envOrDefault(lookup, "UA_MKBRR_BIN", "mkbrr"),
+		PgDumpBinary:     envOrDefault(lookup, "UA_PG_DUMP_BIN", "pg_dump"),
+		PgRestoreBinary:  envOrDefault(lookup, "UA_PG_RESTORE_BIN", "pg_restore"),
+		AgeBinary:        envOrDefault(lookup, "UA_AGE_BIN", "age"),
+		AgeKeygenBinary:  envOrDefault(lookup, "UA_AGE_KEYGEN_BIN", "age-keygen"),
 	}
 	cfg.MasterKeyFile = filepath.Clean(envOrDefault(lookup, "UA_MASTER_KEY_FILE", filepath.Join(cfg.DataDir, "master-keys")))
 	if cfg.DatabaseURL == "" {
@@ -65,6 +77,9 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 	}
 	if !filepath.IsAbs(cfg.DataDir) {
 		return Config{}, fmt.Errorf("UA_DATA_DIR must be an absolute path: %s", cfg.DataDir)
+	}
+	if !filepath.IsAbs(cfg.DownloadsDir) || !filepath.IsAbs(cfg.BackupsDir) {
+		return Config{}, errors.New("UA_DOWNLOADS_DIR and UA_BACKUPS_DIR must be absolute paths")
 	}
 	if !filepath.IsAbs(cfg.LegacyDir) {
 		return Config{}, fmt.Errorf("UA_LEGACY_DIR must be an absolute path: %s", cfg.LegacyDir)
@@ -81,6 +96,10 @@ func LoadFrom(lookup LookupEnv) (Config, error) {
 		{variable: "UA_FFMPEG_BIN", binary: cfg.FFmpegBinary},
 		{variable: "UA_FFPROBE_BIN", binary: cfg.FFprobeBinary},
 		{variable: "UA_MKBRR_BIN", binary: cfg.MkbrrBinary},
+		{variable: "UA_PG_DUMP_BIN", binary: cfg.PgDumpBinary},
+		{variable: "UA_PG_RESTORE_BIN", binary: cfg.PgRestoreBinary},
+		{variable: "UA_AGE_BIN", binary: cfg.AgeBinary},
+		{variable: "UA_AGE_KEYGEN_BIN", binary: cfg.AgeKeygenBinary},
 	} {
 		if strings.ContainsAny(binaryConfig.binary, "\r\n\x00") || strings.TrimSpace(binaryConfig.binary) == "" {
 			return Config{}, fmt.Errorf("%s must be a binary name or absolute path", binaryConfig.variable)

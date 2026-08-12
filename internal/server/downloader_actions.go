@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
@@ -17,7 +19,9 @@ const maxTorrentBase64Bytes = 44 << 20
 
 type DownloaderService interface {
 	Probe(context.Context, string, workflow.Actor) (qbittorrent.ProbeResult, error)
+	Dashboard(context.Context, string, downloaders.DashboardQuery) (downloaders.DashboardSnapshot, error)
 	Inspect(context.Context, string, string, workflow.Actor) (downloaders.TorrentEvidence, error)
+	Files(context.Context, string, string, workflow.Actor) (downloaders.TorrentFilesEvidence, error)
 	Add(context.Context, string, []byte, qbittorrent.AddOptions, workflow.Actor) (downloaders.AddEvidence, error)
 	SetLimits(context.Context, string, string, int64, int64, workflow.Actor) (downloaders.TorrentEvidence, error)
 }
@@ -46,9 +50,70 @@ type setLimitsRequest struct {
 func registerDownloaderRoutes(mux *http.ServeMux, service DownloaderService) {
 	api := downloaderActionsAPI{service: service}
 	mux.HandleFunc("POST /api/v2/downloaders/{name}/probe", api.probe)
+	mux.HandleFunc("GET /api/v2/downloaders/{name}/snapshot", api.dashboard)
 	mux.HandleFunc("GET /api/v2/downloaders/{name}/torrents/{hash}", api.inspect)
+	mux.HandleFunc("GET /api/v2/downloaders/{name}/torrents/{hash}/files", api.files)
 	mux.HandleFunc("POST /api/v2/downloaders/{name}/torrents", api.add)
 	mux.HandleFunc("POST /api/v2/downloaders/{name}/torrents/{hash}/limits", api.setLimits)
+}
+
+func (api downloaderActionsAPI) dashboard(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "downloader:manage"); !ok {
+		return
+	}
+	offset, err := optionalNonNegativeInt(r.URL.Query().Get("offset"), 0)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
+		return
+	}
+	limit, err := optionalNonNegativeInt(r.URL.Query().Get("limit"), 100)
+	if err != nil || limit < 1 || limit > 200 {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 200")
+		return
+	}
+	filter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("filter")))
+	if filter == "" {
+		filter = "all"
+	}
+	if !validDashboardFilter(filter) {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "filter is not supported")
+		return
+	}
+	search := strings.TrimSpace(r.URL.Query().Get("query"))
+	if utf8.RuneCountInString(search) > 200 {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "query must not exceed 200 characters")
+		return
+	}
+	snapshot, err := api.service.Dashboard(r.Context(), strings.TrimSpace(r.PathValue("name")), downloaders.DashboardQuery{
+		Filter: filter, Query: search, Offset: offset, Limit: limit,
+	})
+	if err != nil {
+		writeDownloaderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": "ready", "snapshot": snapshot, "blockers": []any{}, "next_actions": []any{},
+	})
+}
+
+func validDashboardFilter(value string) bool {
+	switch value {
+	case "all", "downloading", "seeding", "active", "paused", "checking", "error", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func optionalNonNegativeInt(value string, fallback int) (int, error) {
+	if strings.TrimSpace(value) == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return 0, errors.New("invalid non-negative integer")
+	}
+	return parsed, nil
 }
 
 func (api downloaderActionsAPI) probe(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +150,45 @@ func (api downloaderActionsAPI) inspect(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "status": "ready", "evidence": evidence,
+		"blockers": []any{}, "next_actions": []any{},
+	})
+}
+
+func (api downloaderActionsAPI) files(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "downloader:manage")
+	if !ok {
+		return
+	}
+	offset, parseErr := optionalNonNegativeInt(r.URL.Query().Get("offset"), 0)
+	if parseErr != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
+		return
+	}
+	limit, parseErr := optionalNonNegativeInt(r.URL.Query().Get("limit"), 100)
+	if parseErr != nil || limit < 1 || limit > 500 {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 500")
+		return
+	}
+	evidence, err := api.service.Files(
+		r.Context(), strings.TrimSpace(r.PathValue("name")), strings.TrimSpace(r.PathValue("hash")),
+		workflow.Actor{Type: "user", ID: principal.UserID},
+	)
+	if err != nil {
+		writeDownloaderError(w, err)
+		return
+	}
+	start := offset
+	if start > len(evidence.Files) {
+		start = len(evidence.Files)
+	}
+	end := start + limit
+	if end > len(evidence.Files) {
+		end = len(evidence.Files)
+	}
+	evidence.Files = evidence.Files[start:end]
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": "ready", "evidence": evidence,
+		"offset": start, "limit": limit, "has_more": end < evidence.FileCount,
 		"blockers": []any{}, "next_actions": []any{},
 	})
 }

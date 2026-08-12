@@ -9,7 +9,7 @@ import (
 
 func TestAdapterCatalogContract(t *testing.T) {
 	catalog := AdapterCapabilities()
-	if catalog.Version != AdapterCatalogVersion || len(catalog.Adapters) != 26 || len(catalog.SHA256) != 64 {
+	if catalog.Version != AdapterCatalogVersion || len(catalog.Adapters) != 31 || len(catalog.SHA256) != 64 {
 		t.Fatalf("catalog version/count/hash = %q/%d/%q", catalog.Version, len(catalog.Adapters), catalog.SHA256)
 	}
 	seen := map[string]bool{}
@@ -40,6 +40,13 @@ func TestAdapterCatalogContract(t *testing.T) {
 	if !slices.Equal(sites, wantSites) {
 		t.Fatalf("site capability codes = %#v, want %#v", sites, wantSites)
 	}
+	for _, adapter := range []string{"imgbox", "pixhost"} {
+		index := slices.IndexFunc(catalog.Adapters, func(item AdapterCapability) bool { return item.ID == "image_host/"+adapter })
+		if index < 0 || !catalog.Adapters[index].RuntimeSupported || len(catalog.Adapters[index].CredentialFields) != 0 ||
+			!slices.Contains(catalog.Adapters[index].Operations, "upload_image") {
+			t.Fatalf("keyless image-host capability is incomplete for %s: %#v", adapter, catalog.Adapters[index])
+		}
+	}
 }
 
 func TestUnifiedDownloaderContractsMatchRuntimeCatalog(t *testing.T) {
@@ -59,7 +66,8 @@ func TestUnifiedDownloaderContractsMatchRuntimeCatalog(t *testing.T) {
 			enabled bool
 		}{
 			{"probe", downloader.Operations.Probe}, {"add_torrent", downloader.Operations.AddTorrent},
-			{"inspect", downloader.Operations.Inspect}, {"list_files", downloader.Operations.ListFiles},
+			{"inspect", downloader.Operations.Inspect}, {"list_torrents", downloader.Operations.ListTorrents},
+			{"list_files", downloader.Operations.ListFiles},
 			{"set_limits", downloader.Operations.SetLimits}, {"wait_complete", downloader.Operations.WaitComplete},
 			{"category", downloader.Operations.Category}, {"tags", downloader.Operations.Tags},
 			{"skip_checking", downloader.Operations.SkipChecking},

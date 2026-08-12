@@ -676,27 +676,36 @@ func (plan *Plan) buildImageHosts(defaults map[string]any) {
 	}
 	for _, definition := range []struct {
 		name, key, endpoint string
+		keyless             bool
 	}{
 		{name: "imgbb", key: "imgbb_api", endpoint: "https://api.imgbb.com/1/upload"},
 		{name: "ptpimg", key: "ptpimg_api", endpoint: "https://ptpimg.me/upload.php"},
+		{name: "imgbox", endpoint: "https://imgbox.com", keyless: true},
+		{name: "pixhost", endpoint: "https://api.pixhost.to/images", keyless: true},
 	} {
+		priority := priorities[definition.name]
 		apiKey := usefulString(defaults[definition.key])
-		if apiKey == "" {
+		if (!definition.keyless && apiKey == "") || (definition.keyless && priority == 0) {
 			continue
 		}
-		priority := priorities[definition.name]
 		if priority == 0 {
 			priority = 1000
+		}
+		credentials := map[string]string{}
+		credentialFields := []string{}
+		if !definition.keyless {
+			credentials["api_key"] = apiKey
+			credentialFields = []string{"api_key"}
 		}
 		enabled := true
 		plan.imageHosts = append(plan.imageHosts, imageHostOperation{name: definition.name, input: integrations.ImageHostInput{
 			Adapter: definition.name, Enabled: &enabled, Priority: priority,
 			Config:      integrations.EndpointConfig{Endpoint: definition.endpoint, TimeoutSeconds: 90, Options: map[string]any{}},
-			Credentials: map[string]string{"api_key": apiKey},
+			Credentials: credentials,
 		}})
 		plan.Resources = append(plan.Resources, ResourcePreview{
 			Kind: "image_host", Name: definition.name, Adapter: definition.name, Enabled: true,
-			CredentialFields: []string{"api_key"}, Configuration: map[string]any{"endpoint": definition.endpoint, "priority": priority},
+			CredentialFields: credentialFields, Configuration: map[string]any{"endpoint": definition.endpoint, "priority": priority},
 		})
 	}
 }

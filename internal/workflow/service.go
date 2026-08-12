@@ -98,6 +98,10 @@ func (s *Service) GetArtifact(ctx context.Context, jobID, artifactID string) (Ar
 	return s.store.GetArtifact(ctx, jobID, artifactID)
 }
 
+func (s *Service) ReviseTargetPackage(ctx context.Context, jobID string, input ReviseTargetPackageInput) (Job, error) {
+	return s.store.ReviseTargetPackage(ctx, jobID, input)
+}
+
 func (s *Service) PauseJob(ctx context.Context, id string, actor Actor) (Job, error) {
 	return s.store.PauseJob(ctx, id, actor)
 }
@@ -142,4 +146,15 @@ func (s *Service) FailStep(
 	actor Actor,
 ) (Job, error) {
 	return s.store.FailStep(ctx, jobID, owner, attemptID, blockers, nextActions, actor)
+}
+
+func (s *Service) DeferStep(
+	ctx context.Context,
+	jobID, owner, attemptID string,
+	notBefore time.Time,
+	reason string,
+	resumeState json.RawMessage,
+	actor Actor,
+) (Job, error) {
+	return s.store.DeferStep(ctx, jobID, owner, attemptID, notBefore, reason, resumeState, actor)
 }

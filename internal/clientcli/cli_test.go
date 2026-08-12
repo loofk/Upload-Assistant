@@ -151,6 +151,41 @@ func TestAPIFailureIsReturnedAsStableJSON(t *testing.T) {
 	}
 }
 
+func TestProviderProbeStageAndRuleRevisionAnalysisAreExplicit(t *testing.T) {
+	providerID := "22222222-2222-4222-8222-222222222222"
+	revisionID := "33333333-3333-4333-8333-333333333333"
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			if request.Method != http.MethodPost || request.URL.Path != "/api/v2/llm-providers/"+providerID+"/probe" || request.URL.Query().Get("stage") != "inference" {
+				t.Fatalf("provider probe request = %s %s query=%v", request.Method, request.URL.Path, request.URL.Query())
+			}
+		case 2:
+			if request.Method != http.MethodPost || request.URL.Path != "/api/v2/site-rules/analyze" {
+				t.Fatalf("rule analysis request = %s %s", request.Method, request.URL.Path)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["provider_id"] != providerID || body["source_revision_id"] != revisionID {
+				t.Fatalf("rule analysis body = %#v err=%v", body, err)
+			}
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"ready"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	if err := Run(context.Background(), []string{"--api-url", server.URL, "providers", "probe", providerID, "--stage", "inference"}, testStreams(&output, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "analyze", revisionID, "--provider", providerID, "--confirm"}, testStreams(&output, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+}
+
 func TestAuditListUsesExactFiltersAndStableCursor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		query := request.URL.Query()
@@ -303,7 +338,55 @@ func TestRulesImportAcceptsBoundedStdin(t *testing.T) {
 	}
 }
 
-func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
+func TestRulesConfigureSourcesAndCollectRequireExplicitEvidence(t *testing.T) {
+	providerID := "22222222-2222-4222-8222-222222222222"
+	runID := "33333333-3333-4333-8333-333333333333"
+	fingerprint := strings.Repeat("c", 64)
+	sourceJSON := `{"sources":[{"id":"titles","url":"https://wiki.example.invalid/title-rules","scope":"标题规则","auth_mode":"none"}],"scope_confirmed":true,"cookie_hosts_confirmed":false}`
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestNumber++
+		switch requestNumber {
+		case 1:
+			if request.Method != http.MethodPut || request.URL.Path != "/api/v2/sites/MTEAM/rule-sources" {
+				t.Fatalf("source request = %s %s", request.Method, request.URL.Path)
+			}
+			var body map[string]any
+			if json.NewDecoder(request.Body).Decode(&body) != nil || body["scope_confirmed"] != true || body["cookie_hosts_confirmed"] != false {
+				t.Fatalf("source body = %#v", body)
+			}
+		case 2:
+			if request.Method != http.MethodPost || request.URL.Path != "/api/v2/sites/MTEAM/rule-collection-runs" || request.Header.Get("Idempotency-Key") != "collection-key" {
+				t.Fatalf("collection request = %s %s headers=%v", request.Method, request.URL.Path, request.Header)
+			}
+			var body map[string]any
+			if json.NewDecoder(request.Body).Decode(&body) != nil || body["source_set_fingerprint"] != fingerprint || body["provider_id"] != providerID || body["confirm"] != true {
+				t.Fatalf("collection body = %#v", body)
+			}
+		case 3:
+			if request.Method != http.MethodGet || request.URL.Path != "/api/v2/site-rule-collection-runs/"+runID {
+				t.Fatalf("status request = %s %s", request.Method, request.URL.Path)
+			}
+		}
+		_, _ = response.Write([]byte(`{"ok":true,"status":"ready"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	if err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "sources-set", "mteam", "--file", "-", "--confirm"}, testStreams(&output, strings.NewReader(sourceJSON))); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "collect", "mteam", "--fingerprint", fingerprint, "--provider", providerID, "--idempotency-key", "collection-key", "--confirm"}, testStreams(&output, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), []string{"--api-url", server.URL, "rules", "collection", runID}, testStreams(&output, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if requestNumber != 3 {
+		t.Fatalf("requests = %d", requestNumber)
+	}
+}
+
+func TestRulesApproveActivateAndDiscardRequireExplicitConfirmation(t *testing.T) {
 	revisionID := "11111111-1111-4111-8111-111111111111"
 	fingerprint := strings.Repeat("a", 64)
 	requestNumber := 0
@@ -312,6 +395,8 @@ func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
 		expectedPath := "/api/v2/site-rules/" + revisionID + "/approve"
 		if requestNumber == 2 {
 			expectedPath = "/api/v2/site-rules/" + revisionID + "/activate"
+		} else if requestNumber == 3 {
+			expectedPath = "/api/v2/site-rules/" + revisionID + "/discard"
 		}
 		if request.Method != http.MethodPost || request.URL.Path != expectedPath {
 			t.Fatalf("request %d = %s %s", requestNumber, request.Method, request.URL.Path)
@@ -323,6 +408,9 @@ func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
 		if requestNumber == 2 && string(body) != `{}` {
 			t.Fatalf("activation body = %s", body)
 		}
+		if requestNumber == 3 && (!bytes.Contains(body, []byte(`"fingerprint":"`+fingerprint+`"`)) || !bytes.Contains(body, []byte(`"confirm":true`))) {
+			t.Fatalf("discard body = %s", body)
+		}
 		_, _ = response.Write([]byte(`{"ok":true,"status":"approved"}`))
 	}))
 	defer server.Close()
@@ -330,10 +418,11 @@ func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
 	for _, command := range [][]string{
 		{"rules", "approve", revisionID, "--fingerprint", fingerprint},
 		{"rules", "activate", revisionID},
+		{"rules", "discard", revisionID, "--fingerprint", fingerprint},
 	} {
 		var output bytes.Buffer
 		err := Run(context.Background(), command, testStreams(&output, nil))
-		if !errors.Is(err, ErrReported) || !strings.Contains(output.String(), "requires --confirm") {
+		if !errors.Is(err, ErrReported) || !strings.Contains(output.String(), "--confirm") {
 			t.Fatalf("Run(%v) err=%v output=%s", command, err, output.String())
 		}
 	}
@@ -347,6 +436,11 @@ func TestRulesApproveAndActivateRequireExplicitConfirmation(t *testing.T) {
 	err = Run(context.Background(), []string{"--api-url", server.URL, "rules", "activate", revisionID, "--confirm"}, testStreams(&output, nil))
 	if err != nil || requestNumber != 2 {
 		t.Fatalf("activate err=%v requests=%d output=%s", err, requestNumber, output.String())
+	}
+	output.Reset()
+	err = Run(context.Background(), []string{"--api-url", server.URL, "rules", "discard", revisionID, "--fingerprint", fingerprint, "--confirm"}, testStreams(&output, nil))
+	if err != nil || requestNumber != 3 {
+		t.Fatalf("discard err=%v requests=%d output=%s", err, requestNumber, output.String())
 	}
 }
 

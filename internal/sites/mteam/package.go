@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 )
 
@@ -27,13 +28,31 @@ const (
 
 type PackageAdapter struct{}
 
+var (
+	seasonEpisodeToken = regexp.MustCompile(`(?i)(?:^|[ ._-])S[0-9]{1,2}E[0-9]{1,3}(?:-E[0-9]{1,3})?(?:$|[ ._-])`)
+	seasonToken        = regexp.MustCompile(`(?i)(?:^|[ ._-])S[0-9]{1,2}(?:$|[ ._-])`)
+	releaseYearToken   = regexp.MustCompile(`(?:^|[ ._-])((?:19|20)[0-9]{2})(?:$|[ ._-])`)
+	resolutionToken    = regexp.MustCompile(`(?i)(?:^|[ ._-])((?:4320|2160|1440|1080|720|576|480)[pi])(?:$|[ ._-])`)
+	releaseSourceToken = regexp.MustCompile(`(?i)(?:^|[ ._-])(UHD[ ._-]?BluRay|BluRay|BDRip|WEB[ ._-]?DL|WEBRip|HDTV|DVDRip|DVD)(?:$|[ ._-])`)
+	videoCodecToken    = regexp.MustCompile(`(?i)(?:^|[ ._-])(x26[45]|H[ ._-]?26[45]|AVC|HEVC|AV1|MPEG-?2)(?:$|[ ._-])`)
+	audioCodecToken    = regexp.MustCompile(`(?i)(?:^|[ ._-])(AAC|AC-?3|E-?AC-?3|DDP?|DTS(?:-HD)?|TrueHD|FLAC|LPCM|Opus)(?:[ ._-]?(Atmos|MA|X))?(?:$|[ ._-])`)
+	audioChannelsToken = regexp.MustCompile(`(?i)(?:^|[ ._-])([0-9](?:\.[0-9])?)(?:CH)?(?:$|[ ._-])`)
+	hdrToken           = regexp.MustCompile(`(?i)(?:^|[ ._-])(HDR10\+?|DV|DoVi|Dolby[ ._-]?Vision|HLG)(?:$|[ ._-])`)
+	releaseTypeToken   = regexp.MustCompile(`(?i)(?:^|[ ._-])(REMUX|Complete|Internal|Repack|Proper|Hybrid)(?:$|[ ._-])`)
+	// The delimiter is the final dash. Excluding dashes from the captured group
+	// prevents WEB-DL-GROUP from being misread as group "DL-GROUP".
+	releaseGroupToken = regexp.MustCompile(`-([A-Za-z0-9][A-Za-z0-9._]{0,31})$`)
+)
+
 func NewPackageAdapter() PackageAdapter { return PackageAdapter{} }
 
 func (PackageAdapter) SiteCode() string { return "MTEAM" }
 
 type packageOptions struct {
 	Name             string `json:"name,omitempty"`
+	NamingProfile    string `json:"naming_profile,omitempty"`
 	SmallDescription string `json:"small_descr,omitempty"`
+	Description      string `json:"description,omitempty"`
 	Category         int    `json:"category,omitempty"`
 	CategoryEvidence string `json:"category_evidence,omitempty"`
 	Standard         int    `json:"standard,omitempty"`
@@ -48,17 +67,21 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 	if err != nil {
 		return sites.PreparedTargetPackage{}, sites.NewAdapterError("target_package_options_invalid", err.Error(), false, err)
 	}
-	title := cleanField(firstNonEmpty(options.Name, material.Title, material.Source.Name))
+	sourceTitle := cleanField(firstNonEmpty(material.Title, material.Source.Name))
+	title := cleanField(firstNonEmpty(options.Name, sourceTitle))
+	namingProfile := cleanField(options.NamingProfile)
+	namingProfileDerivation := stringDerivation(options.NamingProfile)
+	namingProfileEvidence := ""
+	if namingProfile == "" && len(material.Naming.Profiles) > 0 {
+		namingProfile, namingProfileEvidence = inferNamingProfile(material, title)
+		if namingProfile != "" {
+			namingProfileDerivation = "verified_metadata"
+		}
+	}
 	smallDescription := cleanField(firstNonEmpty(options.SmallDescription, material.Title, material.Source.Name))
-	requirements := make([]sites.PackageRequirement, 0, 3)
-	if title == "" {
-		requirements = append(requirements, requirement("target_package.name", "target_name_required", "MTEAM requires a non-empty release name"))
-	} else if utf8.RuneCountInString(title) > maxNameRunes {
-		requirements = append(requirements, sites.PackageRequirement{
-			Code: "target_name_too_long", Field: "target_package.name",
-			Message:    "MTEAM release name exceeds the reviewed 255-character limit; provide an explicit shorter name",
-			Parameters: map[string]any{"current_length": utf8.RuneCountInString(title), "maximum": maxNameRunes},
-		})
+	requirements := make([]sites.PackageRequirement, 0, 5)
+	if utf8.RuneCountInString(namingProfile) > 64 {
+		return sites.PreparedTargetPackage{}, sites.NewAdapterError("target_package_options_invalid", "MTEAM naming profile exceeds 64 characters", false, nil)
 	}
 	if smallDescription == "" {
 		requirements = append(requirements, requirement("target_package.small_descr", "target_small_description_required", "MTEAM requires a non-empty short description"))
@@ -92,6 +115,43 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 			Code: "target_category_required", Field: "target_package.category",
 			Message:    "MTEAM category cannot be inferred safely for this source; provide the current MTEAM category id",
 			Parameters: map[string]any{"category_evidence_field": "target_package.category_evidence"},
+		})
+	}
+	if namingProfile == "" && len(material.Naming.Profiles) > 0 {
+		selected, selectErr := rules.SelectNamingProfile(material.Naming, "", resourceClassForMaterial(material, sourceTitle), category)
+		if selectErr == nil {
+			namingProfile = selected.ID
+			namingProfileDerivation = "verified_category"
+			namingProfileEvidence = "active rule selector matched verified target category or media class"
+		}
+	}
+	if len(material.Naming.Profiles) > 0 && namingProfile == "" {
+		requirements = append(requirements, sites.PackageRequirement{
+			Code: "target_naming_profile_required", Field: "target_package.naming_profile",
+			Message:    "active MTEAM rules could not select one naming profile from the verified category and metadata",
+			Parameters: map[string]any{"allowed_profiles": namingProfileIDs(material.Naming.Profiles), "category": category},
+		})
+	} else if options.Name == "" && namingProfile != "" {
+		if profile, selectErr := rules.SelectNamingProfile(material.Naming, namingProfile, "", category); selectErr == nil && len(profile.TitleTokens) > 0 {
+			generated, missing := rules.RenderNamingTitle(profile, releaseTokenValues(sourceTitle))
+			if len(missing) > 0 {
+				requirements = append(requirements, sites.PackageRequirement{
+					Code: "target_naming_tokens_required", Field: "target_package.name",
+					Message:    "the reviewed naming template requires release fields that could not be verified",
+					Parameters: map[string]any{"profile": profile.ID, "missing_tokens": missing, "source_title": sourceTitle},
+				})
+			} else {
+				title = generated
+			}
+		}
+	}
+	if title == "" {
+		requirements = append(requirements, requirement("target_package.name", "target_name_required", "MTEAM requires a non-empty release name"))
+	} else if utf8.RuneCountInString(title) > maxNameRunes {
+		requirements = append(requirements, sites.PackageRequirement{
+			Code: "target_name_too_long", Field: "target_package.name",
+			Message:    "MTEAM release name exceeds the reviewed 255-character limit; provide an explicit shorter name",
+			Parameters: map[string]any{"current_length": utf8.RuneCountInString(title), "maximum": maxNameRunes},
 		})
 	}
 
@@ -145,14 +205,19 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 	if options.Anonymous != nil {
 		anonymous = *options.Anonymous
 	}
+	nameDerivation := stringDerivation(options.Name)
+	if options.Name == "" && title != sourceTitle {
+		nameDerivation = "active_rule_template"
+	}
 	decisions = append(decisions,
-		sites.TargetDecision{Field: "name", Value: title, Derivation: stringDerivation(options.Name)},
+		sites.TargetDecision{Field: "name", Value: title, Derivation: nameDerivation},
+		sites.TargetDecision{Field: "namingProfile", Value: namingProfile, Derivation: namingProfileDerivation, Evidence: namingProfileEvidence},
 		sites.TargetDecision{Field: "smallDescr", Value: smallDescription, Derivation: stringDerivation(options.SmallDescription)},
 		sites.TargetDecision{Field: "anonymous", Value: anonymous, Derivation: boolDerivation(options.Anonymous)},
 	)
 
 	fields := map[string]any{
-		"name": title, "smallDescr": smallDescription, "category": category,
+		"name": title, "namingProfile": namingProfile, "smallDescr": smallDescription, "category": category,
 		"standard": standard, "anonymous": anonymous,
 	}
 	if imdb := material.Links["imdb"]; imdb != "" {
@@ -164,6 +229,13 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 	description, err := buildDescription(material, title)
 	if err != nil {
 		return sites.PreparedTargetPackage{}, sites.NewAdapterError("target_description_invalid", err.Error(), false, err)
+	}
+	if override := strings.TrimSpace(options.Description); override != "" {
+		if !utf8.ValidString(override) || strings.IndexByte(override, 0) >= 0 || utf8.RuneCountInString(override) > maxDescriptionRunes {
+			return sites.PreparedTargetPackage{}, sites.NewAdapterError("target_package_options_invalid", "MTEAM description override is invalid or too large", false, nil)
+		}
+		description = override
+		decisions = append(decisions, sites.TargetDecision{Field: "description", Value: "operator_override", Derivation: "explicit_input"})
 	}
 	warnings := make([]string, 0, 3)
 	if strings.TrimSpace(material.SourceDescription) == "" {
@@ -184,6 +256,7 @@ func (PackageAdapter) PreparePackage(_ context.Context, material sites.TargetPac
 		MetadataLinks: cloneStringMap(material.Links), FormFields: fields,
 		Description: description, MediaInfo: mediaPayload,
 		Content: material.Content, Evidence: material.Evidence, Decisions: decisions, Warnings: warnings,
+		NamingProfiles:       append([]rules.NamingProfile(nil), material.Naming.Profiles...),
 		ManualReviewRequired: true, GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -480,6 +553,121 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func inferNamingProfile(material sites.TargetPackageMaterial, title string) (string, string) {
+	has := func(id string) bool {
+		for _, profile := range material.Naming.Profiles {
+			if profile.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	mediaKind := strings.ToLower(strings.TrimSpace(material.Media.Kind))
+	tmdbType := strings.ToLower(strings.TrimSpace(material.Source.TMDbType))
+	upperTitle := strings.ToUpper(title)
+	if tmdbType == "movie" && has("movie") {
+		return "movie", "verified TMDb media type is movie"
+	}
+	if tmdbType == "tv" {
+		if seasonEpisodeToken.MatchString(title) && has("tv_episode") {
+			return "tv_episode", "verified TMDb media type is TV and the title contains a season/episode token"
+		}
+		if seasonToken.MatchString(title) && has("tv_season") {
+			return "tv_season", "verified TMDb media type is TV and the title contains a season token"
+		}
+	}
+	if material.Source.AniDBID != "" || strings.EqualFold(material.Source.Tracker, "U2") {
+		if mediaKind == "bdinfo" && has("anime_disc") {
+			return "anime_disc", "verified anime identity and BDInfo media evidence"
+		}
+		if strings.Contains(upperTitle, "WEB-DL") {
+			if seasonEpisodeToken.MatchString(title) && has("anime_web_episode") {
+				return "anime_web_episode", "verified anime identity, WEB-DL title, and season/episode token"
+			}
+			if seasonToken.MatchString(title) && has("anime_web_season") {
+				return "anime_web_season", "verified anime identity, WEB-DL title, and season token"
+			}
+		}
+		if (strings.Contains(upperTitle, "BLURAY") || strings.Contains(upperTitle, "BDRIP")) && has("anime_encode") {
+			return "anime_encode", "verified anime identity and encoded BluRay/BDRip title"
+		}
+	}
+	return "", ""
+}
+
+func resourceClassForMaterial(material sites.TargetPackageMaterial, title string) string {
+	mediaKind := strings.ToLower(strings.TrimSpace(material.Media.Kind))
+	if material.Source.AniDBID != "" || strings.EqualFold(material.Source.Tracker, "U2") {
+		upper := strings.ToUpper(title)
+		if mediaKind == "bdinfo" {
+			return "anime_disc"
+		}
+		if strings.Contains(upper, "WEB-DL") || strings.Contains(upper, "WEB DL") {
+			if seasonEpisodeToken.MatchString(title) {
+				return "anime_web_episode"
+			}
+			return "anime_web_season"
+		}
+		return "anime_encode"
+	}
+	if strings.EqualFold(material.Source.TMDbType, "movie") {
+		return "movie"
+	}
+	if strings.EqualFold(material.Source.TMDbType, "tv") {
+		if seasonEpisodeToken.MatchString(title) {
+			return "tv_episode"
+		}
+		return "tv_season"
+	}
+	return ""
+}
+
+func namingProfileIDs(profiles []rules.NamingProfile) []string {
+	result := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		result = append(result, profile.ID)
+	}
+	return result
+}
+
+func releaseTokenValues(title string) map[string]string {
+	values := map[string]string{}
+	remaining := strings.TrimSpace(title)
+	if match := releaseGroupToken.FindStringSubmatch(remaining); len(match) > 1 {
+		values["group"] = match[1]
+		remaining = strings.TrimSpace(strings.TrimSuffix(remaining, match[0]))
+	}
+	// Remove each matched token by index instead of interpreting it as a
+	// regular-expression replacement. This preserves punctuation in titles.
+	extractOne := func(key string, pattern *regexp.Regexp) {
+		indices := pattern.FindStringSubmatchIndex(remaining)
+		if len(indices) < 4 {
+			return
+		}
+		value := strings.TrimSpace(remaining[indices[2]:indices[3]])
+		if key == "audio_codec" && len(indices) >= 6 && indices[4] >= 0 {
+			value += "-" + strings.TrimSpace(remaining[indices[4]:indices[5]])
+		}
+		values[key] = value
+		remaining = remaining[:indices[0]] + " " + remaining[indices[1]:]
+	}
+	extractOne("season_episode", regexp.MustCompile(`(?i)(?:^|[ ._-])(S[0-9]{1,3}(?:E[0-9]{1,4}(?:-E[0-9]{1,4})?)?)(?:$|[ ._-])`))
+	extractOne("year", releaseYearToken)
+	extractOne("resolution", resolutionToken)
+	extractOne("source", releaseSourceToken)
+	extractOne("release_type", releaseTypeToken)
+	extractOne("video_codec", videoCodecToken)
+	extractOne("audio_codec", audioCodecToken)
+	extractOne("audio_channels", audioChannelsToken)
+	extractOne("hdr", hdrToken)
+	remaining = strings.Trim(strings.TrimSpace(strings.NewReplacer(".", " ", "_", " ").Replace(remaining)), "- ")
+	remaining = strings.Join(strings.Fields(remaining), " ")
+	if remaining != "" {
+		values["title"] = remaining
+	}
+	return values
 }
 
 func stringDerivation(override string) string {

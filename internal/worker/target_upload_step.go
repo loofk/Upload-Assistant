@@ -145,6 +145,9 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 
 	freshDuplicate, err := executor.duplicates.DuplicateCheck(ctx, bindings.Target, bindings.PriorDuplicateQuery, execution.Actor)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, targetDuplicateRequestBlock(err, bindings.Target, bindings.PriorDuplicateQuery)
 	}
 	if err := validateTargetDuplicateEvidence(freshDuplicate, bindings.Target, bindings.PriorDuplicateQuery); err != nil {
@@ -177,6 +180,9 @@ func (executor targetUploadExecutor) Execute(ctx context.Context, execution Exec
 		RuleFingerprint:          bindings.RuleFingerprint, DuplicateCheckSHA256: freshDuplicateArtifact.SHA256,
 	}, execution.Actor)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, targetUploadAdapterBlock(err, bindings, freshDuplicateArtifact)
 	}
 	if err := validateTargetUploadEvidence(upload, bindings); err != nil {
@@ -268,6 +274,9 @@ func (executor targetUploadExecutor) recoverUploaded(
 	}
 	freshDuplicate, err := executor.duplicates.DuplicateCheck(ctx, bindings.Target, bindings.PriorDuplicateQuery, execution.Actor)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		code, message, _ := sites.ErrorDetails(err)
 		return nil, targetUploadReconciliationBlock(code, message, bindings, nil)
 	}

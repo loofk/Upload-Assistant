@@ -54,7 +54,7 @@ func TestClientUploadsBoundMTeamMultipartAndAuditsIntentResult(t *testing.T) {
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "mteam-secret")
-	evidence, err := NewClient(store, nil).Upload(context.Background(), request, workflow.Actor{Type: "worker", ID: "fixture"})
+	evidence, err := NewClient(store, permissiveAccessGate{}, nil).Upload(context.Background(), request, workflow.Actor{Type: "worker", ID: "fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestClientUploadRequiresConfirmationBeforeAnySiteAction(t *testing.T) {
 	request := mteamUploadRequest(t)
 	request.Confirmed = false
 	store := runtimeSiteStore("https://api.m-team.cc", "key")
-	_, err := NewClient(store, nil).Upload(context.Background(), request, workflow.Actor{})
+	_, err := NewClient(store, permissiveAccessGate{}, nil).Upload(context.Background(), request, workflow.Actor{})
 	code, _, _ := sites.ErrorDetails(err)
 	if code != "target_upload_request_invalid" || len(store.actions) != 0 {
 		t.Fatalf("missing confirmation code/actions/error = %q/%#v/%v", code, store.actions, err)
@@ -85,7 +85,7 @@ func TestClientUploadTreatsSuccessWithoutIDAsUnknownOutcome(t *testing.T) {
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "key")
-	_, err := NewClient(store, nil).Upload(context.Background(), mteamUploadRequest(t), workflow.Actor{})
+	_, err := NewClient(store, permissiveAccessGate{}, nil).Upload(context.Background(), mteamUploadRequest(t), workflow.Actor{})
 	code, _, _ := sites.ErrorDetails(err)
 	if code != "target_upload_outcome_unknown" || len(store.actions) != 2 || store.actions[1] != "target.upload_outcome" {
 		t.Fatalf("unknown outcome code/actions/error = %q/%#v/%v", code, store.actions, err)

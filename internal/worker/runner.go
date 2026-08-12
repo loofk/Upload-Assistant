@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/loofk/upload-assistant/v2/internal/operations"
+	"github.com/loofk/upload-assistant/v2/internal/siteaccess"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -19,6 +21,7 @@ type Runtime interface {
 	CompleteStep(context.Context, string, string, string, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	BlockStep(context.Context, string, string, string, json.RawMessage, json.RawMessage, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	FailStep(context.Context, string, string, string, json.RawMessage, json.RawMessage, workflow.Actor) (workflow.Job, error)
+	DeferStep(context.Context, string, string, string, time.Time, string, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	RegisterArtifact(context.Context, workflow.RegisterArtifactInput) (workflow.Artifact, error)
 	ListArtifacts(context.Context, string) ([]workflow.Artifact, error)
 }
@@ -72,9 +75,14 @@ type Runner struct {
 	lease     time.Duration
 	poll      time.Duration
 	logger    *slog.Logger
+	logs      *operations.AsyncLogSink
 }
 
 type Option func(*Runner)
+
+func WithOperationalLogs(sink *operations.AsyncLogSink) Option {
+	return func(runner *Runner) { runner.logs = sink }
+}
 
 func WithRuleProvider(provider RuleProvider) Option {
 	return func(runner *Runner) {
@@ -122,6 +130,9 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	executionCorrelation := operations.Correlation{TraceID: attempt.TraceID, JobID: job.ID, StepKey: step.Key, AttemptID: attempt.ID, ActorType: "worker", ActorID: r.owner}
+	ctx = operations.WithCorrelation(ctx, executionCorrelation)
+	r.logAttempt("info", "workflow step started", job.ID, step.Key, attempt.ID, attempt.TraceID, "", map[string]any{"attempt": attempt.Number})
 	executor, exists := r.executors[step.Key]
 	if !exists {
 		blockers := mustJSON([]map[string]string{{
@@ -140,11 +151,29 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	defer cancel()
 	heartbeatDone := make(chan struct{})
 	go r.heartbeat(executionCtx, cancel, job.ID, heartbeatDone)
+	executionCtx = siteaccess.WithExecution(executionCtx, job.ID, attempt.ID, r.owner)
 	output, executeErr := executor.Execute(executionCtx, Execution{Job: job, Step: step, Attempt: attempt, Actor: actor})
 	cancel()
 	<-heartbeatDone
 	if executeErr == nil {
 		_, err = r.runtime.CompleteStep(ctx, job.ID, r.owner, attempt.ID, output, actor)
+		if err == nil {
+			r.logAttempt("info", "workflow step completed", job.ID, step.Key, attempt.ID, attempt.TraceID, "", map[string]any{"attempt": attempt.Number})
+		}
+		return err
+	}
+	var deferred *siteaccess.DeferredError
+	if errors.As(executeErr, &deferred) {
+		resume := map[string]any{}
+		for key, value := range deferred.ResumeState {
+			resume[key] = value
+		}
+		resume["site_access"] = map[string]any{
+			"site_code": deferred.SiteCode, "operation": deferred.Operation,
+			"request_class": deferred.RequestClass, "not_before": deferred.NotBefore.UTC(),
+		}
+		resumeState := mustJSON(resume)
+		_, err = r.runtime.DeferStep(ctx, job.ID, r.owner, attempt.ID, deferred.NotBefore, deferred.Reason, resumeState, actor)
 		return err
 	}
 	var blocked *BlockError
@@ -169,7 +198,16 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	}
 	blockers := mustJSON([]map[string]string{{"code": "step_execution_failed", "message": executeErr.Error()}})
 	_, err = r.runtime.FailStep(ctx, job.ID, r.owner, attempt.ID, blockers, mustJSON([]map[string]string{{"action": "retry_step"}}), actor)
+	r.logAttempt("error", "workflow step failed", job.ID, step.Key, attempt.ID, attempt.TraceID, "step_execution_failed", map[string]any{"error": executeErr.Error(), "attempt": attempt.Number})
 	return err
+}
+
+func (r *Runner) logAttempt(level, message, jobID, stepKey, attemptID, traceID, errorCode string, attributes map[string]any) {
+	if r.logs == nil {
+		return
+	}
+	body, _ := json.Marshal(attributes)
+	r.logs.Enqueue(operations.LogEntry{OccurredAt: time.Now().UTC(), Level: level, Component: "worker", Message: message, TraceID: traceID, JobID: jobID, StepKey: stepKey, AttemptID: attemptID, ErrorCode: errorCode, ActorType: "worker", ActorID: r.owner, Attributes: body})
 }
 
 func (r *Runner) heartbeat(ctx context.Context, cancel context.CancelFunc, jobID string, done chan<- struct{}) {

@@ -595,6 +595,128 @@ func TestExpiredDownloaderAddLeaseRequiresReconciliation(t *testing.T) {
 	}
 }
 
+func TestReviseTargetPackagePreservesEvidenceAndResetsUploadConfirmation(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(pool)
+	definition := RetorrentDefinition()
+	workflowID, err := store.EnsureDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(ctx, workflowID, definition, CreateJobInput{
+		Kind: "retorrent", ExecutionMode: ExecutionStep,
+		Input:          json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=5","target":"MTEAM","confirm_upload":true}`),
+		IdempotencyKey: "revise-target-package-" + uuid.NewString(), Owner: "integration-test",
+		Actor: Actor{Type: "test", ID: "revise-target-package"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM jobs WHERE id = $1`, job.ID) })
+
+	expectedSHA := strings.Repeat("a", 64)
+	var packageStepID, uploadStepID string
+	var packagePosition int
+	if err := pool.QueryRow(ctx, `SELECT id::text, position FROM job_steps WHERE job_id=$1 AND step_key='target_package'`, job.ID).Scan(&packageStepID, &packagePosition); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM job_steps WHERE job_id=$1 AND step_key='target_upload'`, job.ID).Scan(&uploadStepID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE job_steps SET status='pending', output_summary='{}', blockers='[]', next_actions='[]', resume_state='{}' WHERE job_id=$1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE job_steps SET status='complete', output_summary=jsonb_build_object('package_sha256',$2::text), finished_at=now() WHERE id=$1`, packageStepID, expectedSHA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE job_steps SET status='blocked', blockers='[{"code":"confirm_upload_required","message":"review required"}]', resume_state='{"confirm_upload":true}', finished_at=now() WHERE id=$1`, uploadStepID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO step_attempts(job_step_id, attempt, status, input_snapshot, output_summary, finished_at)
+		VALUES ($1,1,'complete','{}',jsonb_build_object('package_sha256',$3::text),now()),
+		       ($2,1,'blocked','{}','{}',now())`, packageStepID, uploadStepID, expectedSHA); err != nil {
+		t.Fatal(err)
+	}
+	var artifactID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO artifacts(job_id,job_step_id,kind,storage_path,filename,mime_type,size_bytes,sha256,metadata,expires_at)
+		VALUES ($1,$2,'target_package','fixture/target-package.json','target-package.json','application/json',123,$3,'{}',now()+interval '30 days')
+		RETURNING id::text`, job.ID, packageStepID, expectedSHA).Scan(&artifactID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE jobs SET status='blocked',current_step_key='target_upload',
+		blockers='[{"code":"confirm_upload_required","message":"review required"}]',
+		next_actions='[]',resume_state='{"confirm_upload":true,"target_package_requirements":{"old":true}}'
+		WHERE id=$1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	revised, err := store.ReviseTargetPackage(ctx, job.ID, ReviseTargetPackageInput{
+		ExpectedPackageSHA256: expectedSHA,
+		Options:               json.RawMessage(`{"title":"Reviewed title","description":"Reviewed description"}`),
+		Actor:                 Actor{Type: "user", ID: "reviewer"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resume struct {
+		ConfirmUpload             bool           `json:"confirm_upload"`
+		TargetPackage             map[string]any `json:"target_package"`
+		TargetPackageRequirements map[string]any `json:"target_package_requirements"`
+	}
+	if err := json.Unmarshal(revised.ResumeState, &resume); err != nil {
+		t.Fatal(err)
+	}
+	if revised.Status != JobQueued || revised.CurrentStep != "target_package" || resume.ConfirmUpload ||
+		resume.TargetPackage["title"] != "Reviewed title" || resume.TargetPackageRequirements != nil {
+		t.Fatalf("revised job/resume = %s/%s %#v", revised.Status, revised.CurrentStep, resume)
+	}
+	steps, err := store.ListSteps(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range steps {
+		if step.Position < packagePosition {
+			continue
+		}
+		want := StepPending
+		if step.Position == packagePosition {
+			want = StepReady
+		}
+		if step.Status != want || string(step.OutputSummary) != `{}` || string(step.Blockers) != `[]` {
+			t.Fatalf("reset step %s = status=%s output=%s blockers=%s, want %s/{}/[]", step.Key, step.Status, step.OutputSummary, step.Blockers, want)
+		}
+	}
+	var artifactCount, attemptCount, eventCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM artifacts WHERE id=$1 AND job_id=$2 AND sha256=$3`, artifactID, job.ID, expectedSHA).Scan(&artifactCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM step_attempts WHERE job_step_id = ANY($1::uuid[])`, []string{packageStepID, uploadStepID}).Scan(&attemptCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM job_events WHERE job_id=$1 AND event_type='target_package.revision_requested' AND payload->>'confirm_upload_reset'='true'`, job.ID).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if artifactCount != 1 || attemptCount != 2 || eventCount != 1 {
+		t.Fatalf("preserved evidence counts artifact/attempt/event = %d/%d/%d", artifactCount, attemptCount, eventCount)
+	}
+}
+
 func TestSafeReplayInputAndReconciliationBlockers(t *testing.T) {
 	input, err := safeReplayInput("retorrent", json.RawMessage(`{"source_url":"https://u2.dmhy.org/details.php?id=1","accept_rules":{"U2":{"accepted":true}},"confirm_upload":true,"downloader":{"name":"box"}}`))
 	if err != nil || string(input) != `{"confirm_upload":false,"downloader":{"name":"box"},"source_url":"https://u2.dmhy.org/details.php?id=1"}` {

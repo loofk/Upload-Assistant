@@ -185,7 +185,9 @@ func TestRunnerPersistsSourceAndDownloaderBoundaryEvidence(t *testing.T) {
 			artifactStore,
 		),
 		WithImageHosts(imageHost, artifactStore),
-		WithTargetPackages(mustTargetPackageRegistry(t), artifactStore),
+		WithTargetPackages(mustTargetPackageRegistry(t), artifactStore, integrationRuleProvider{
+			revisions: map[string]rules.Revision{"U2": rule, "MTEAM": targetRule},
+		}),
 		WithTargetDuplicateChecks(targetDuplicates, artifactStore),
 		WithTargetTorrents(targetTorrentProfiles, targetTorrentMaker, artifactStore),
 		WithTargetUploads(targetUploader, targetDuplicates, integrationRuleProvider{

@@ -133,6 +133,26 @@ func TestCheckReportsConfigurationReadyWithoutAuthorizingLiveUpload(t *testing.T
 	}
 }
 
+func TestCheckImageHostAcceptsKeylessAdaptersWithoutCredentials(t *testing.T) {
+	for _, adapter := range []string{"imgbox", "pixhost"} {
+		t.Run(adapter, func(t *testing.T) {
+			provider := fakeIntegrations{imageHosts: map[string]integrations.RuntimeImageHost{
+				adapter: {
+					ImageHost:   integrations.ImageHost{Name: adapter, Adapter: adapter, Enabled: true, HealthStatus: "unknown", Config: json.RawMessage(`{"endpoint":"https://example.invalid"}`)},
+					Credentials: map[string]string{},
+				},
+			}}
+			report := Report{}
+			if err := NewService(fakeRules{}, provider, Runtime{}).checkImageHost(context.Background(), &report, adapter); err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Blockers) != 0 || len(report.Checks) != 1 || report.Checks[0].Status != "ready" {
+				t.Fatalf("keyless image-host readiness = %#v", report)
+			}
+		})
+	}
+}
+
 func TestCheckReturnsActionableBlockersWithoutExternalCalls(t *testing.T) {
 	report, err := NewService(fakeRules{}, fakeIntegrations{}, Runtime{
 		MediaInfoBinary: "/missing/mediainfo", BDInfoBinary: "/missing/bdinfo", FFmpegBinary: "/missing/ffmpeg",

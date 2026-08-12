@@ -105,6 +105,10 @@ func TestClientSessionProbeAddInspectFilesLimitsAndWait(t *testing.T) {
 	if err != nil || result.Observed == nil || result.Observed.Hash != hashes.V1SHA1 || result.Observed.ContentPath != "/downloads/test" {
 		t.Fatalf("Add() result/error = %#v/%v", result, err)
 	}
+	torrents, err := client.List(ctx)
+	if err != nil || len(torrents) != 1 || torrents[0].Ratio != 3 {
+		t.Fatalf("List() torrents/error = %#v/%v", torrents, err)
+	}
 	files, err := client.Files(ctx, hashes.V1SHA1)
 	if err != nil || len(files) != 1 || files[0].Name != "test" || !files[0].Seed {
 		t.Fatalf("Files() result/error = %#v/%v", files, err)

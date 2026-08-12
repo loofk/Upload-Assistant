@@ -149,9 +149,9 @@ func (executor ruleGateExecutor) Execute(ctx context.Context, execution Executio
 		"site_code": siteCode, "role": executor.role,
 		"rule_revision_id": revision.ID, "fingerprint": revision.Fingerprint,
 		"accepted": true, "acceptance_sha256": hex.EncodeToString(acceptanceHash[:]),
-		"automation": policy.Automation, "limits": policy.Limits,
+		"automation": policy.Automation, "limits": policy.Limits, "naming": policy.Naming,
 		"seeding": policy.Seeding, "transfer": policy.Transfer,
-		"obligations": acceptedObligations,
+		"obligations": acceptedObligations, "advisories": policy.Advisories,
 	}), nil
 }
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/loofk/upload-assistant/v2/internal/operations"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -34,6 +35,7 @@ type JobService interface {
 	PauseJob(context.Context, string, workflow.Actor) (workflow.Job, error)
 	ResumeJob(context.Context, string, json.RawMessage, workflow.Actor) (workflow.Job, error)
 	CancelJob(context.Context, string, workflow.Actor) (workflow.Job, error)
+	ReviseTargetPackage(context.Context, string, workflow.ReviseTargetPackageInput) (workflow.Job, error)
 }
 
 type ArtifactContentReader interface {
@@ -80,6 +82,10 @@ func registerJobRoutes(mux *http.ServeMux, service JobService, reader ArtifactCo
 	mux.HandleFunc("GET /api/v2/jobs", api.list)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}", api.get)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/summary", api.summary)
+	mux.HandleFunc("GET /api/v2/jobs/{job_id}/attention", api.attention)
+	mux.HandleFunc("POST /api/v2/jobs/{job_id}/actions", api.performAction)
+	mux.HandleFunc("GET /api/v2/jobs/{job_id}/upload-preview", api.uploadPreview)
+	mux.HandleFunc("POST /api/v2/jobs/{job_id}/upload-preview/revisions", api.reviseUploadPreview)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/steps", api.steps)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/attempts", api.attempts)
 	mux.HandleFunc("GET /api/v2/jobs/{job_id}/events", api.events)
@@ -236,6 +242,7 @@ func (a jobsAPI) summary(w http.ResponseWriter, r *http.Request) {
 		"current_step": job.CurrentStep, "blockers": redactJSON(job.Blockers),
 		"next_actions": redactJSON(job.NextActions), "resume_state": redactJSON(job.ResumeState),
 		"summary": redactJSON(job.Summary), "steps": redactSteps(steps), "artifacts": redactArtifacts(artifacts),
+		"attention": attentionForJob(job),
 	}
 	if job.ReplayOfJobID != "" {
 		response["replay_of_job_id"] = job.ReplayOfJobID
@@ -651,9 +658,31 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 }
 
 func writeProblem(w http.ResponseWriter, status int, code, detail string) {
+	writeProblemWithAttributes(w, status, code, detail, nil, nil)
+}
+
+func writeProblemWithAttributes(w http.ResponseWriter, status int, code, detail string, attributes map[string]any, nextActions []map[string]string) {
+	detail, _ = operations.Redact(detail).(string)
+	if runes := []rune(detail); len(runes) > 1000 {
+		detail = string(runes[:1000]) + "…"
+	}
+	if recorder, ok := w.(interface{ SetErrorCode(string) }); ok {
+		recorder.SetErrorCode(code)
+	}
+	if recorder, ok := w.(interface{ SetErrorDetail(string) }); ok {
+		recorder.SetErrorDetail(detail)
+	}
+	if len(attributes) > 0 {
+		if recorder, ok := w.(interface{ SetErrorAttributes(map[string]any) }); ok {
+			recorder.SetErrorAttributes(attributes)
+		}
+	}
+	if nextActions == nil {
+		nextActions = []map[string]string{}
+	}
 	writeJSON(w, status, map[string]any{
 		"ok": false, "status": "failed", "error": map[string]string{"code": code, "detail": detail},
-		"blockers": []map[string]string{{"code": code, "message": detail}}, "next_actions": []any{},
+		"blockers": []map[string]string{{"code": code, "message": detail}}, "next_actions": nextActions,
 	})
 }
 

@@ -323,15 +323,17 @@ func (service *Service) checkImageHost(ctx context.Context, report *Report, name
 	runtime, err := service.integrations.GetRuntimeImageHost(ctx, name)
 	if isConfigurationError(err) {
 		report.block("image_host", "image_host_configuration_required", "图床不存在、已禁用或凭据无法读取。", map[string]any{"name": name})
-		report.NextActions = append(report.NextActions, NextAction{Action: "configure_image_host", Description: "配置启用的 imgbb 或 PTPimg；本预检不会上传测试图片。", Parameters: map[string]any{"name": name}})
+		report.NextActions = append(report.NextActions, NextAction{Action: "configure_image_host", Description: "配置启用的 ImgBB、PTPimg、Imgbox 或 Pixhost；本预检不会上传测试图片。", Parameters: map[string]any{"name": name}})
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("check image host %s: %w", name, err)
 	}
 	fields := presentFields(runtime.Credentials)
-	if !slices.Contains([]string{"imgbb", "ptpimg"}, runtime.Adapter) || !slices.Contains(fields, "api_key") {
-		report.block("image_host", "image_host_configuration_incomplete", "图床 adapter 或 api_key 字段不完整。", map[string]any{"name": name, "adapter": runtime.Adapter, "credential_fields": fields})
+	supported := slices.Contains([]string{"imgbb", "ptpimg", "imgbox", "pixhost"}, runtime.Adapter)
+	needsAPIKey := runtime.Adapter == "imgbb" || runtime.Adapter == "ptpimg"
+	if !supported || (needsAPIKey && !slices.Contains(fields, "api_key")) {
+		report.block("image_host", "image_host_configuration_incomplete", "图床 adapter 不受支持，或该 adapter 所需凭据不完整。", map[string]any{"name": name, "adapter": runtime.Adapter, "credential_fields": fields})
 		return nil
 	}
 	digest := sha256.Sum256(runtime.Config)

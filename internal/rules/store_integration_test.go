@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -66,6 +67,15 @@ func TestStoreImportApprovalAndActivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import() complete error = %v", err)
 	}
+	retiredDraft, err := store.Get(ctx, draft.ID)
+	if err != nil || retiredDraft.Status != "retired" {
+		t.Fatalf("superseded draft status/error = %s/%v, want retired", retiredDraft.Status, err)
+	}
+	for _, section := range reviewSectionOrder {
+		if _, err := store.SetReviewCheck(ctx, complete.ID, section, complete.Fingerprint, "confirmed", "reviewed", workflow.Actor{Type: "user", ID: reviewerID}); err != nil {
+			t.Fatalf("SetReviewCheck(%s) error = %v", section, err)
+		}
+	}
 	approved, err := store.Approve(ctx, complete.ID, complete.Fingerprint, "verified against supplied source", workflow.Actor{Type: "user", ID: reviewerID})
 	if err != nil || approved.Status != "approved" {
 		t.Fatalf("Approve() revision/error = %s/%v", approved.Status, err)
@@ -77,6 +87,22 @@ func TestStoreImportApprovalAndActivation(t *testing.T) {
 	loaded, err := store.Active(ctx, "U2")
 	if err != nil || loaded.ID != active.ID {
 		t.Fatalf("Active() revision/error = %s/%v, want %s", loaded.ID, err, active.ID)
+	}
+	corrected, err := store.CorrectHardGate(ctx, approved.ID, approved.Fingerprint, "upload_limit", json.RawMessage(`{"upload":"100MB/s"}`), "原文明确要求全局上传限速", workflow.Actor{Type: "user", ID: reviewerID})
+	if err != nil {
+		t.Fatalf("CorrectHardGate() error = %v", err)
+	}
+	correctedPolicy, err := ParsePolicy(corrected.Policy)
+	if err != nil || corrected.Status != "draft" || corrected.Revision <= approved.Revision || correctedPolicy.Limits.Upload != "100MB/s" {
+		t.Fatalf("corrected revision/policy/error = %#v/%#v/%v", corrected, correctedPolicy, err)
+	}
+	correctedReview, err := store.GetReview(ctx, corrected.ID)
+	if err != nil || correctedReview.ConfirmedCount != 0 || correctedReview.ApprovalReady {
+		t.Fatalf("corrected review/error = %#v/%v", correctedReview, err)
+	}
+	discarded, err := store.DiscardDraft(ctx, corrected.ID, corrected.Fingerprint, workflow.Actor{Type: "user", ID: reviewerID})
+	if err != nil || discarded.Status != "retired" {
+		t.Fatalf("DiscardDraft() revision/error = %s/%v, want retired", discarded.Status, err)
 	}
 	revisions, err := store.List(ctx, "U2")
 	if err != nil || len(revisions) < 2 {

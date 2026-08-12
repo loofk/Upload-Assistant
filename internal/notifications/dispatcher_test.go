@@ -129,3 +129,35 @@ func TestDispatcherPreservesKnownReceiptWhenLocalCompletionFails(t *testing.T) {
 		t.Fatalf("RunOnce() err=%v failed=%v unknown=%#v", err, store.failed, store.unknown)
 	}
 }
+
+func TestNotificationAdaptersBuildBoundedTextPayloadsAndValidateReceipts(t *testing.T) {
+	payload := json.RawMessage(`{"event_type":"step.blocked","title":"任务需要处理","message":"规则需要人工确认","job_id":"deadbeef-0000","job_status":"blocked","current_step":"target_rules","occurred_at":"2026-08-10T00:00:00Z"}`)
+	tests := []struct {
+		adapter     string
+		credentials map[string]string
+		bodyNeedle  string
+		response    string
+	}{
+		{"telegram_bot", map[string]string{"bot_token": "123456:abcdefghijklmnopqrstuvwxyz_ABCD", "chat_id": "-100123"}, `"chat_id":"-100123"`, `{"ok":true,"result":{"message_id":42}}`},
+		{"wecom_bot", map[string]string{"webhook_url": "https://example.invalid/wecom"}, `"msgtype":"text"`, `{"errcode":0,"errmsg":"ok"}`},
+		{"feishu_bot", map[string]string{"webhook_url": "https://example.invalid/feishu"}, `"msg_type":"text"`, `{"code":0,"msg":"success"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.adapter, func(t *testing.T) {
+			runtime := integrations.RuntimeNotificationChannel{
+				NotificationChannel: integrations.NotificationChannel{Adapter: test.adapter},
+				Credentials:         test.credentials,
+			}
+			endpoint, body, err := notificationRequest(runtime, payload)
+			if err != nil || endpoint == "" || !strings.Contains(string(body), test.bodyNeedle) || !strings.Contains(string(body), "规则需要人工确认") {
+				t.Fatalf("request endpoint/body/error = %q/%s/%v", endpoint, body, err)
+			}
+			if _, err := validateNotificationReceipt(test.adapter, []byte(test.response)); err != nil {
+				t.Fatalf("receipt: %v", err)
+			}
+			if _, err := validateNotificationReceipt(test.adapter, []byte(`{}`)); err == nil {
+				t.Fatal("empty receipt must not be accepted")
+			}
+		})
+	}
+}

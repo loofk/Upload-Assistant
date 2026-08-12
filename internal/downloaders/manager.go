@@ -6,10 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/deluge"
 	"github.com/loofk/upload-assistant/v2/internal/downloaders/qbittorrent"
@@ -31,21 +35,96 @@ type ConfigurationStore interface {
 }
 
 type Manager struct {
-	store ConfigurationStore
+	store             ConfigurationStore
+	dashboardMu       sync.Mutex
+	dashboardCache    map[string]dashboardCacheEntry
+	dashboardInflight map[string]*dashboardCall
 }
 
 type torrentClient interface {
 	Probe(context.Context) (qbittorrent.ProbeResult, error)
 	Get(context.Context, string) (qbittorrent.Torrent, error)
+	List(context.Context) ([]qbittorrent.Torrent, error)
 	Files(context.Context, string) ([]qbittorrent.TorrentFile, error)
 	Add(context.Context, []byte, qbittorrent.AddOptions) (qbittorrent.AddResult, error)
 	SetLimits(context.Context, string, int64, int64) error
 	WaitComplete(context.Context, string, time.Duration) (qbittorrent.Torrent, error)
 }
 
+const dashboardCacheTTL = 3 * time.Second
+
+type DashboardQuery struct {
+	Filter string
+	Query  string
+	Offset int
+	Limit  int
+}
+
+type DashboardSummary struct {
+	Total         int   `json:"total"`
+	Downloading   int   `json:"downloading"`
+	Seeding       int   `json:"seeding"`
+	Paused        int   `json:"paused"`
+	Checking      int   `json:"checking"`
+	Errors        int   `json:"errors"`
+	Active        int   `json:"active"`
+	DownloadSpeed int64 `json:"download_speed"`
+	UploadSpeed   int64 `json:"upload_speed"`
+}
+
+type DashboardTorrent struct {
+	Hash            string  `json:"hash"`
+	Name            string  `json:"name"`
+	State           string  `json:"state"`
+	StateGroup      string  `json:"state_group"`
+	Progress        float64 `json:"progress"`
+	TotalSize       int64   `json:"total_size"`
+	AmountLeft      int64   `json:"amount_left"`
+	Downloaded      int64   `json:"downloaded"`
+	Uploaded        int64   `json:"uploaded"`
+	DownloadSpeed   int64   `json:"download_speed"`
+	UploadSpeed     int64   `json:"upload_speed"`
+	DownloadLimit   int64   `json:"download_limit"`
+	UploadLimit     int64   `json:"upload_limit"`
+	LimitsAvailable bool    `json:"limits_available"`
+	Ratio           float64 `json:"ratio"`
+	Category        string  `json:"category,omitempty"`
+	Tags            string  `json:"tags,omitempty"`
+	AddedOn         int64   `json:"added_on"`
+	CompletionOn    int64   `json:"completion_on"`
+	TimeActive      int64   `json:"time_active"`
+	SeedingTime     int64   `json:"seeding_time"`
+}
+
+type DashboardSnapshot struct {
+	DownloaderName string             `json:"downloader_name"`
+	Adapter        string             `json:"adapter"`
+	NetworkClass   string             `json:"network_class"`
+	FetchedAt      time.Time          `json:"fetched_at"`
+	Summary        DashboardSummary   `json:"summary"`
+	Torrents       []DashboardTorrent `json:"torrents"`
+	FilteredTotal  int                `json:"filtered_total"`
+	Offset         int                `json:"offset"`
+	Limit          int                `json:"limit"`
+	HasMore        bool               `json:"has_more"`
+}
+
+type dashboardCacheEntry struct {
+	fetchedAt time.Time
+	runtime   integrations.RuntimeDownloader
+	torrents  []qbittorrent.Torrent
+}
+
+type dashboardCall struct {
+	done  chan struct{}
+	entry dashboardCacheEntry
+	err   error
+}
+
 type TorrentEvidence struct {
 	DownloaderName      string                    `json:"downloader_name"`
 	Adapter             string                    `json:"adapter"`
+	NetworkClass        string                    `json:"network_class"`
 	ConfigurationSHA256 string                    `json:"configuration_sha256"`
 	Torrent             qbittorrent.Torrent       `json:"torrent"`
 	RemoteSavePath      string                    `json:"remote_save_path"`
@@ -54,10 +133,22 @@ type TorrentEvidence struct {
 	PathMapping         *integrations.PathMapping `json:"path_mapping,omitempty"`
 }
 
+// Profile is the non-secret, operator-reviewed downloader identity used by
+// workflow policy. NetworkClass is never inferred from a host name or IP.
+type Profile struct {
+	DownloaderName      string `json:"downloader_name"`
+	Adapter             string `json:"adapter"`
+	NetworkClass        string `json:"network_class"`
+	ConfigurationSHA256 string `json:"configuration_sha256"`
+}
+
 type AddEvidence struct {
 	DownloaderName      string                 `json:"downloader_name"`
 	Adapter             string                 `json:"adapter"`
+	NetworkClass        string                 `json:"network_class"`
 	ConfigurationSHA256 string                 `json:"configuration_sha256"`
+	SeedboxUploadLimit  int64                  `json:"seedbox_upload_limit_bytes_per_second"`
+	AppliedUploadLimit  int64                  `json:"applied_upload_limit_bytes_per_second"`
 	TorrentBytes        int                    `json:"torrent_bytes"`
 	TorrentSHA256       string                 `json:"torrent_sha256"`
 	ExpectedHashes      torrentmeta.InfoHashes `json:"expected_hashes"`
@@ -75,7 +166,225 @@ type TorrentFilesEvidence struct {
 }
 
 func NewManager(store ConfigurationStore) *Manager {
-	return &Manager{store: store}
+	return &Manager{
+		store: store, dashboardCache: map[string]dashboardCacheEntry{}, dashboardInflight: map[string]*dashboardCall{},
+	}
+}
+
+func (manager *Manager) Dashboard(ctx context.Context, name string, query DashboardQuery) (DashboardSnapshot, error) {
+	query.Filter = strings.ToLower(strings.TrimSpace(query.Filter))
+	query.Query = strings.TrimSpace(query.Query)
+	if query.Filter == "" {
+		query.Filter = "all"
+	}
+	if !isDashboardFilter(query.Filter) {
+		return DashboardSnapshot{}, fmt.Errorf("invalid downloader dashboard filter")
+	}
+	if utf8.RuneCountInString(query.Query) > 200 {
+		return DashboardSnapshot{}, fmt.Errorf("downloader dashboard query exceeds 200 characters")
+	}
+	if query.Offset < 0 {
+		return DashboardSnapshot{}, fmt.Errorf("downloader dashboard offset must not be negative")
+	}
+	if query.Limit == 0 {
+		query.Limit = 100
+	}
+	if query.Limit < 1 || query.Limit > 200 {
+		return DashboardSnapshot{}, fmt.Errorf("downloader dashboard limit must be between 1 and 200")
+	}
+
+	entry, err := manager.dashboardEntry(ctx, strings.TrimSpace(name))
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
+	summary := summarizeDashboard(entry.torrents)
+	needle := strings.ToLower(query.Query)
+	filtered := make([]qbittorrent.Torrent, 0, len(entry.torrents))
+	for _, torrent := range entry.torrents {
+		group := dashboardStateGroup(torrent)
+		if query.Filter != "all" && query.Filter != group && !(query.Filter == "active" && (torrent.DownloadSpeed > 0 || torrent.UploadSpeed > 0)) {
+			continue
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(strings.Join([]string{torrent.Name, torrent.Hash, torrent.Category, torrent.Tags}, " ")), needle) {
+			continue
+		}
+		filtered = append(filtered, torrent)
+	}
+	sort.SliceStable(filtered, func(left, right int) bool {
+		if filtered[left].AddedOn == filtered[right].AddedOn {
+			return strings.ToLower(filtered[left].Name) < strings.ToLower(filtered[right].Name)
+		}
+		return filtered[left].AddedOn > filtered[right].AddedOn
+	})
+	filteredTotal := len(filtered)
+	start := query.Offset
+	if start > filteredTotal {
+		start = filteredTotal
+	}
+	end := start + query.Limit
+	if end > filteredTotal {
+		end = filteredTotal
+	}
+	items := make([]DashboardTorrent, 0, end-start)
+	for _, torrent := range filtered[start:end] {
+		items = append(items, dashboardTorrent(torrent, entry.runtime.Adapter))
+	}
+	return DashboardSnapshot{
+		DownloaderName: entry.runtime.Name, Adapter: entry.runtime.Adapter, NetworkClass: entry.runtime.NetworkClass,
+		FetchedAt: entry.fetchedAt, Summary: summary, Torrents: items, FilteredTotal: filteredTotal,
+		Offset: start, Limit: query.Limit, HasMore: end < filteredTotal,
+	}, nil
+}
+
+func (manager *Manager) dashboardEntry(ctx context.Context, name string) (dashboardCacheEntry, error) {
+	now := time.Now().UTC()
+	manager.dashboardMu.Lock()
+	if entry, ok := manager.dashboardCache[name]; ok && now.Sub(entry.fetchedAt) < dashboardCacheTTL {
+		manager.dashboardMu.Unlock()
+		return entry, nil
+	}
+	if call, ok := manager.dashboardInflight[name]; ok {
+		manager.dashboardMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return dashboardCacheEntry{}, ctx.Err()
+		case <-call.done:
+			return call.entry, call.err
+		}
+	}
+	call := &dashboardCall{done: make(chan struct{})}
+	manager.dashboardInflight[name] = call
+	manager.dashboardMu.Unlock()
+
+	runtime, client, err := manager.client(ctx, name)
+	var torrents []qbittorrent.Torrent
+	if err == nil {
+		torrents, err = client.List(ctx)
+	}
+	entry := dashboardCacheEntry{fetchedAt: time.Now().UTC(), runtime: runtime, torrents: torrents}
+
+	manager.dashboardMu.Lock()
+	call.entry, call.err = entry, err
+	if err == nil {
+		manager.dashboardCache[name] = entry
+	}
+	delete(manager.dashboardInflight, name)
+	close(call.done)
+	manager.dashboardMu.Unlock()
+	return entry, err
+}
+
+func isDashboardFilter(value string) bool {
+	switch value {
+	case "all", "downloading", "seeding", "paused", "checking", "error", "active", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func summarizeDashboard(torrents []qbittorrent.Torrent) DashboardSummary {
+	summary := DashboardSummary{Total: len(torrents)}
+	for _, torrent := range torrents {
+		switch dashboardStateGroup(torrent) {
+		case "downloading":
+			summary.Downloading++
+		case "seeding":
+			summary.Seeding++
+		case "paused":
+			summary.Paused++
+		case "checking":
+			summary.Checking++
+		case "error":
+			summary.Errors++
+		}
+		if torrent.DownloadSpeed > 0 || torrent.UploadSpeed > 0 {
+			summary.Active++
+		}
+		summary.DownloadSpeed = saturatingAdd(summary.DownloadSpeed, torrent.DownloadSpeed)
+		summary.UploadSpeed = saturatingAdd(summary.UploadSpeed, torrent.UploadSpeed)
+	}
+	return summary
+}
+
+func dashboardStateGroup(torrent qbittorrent.Torrent) string {
+	state := strings.ToLower(strings.TrimSpace(torrent.State))
+	switch {
+	case strings.Contains(state, "error") || strings.Contains(state, "missing"):
+		return "error"
+	case strings.Contains(state, "check") || strings.Contains(state, "verify"):
+		return "checking"
+	case strings.Contains(state, "pause") || strings.Contains(state, "stop"):
+		return "paused"
+	case torrent.Progress >= 0.999999 || strings.Contains(state, "seed") || strings.Contains(state, "upload"):
+		return "seeding"
+	case strings.Contains(state, "download") || strings.Contains(state, "meta") || torrent.Progress < 0.999999:
+		return "downloading"
+	default:
+		return "completed"
+	}
+}
+
+func dashboardTorrent(torrent qbittorrent.Torrent, adapter string) DashboardTorrent {
+	state := strings.ToLower(strings.TrimSpace(torrent.State))
+	if strings.Contains(state, "error") || strings.Contains(state, "missing") {
+		state = "error"
+	}
+	return DashboardTorrent{
+		Hash: torrent.Hash, Name: torrent.Name, State: state, StateGroup: dashboardStateGroup(torrent),
+		Progress: safeProgress(torrent.Progress), TotalSize: nonNegative(torrent.TotalSize), AmountLeft: nonNegative(torrent.AmountLeft),
+		Downloaded: nonNegative(torrent.Downloaded), Uploaded: nonNegative(torrent.Uploaded),
+		DownloadSpeed: nonNegative(torrent.DownloadSpeed), UploadSpeed: nonNegative(torrent.UploadSpeed),
+		DownloadLimit: nonNegative(torrent.DownloadLimit), UploadLimit: nonNegative(torrent.UploadLimit), LimitsAvailable: adapter != "rtorrent", Ratio: safeRatio(torrent.Ratio),
+		Category: torrent.Category, Tags: torrent.Tags, AddedOn: nonNegative(torrent.AddedOn), CompletionOn: nonNegative(torrent.CompletionOn),
+		TimeActive: nonNegative(torrent.TimeActive), SeedingTime: nonNegative(torrent.SeedingTime),
+	}
+}
+
+func nonNegative(value int64) int64 {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func safeProgress(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func safeRatio(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	return value
+}
+
+func saturatingAdd(current, value int64) int64 {
+	if value <= 0 {
+		return current
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if current > maxInt64-value {
+		return maxInt64
+	}
+	return current + value
+}
+
+func (manager *Manager) Profile(ctx context.Context, name string) (Profile, error) {
+	runtime, err := manager.store.GetRuntimeDownloader(ctx, name)
+	if err != nil {
+		return Profile{}, err
+	}
+	return Profile{
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter, NetworkClass: runtime.NetworkClass,
+		ConfigurationSHA256: runtime.ConfigurationSHA256,
+	}, nil
 }
 
 func (manager *Manager) Probe(ctx context.Context, name string, actor workflow.Actor) (qbittorrent.ProbeResult, error) {
@@ -161,6 +470,13 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	if err != nil {
 		return AddEvidence{}, err
 	}
+	if options.SeedboxUploadLimit < 0 {
+		return AddEvidence{}, fmt.Errorf("seedbox upload limit must not be negative")
+	}
+	if runtime.NetworkClass == "seedbox" && options.SeedboxUploadLimit > 0 &&
+		(options.UploadLimit == 0 || options.SeedboxUploadLimit < options.UploadLimit) {
+		options.UploadLimit = options.SeedboxUploadLimit
+	}
 	applyConfiguredDefaults(runtime.EndpointConfig.Options, &options)
 	if err := validateAddCapabilities(runtime.AdapterCapability, options); err != nil {
 		return AddEvidence{}, err
@@ -171,7 +487,9 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	}
 	torrentSHA := sha256.Sum256(metainfo)
 	evidence := AddEvidence{
-		DownloaderName: runtime.Name, Adapter: runtime.Adapter, ConfigurationSHA256: runtime.ConfigurationSHA256,
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter, NetworkClass: runtime.NetworkClass,
+		ConfigurationSHA256: runtime.ConfigurationSHA256,
+		SeedboxUploadLimit:  options.SeedboxUploadLimit, AppliedUploadLimit: options.UploadLimit,
 		TorrentBytes: len(metainfo), TorrentSHA256: hex.EncodeToString(torrentSHA[:]),
 		ExpectedHashes: inspection.Hashes, Result: qbittorrent.AddResult{Hashes: inspection.Hashes},
 	}
@@ -182,6 +500,7 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 		"save_path": options.SavePath, "category": options.Category, "tags": options.Tags,
 		"apply_labels": addLabelsEnabled(options), "skip_checking": options.SkipChecking, "paused": options.Paused,
 		"download_limit": options.DownloadLimit, "upload_limit": options.UploadLimit,
+		"network_class": runtime.NetworkClass, "seedbox_upload_limit": options.SeedboxUploadLimit,
 	}, actor); err != nil {
 		return AddEvidence{}, fmt.Errorf("persist downloader add intent: %w", err)
 	}
@@ -211,6 +530,18 @@ func (manager *Manager) Add(ctx context.Context, name string, metainfo []byte, o
 	if result.Observed != nil {
 		observed := buildTorrentEvidence(runtime, *result.Observed)
 		evidence.Observed = &observed
+	}
+	if options.UploadLimit > 0 {
+		hash := inspection.Hashes.V1SHA1
+		if hash == "" {
+			hash = inspection.Hashes.V2SHA256
+		}
+		if result.Observed == nil {
+			return evidence, &postAddVerificationError{hash: strings.ToLower(hash), err: errors.New("upload limit could not be read back after torrent add")}
+		}
+		if result.Observed.UploadLimit != options.UploadLimit {
+			return evidence, &postAddVerificationError{hash: strings.ToLower(hash), err: fmt.Errorf("upload limit readback is %d bytes/s, want %d bytes/s", result.Observed.UploadLimit, options.UploadLimit)}
+		}
 	}
 	if err := manager.store.AuditDownloaderAction(ctx, name, "torrent.add", map[string]any{
 		"torrent_bytes": evidence.TorrentBytes, "torrent_sha256": evidence.TorrentSHA256,
@@ -415,7 +746,8 @@ func (manager *Manager) client(ctx context.Context, name string) (integrations.R
 
 func buildTorrentEvidence(runtime integrations.RuntimeDownloader, torrent qbittorrent.Torrent) TorrentEvidence {
 	evidence := TorrentEvidence{
-		DownloaderName: runtime.Name, Adapter: runtime.Adapter, ConfigurationSHA256: runtime.ConfigurationSHA256, Torrent: torrent,
+		DownloaderName: runtime.Name, Adapter: runtime.Adapter, NetworkClass: runtime.NetworkClass,
+		ConfigurationSHA256: runtime.ConfigurationSHA256, Torrent: torrent,
 		RemoteSavePath: torrent.SavePath, RemoteContentPath: torrent.ContentPath,
 	}
 	for _, mapping := range runtime.PathMappings {

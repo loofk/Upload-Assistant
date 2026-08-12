@@ -52,7 +52,7 @@ var snapshotCalls = []string{
 }
 
 var requiredMethods = []string{
-	"system.multicall", "load.raw", "d.hash", "d.directory.set", "d.custom1.set", "d.start",
+	"system.multicall", "d.multicall2", "load.raw", "d.hash", "d.directory.set", "d.custom1.set", "d.start",
 	"f.multicall", "d.throttle_name.set", "throttle.down", "throttle.up", "throttle.down.max", "throttle.up.max",
 	"d.is_active", "d.is_multi_file", "d.is_hash_checking", "d.timestamp.started", "d.timestamp.finished",
 }
@@ -144,6 +144,37 @@ func (client *Client) Get(ctx context.Context, hash string) (qbittorrent.Torrent
 		return qbittorrent.Torrent{}, err
 	}
 	return normalizeTorrent(snapshot, downloadLimit, uploadLimit), nil
+}
+
+func (client *Client) List(ctx context.Context) ([]qbittorrent.Torrent, error) {
+	params := []any{"", "main"}
+	for _, method := range snapshotCalls {
+		params = append(params, method+"=")
+	}
+	response, err := client.rpc.call(ctx, "d.multicall2", params...)
+	if err != nil {
+		return nil, mapRPCError(err)
+	}
+	rows, ok := response.([]any)
+	if !ok {
+		return nil, fmt.Errorf("rTorrent d.multicall2 returned an invalid response")
+	}
+	if len(rows) > 100_000 {
+		return nil, fmt.Errorf("rTorrent torrent count exceeds 100000")
+	}
+	result := make([]qbittorrent.Torrent, 0, len(rows))
+	for _, rawRow := range rows {
+		row, ok := rawRow.([]any)
+		if !ok {
+			return nil, fmt.Errorf("rTorrent d.multicall2 returned an invalid row")
+		}
+		snapshot, err := decodeSnapshot(row)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, normalizeTorrent(snapshot, 0, 0))
+	}
+	return result, nil
 }
 
 func (client *Client) Files(ctx context.Context, hash string) ([]qbittorrent.TorrentFile, error) {

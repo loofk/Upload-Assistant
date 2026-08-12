@@ -116,13 +116,17 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 	if err := validateDownloaderControl(control); err != nil {
 		return nil, downloaderConfigurationBlock(err, control)
 	}
-	policyDownload, err := rules.ParseByteRate(sourceRule.Limits.Download)
-	if err != nil {
-		return nil, ruleLimitBlock("download", sourceRule, err)
-	}
 	policyUpload, err := rules.ParseByteRate(sourceRule.Limits.Upload)
 	if err != nil {
 		return nil, ruleLimitBlock("upload", sourceRule, err)
+	}
+	seedboxUpload, err := rules.ParseByteRate(sourceRule.Limits.SeedboxUpload)
+	if err != nil {
+		return nil, ruleLimitBlock("seedbox_upload", sourceRule, err)
+	}
+	policyDownload, err := rules.ParseByteRate(sourceRule.Limits.Download)
+	if err != nil {
+		return nil, ruleLimitBlock("download", sourceRule, err)
 	}
 	appliedDownload := strictestLimit(control.DownloadLimit, policyDownload)
 	appliedUpload := strictestLimit(control.UploadLimit, policyUpload)
@@ -138,7 +142,7 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 		SavePath: control.SavePath, Category: control.Category, Tags: control.Tags,
 		ApplyLabels:  control.ApplyLabels,
 		SkipChecking: boolValue(control.SkipChecking), Paused: boolValue(control.Paused),
-		DownloadLimit: appliedDownload, UploadLimit: appliedUpload,
+		DownloadLimit: appliedDownload, UploadLimit: appliedUpload, SeedboxUploadLimit: seedboxUpload,
 	}
 	evidence, recovered, recoveryErr := recoverDownloaderAdd(ctx, executor.provider, control.Name, metainfo, addOptions, snapshot.ResumeState.Reconciliation, execution.Actor)
 	if recoveryErr != nil {
@@ -161,13 +165,20 @@ func (executor downloaderAddExecutor) Execute(ctx context.Context, execution Exe
 	if torrentHash == "" {
 		torrentHash = evidence.Result.Hashes.V2SHA256
 	}
+	observedAppliedUpload := evidence.AppliedUploadLimit
+	if observedAppliedUpload == 0 && appliedUpload > 0 && evidence.NetworkClass == "" {
+		// Compatibility for in-process test providers predating manager evidence;
+		// the real manager always returns the authoritative network class/value.
+		observedAppliedUpload = appliedUpload
+	}
 	return mustJSON(map[string]any{
 		"downloader_name": control.Name, "downloader_adapter": evidence.Adapter, "torrent_hash": torrentHash,
 		"add_evidence": evidence, "recovered": recovered,
 		"limits": map[string]any{
 			"requested_download": control.DownloadLimit, "requested_upload": control.UploadLimit,
 			"policy_download": policyDownload, "policy_upload": policyUpload,
-			"applied_download": appliedDownload, "applied_upload": appliedUpload,
+			"policy_seedbox_upload": seedboxUpload, "downloader_network_class": evidence.NetworkClass,
+			"applied_download": appliedDownload, "applied_upload": observedAppliedUpload,
 			"rule_fingerprint": sourceRule.Fingerprint,
 		},
 		"options": map[string]any{
@@ -213,10 +224,17 @@ func recoverDownloaderAdd(
 	if err := validateRecoveredDownloaderAdd(observed, inspection, options, name); err != nil {
 		return downloaders.AddEvidence{}, true, downloaderRecoveryBlock(err.Error(), name, reconciliation)
 	}
+	appliedUpload := options.UploadLimit
+	if observed.NetworkClass == "seedbox" && options.SeedboxUploadLimit > 0 &&
+		(appliedUpload == 0 || options.SeedboxUploadLimit < appliedUpload) {
+		appliedUpload = options.SeedboxUploadLimit
+	}
 	torrentSHA := sha256.Sum256(metainfo)
 	result := qbittorrent.AddResult{Hashes: inspection.Hashes, Observed: &observed.Torrent}
 	return downloaders.AddEvidence{
-		DownloaderName: name, Adapter: observed.Adapter, ConfigurationSHA256: observed.ConfigurationSHA256,
+		DownloaderName: name, Adapter: observed.Adapter, NetworkClass: observed.NetworkClass,
+		ConfigurationSHA256: observed.ConfigurationSHA256,
+		SeedboxUploadLimit:  options.SeedboxUploadLimit, AppliedUploadLimit: appliedUpload,
 		TorrentBytes: len(metainfo), TorrentSHA256: hex.EncodeToString(torrentSHA[:]),
 		ExpectedHashes: inspection.Hashes, Result: result, Observed: &observed,
 	}, true, nil
@@ -233,7 +251,12 @@ func validateRecoveredDownloaderAdd(observed downloaders.TorrentEvidence, inspec
 	if options.SavePath != "" && observed.Torrent.SavePath != options.SavePath {
 		return fmt.Errorf("the remote downloader save path does not match the reviewed add options")
 	}
-	if observed.Torrent.DownloadLimit != options.DownloadLimit || observed.Torrent.UploadLimit != options.UploadLimit {
+	expectedUpload := options.UploadLimit
+	if observed.NetworkClass == "seedbox" && options.SeedboxUploadLimit > 0 &&
+		(expectedUpload == 0 || options.SeedboxUploadLimit < expectedUpload) {
+		expectedUpload = options.SeedboxUploadLimit
+	}
+	if observed.Torrent.DownloadLimit != options.DownloadLimit || observed.Torrent.UploadLimit != expectedUpload {
 		return fmt.Errorf("the remote downloader limits do not match the reviewed add options")
 	}
 	if options.ApplyLabels == nil || *options.ApplyLabels {

@@ -9,10 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -27,10 +30,10 @@ type TargetPackageProvider interface {
 	PreparePackage(context.Context, sites.TargetPackageMaterial) (sites.PreparedTargetPackage, error)
 }
 
-func WithTargetPackages(provider TargetPackageProvider, artifactStore WorkflowArtifactStore) Option {
+func WithTargetPackages(provider TargetPackageProvider, artifactStore WorkflowArtifactStore, ruleProvider RuleProvider) Option {
 	return func(runner *Runner) {
 		runner.executors["target_package"] = targetPackageExecutor{
-			provider: provider, artifacts: artifactStore, recorder: runner.runtime,
+			provider: provider, artifacts: artifactStore, recorder: runner.runtime, rules: ruleProvider,
 		}
 	}
 }
@@ -39,6 +42,7 @@ type targetPackageExecutor struct {
 	provider  TargetPackageProvider
 	artifacts WorkflowArtifactStore
 	recorder  ArtifactRecorder
+	rules     RuleProvider
 }
 
 type targetPackageSnapshot struct {
@@ -52,16 +56,39 @@ type targetPackageSnapshot struct {
 }
 
 func (executor targetPackageExecutor) Execute(ctx context.Context, execution Execution) (json.RawMessage, error) {
-	if executor.provider == nil || executor.artifacts == nil || executor.recorder == nil {
+	if executor.provider == nil || executor.artifacts == nil || executor.recorder == nil || executor.rules == nil {
 		return nil, fmt.Errorf("target package workflow dependencies are unavailable")
 	}
-	material, optionMap, err := executor.material(execution.Step.InputSnapshot)
+	material, optionMap, err := executor.material(ctx, execution.Step.InputSnapshot)
 	if err != nil {
+		var blocked *BlockError
+		if errors.As(err, &blocked) {
+			return nil, blocked
+		}
 		return nil, invalidSnapshotBlock(err)
 	}
 	prepared, err := executor.provider.PreparePackage(ctx, material)
 	if err != nil {
 		return nil, targetPackageBlock(err, material.Target, optionMap)
+	}
+	releaseTitle, _ := prepared.FormFields["name"].(string)
+	namingProfile, _ := prepared.FormFields["namingProfile"].(string)
+	violations := rules.CheckNamingProfile(material.Naming, namingProfile, releaseTitle, path.Base(material.Content.LocalRoot))
+	if len(violations) > 0 {
+		requirements := make([]sites.PackageRequirement, 0, len(violations))
+		for _, violation := range violations {
+			requirements = append(requirements, sites.PackageRequirement{
+				Code: violation.Code, Field: violation.Field, Message: violation.Message,
+				Parameters: map[string]any{
+					"profile": violation.Profile, "allowed_profiles": violation.AllowedProfiles,
+					"pattern": violation.Pattern, "template": violation.Template, "max_length": violation.MaxLength,
+				},
+			})
+		}
+		return nil, targetPackageBlock(&sites.PackageRequirementsError{Requirements: requirements}, material.Target, optionMap)
+	}
+	for _, advisory := range material.Advisories {
+		prepared.Warnings = append(prepared.Warnings, advisory.Section+": "+advisory.Summary)
 	}
 	body, err := json.MarshalIndent(prepared, "", "  ")
 	if err != nil {
@@ -98,7 +125,9 @@ func (executor targetPackageExecutor) Execute(ctx context.Context, execution Exe
 	}
 	return mustJSON(map[string]any{
 		"prepared": true, "target": prepared.Target, "adapter": prepared.Adapter,
-		"form_fields": prepared.FormFields, "description_length": len([]rune(prepared.Description)),
+		"target_rule_revision_id": material.TargetRuleRevisionID,
+		"target_rule_fingerprint": material.TargetRuleFingerprint,
+		"form_fields":             prepared.FormFields, "description_length": len([]rune(prepared.Description)),
 		"manual_review_required": prepared.ManualReviewRequired,
 		"decisions":              prepared.Decisions, "warnings": prepared.Warnings,
 		"package_artifact_id": recorded.ID, "package_sha256": recorded.SHA256,
@@ -107,7 +136,7 @@ func (executor targetPackageExecutor) Execute(ctx context.Context, execution Exe
 	}), nil
 }
 
-func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (sites.TargetPackageMaterial, map[string]any, error) {
+func (executor targetPackageExecutor) material(ctx context.Context, snapshotBody json.RawMessage) (sites.TargetPackageMaterial, map[string]any, error) {
 	var snapshot targetPackageSnapshot
 	if err := json.Unmarshal(snapshotBody, &snapshot); err != nil {
 		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("decode target package snapshot: %w", err)
@@ -122,6 +151,23 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 	}
 	if !decodePrevious(snapshot.PreviousSteps, "source_parse", &parsed) || parsed.Target == "" {
 		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("source_parse target evidence is missing or incomplete")
+	}
+	targetRevision, err := executor.rules.Active(ctx, parsed.Target)
+	if errors.Is(err, rules.ErrNotFound) || (err == nil && targetRevision.Status != "approved") {
+		return sites.TargetPackageMaterial{}, nil, activeRuleRequired(parsed.Target)
+	}
+	if err != nil {
+		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("load active %s rules: %w", parsed.Target, err)
+	}
+	targetPolicy, err := rules.ParsePolicy(targetRevision.Policy)
+	if err != nil {
+		return sites.TargetPackageMaterial{}, nil, fmt.Errorf("parse active %s rule policy: %w", parsed.Target, err)
+	}
+	if !targetPolicy.Source.Complete {
+		return sites.TargetPackageMaterial{}, nil, policyBlock(parsed.Target, "rule_source_incomplete", "the active target rule revision does not contain a complete captured rule source", targetRevision, targetPolicy)
+	}
+	if !slices.Contains(targetPolicy.Site.Roles, "target") {
+		return sites.TargetPackageMaterial{}, nil, policyBlock(parsed.Target, "rule_role_not_allowed", "the active rule revision does not allow this site role", targetRevision, targetPolicy)
 	}
 	var inspected struct {
 		SourceInfo          sites.SourceInfo             `json:"source_info"`
@@ -281,8 +327,9 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 		sourceDescription = string(descriptionBody)
 	}
 	var sourceRules struct {
-		Fingerprint string `json:"fingerprint"`
-		RevisionID  string `json:"rule_revision_id"`
+		Fingerprint string           `json:"fingerprint"`
+		RevisionID  string           `json:"rule_revision_id"`
+		Advisories  []rules.Advisory `json:"advisories"`
 	}
 	_ = decodePrevious(snapshot.PreviousSteps, "source_rules", &sourceRules)
 	var sourceTorrent struct {
@@ -308,8 +355,12 @@ func (executor targetPackageExecutor) material(snapshotBody json.RawMessage) (si
 			},
 		},
 		Screenshots: screenshots, Options: options,
+		TargetRuleRevisionID: targetRevision.ID, TargetRuleFingerprint: targetRevision.Fingerprint,
+		Naming:     targetPolicy.Naming,
+		Advisories: append(append([]rules.Advisory(nil), sourceRules.Advisories...), targetPolicy.Advisories...),
 		Evidence: map[string]any{
 			"source_rule":         map[string]any{"revision_id": sourceRules.RevisionID, "fingerprint": sourceRules.Fingerprint},
+			"target_rule":         map[string]any{"revision_id": targetRevision.ID, "fingerprint": targetRevision.Fingerprint},
 			"source_torrent":      map[string]any{"artifact_id": sourceTorrent.ArtifactID, "sha256": sourceTorrent.SHA256, "hashes": sourceTorrent.Hashes},
 			"source_description":  inspected.DescriptionArtifact,
 			"metadata":            metadataEvidence,

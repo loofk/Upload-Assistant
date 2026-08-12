@@ -215,6 +215,21 @@ func (client *Client) Get(ctx context.Context, hash string) (qbittorrent.Torrent
 	return qbittorrent.Torrent{}, qbittorrent.ErrNotFound
 }
 
+func (client *Client) List(ctx context.Context) ([]qbittorrent.Torrent, error) {
+	items, err := client.getTorrents(ctx, nil, torrentFields)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) > 100_000 {
+		return nil, fmt.Errorf("Transmission torrent count exceeds 100000")
+	}
+	result := make([]qbittorrent.Torrent, 0, len(items))
+	for _, item := range items {
+		result = append(result, normalizeTorrent(item))
+	}
+	return result, nil
+}
+
 func (client *Client) Files(ctx context.Context, hash string) ([]qbittorrent.TorrentFile, error) {
 	if err := validateHash(hash); err != nil {
 		return nil, err
@@ -358,7 +373,11 @@ func (client *Client) getTorrents(ctx context.Context, ids []string, fields []st
 	var response struct {
 		Torrents []torrent `json:"torrents"`
 	}
-	if err := client.call(ctx, "torrent-get", map[string]any{"ids": ids, "fields": fields}, &response); err != nil {
+	arguments := map[string]any{"fields": fields}
+	if len(ids) > 0 {
+		arguments["ids"] = ids
+	}
+	if err := client.call(ctx, "torrent-get", arguments, &response); err != nil {
 		return nil, err
 	}
 	return response.Torrents, nil

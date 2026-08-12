@@ -79,7 +79,7 @@ func TestDownloaderAddVerifiesArtifactAndAppliesStrictestRuleLimits(t *testing.T
 		t.Fatal(err)
 	}
 	if string(provider.addBytes) != string(metainfo) || provider.addOptions.DownloadLimit != 20*1024*1024 ||
-		provider.addOptions.UploadLimit != 50_000_000 || provider.addOptions.SavePath != "/remote/downloads" {
+		provider.addOptions.UploadLimit != 50_000_000 || provider.addOptions.SeedboxUploadLimit != 2*1024*1024 || provider.addOptions.SavePath != "/remote/downloads" {
 		t.Fatalf("applied add bytes/options = %q/%#v", provider.addBytes, provider.addOptions)
 	}
 	var result struct {
@@ -253,7 +253,7 @@ func downloaderAddExecution(storagePath string, size int64, sha string) Executio
 				"source_torrent": map[string]any{"storage_path": storagePath, "size_bytes": size, "sha256": sha},
 				"source_rules": map[string]any{
 					"fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-					"limits":      map[string]any{"download": "20MiB/s", "upload": "100M/s"},
+					"limits":      map[string]any{"download": "20MiB/s", "upload": "100M/s", "seedbox_upload": "2MiB/s"},
 				},
 			},
 		})},

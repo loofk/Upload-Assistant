@@ -442,7 +442,7 @@ func imageHostBlock(err error, name, operation string) *BlockError {
 		description = "Correct the image host configuration before resuming."
 	case errors.Is(err, imagehosts.ErrAdapterUnavailable):
 		code, action = "image_host_adapter_unavailable", "install_image_host_adapter"
-		description = "Use imgbb/PTPimg or implement the configured image host adapter."
+		description = "Use ImgBB, PTPimg, Imgbox, or Pixhost, or implement the configured image-host adapter."
 	}
 	return &BlockError{
 		Blockers:    []Blocker{{Code: code, Message: err.Error()}},

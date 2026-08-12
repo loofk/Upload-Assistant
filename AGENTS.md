@@ -69,6 +69,10 @@ docker compose up -d --build
 docker compose exec upload-assistant upload-assistant admin bootstrap --username admin
 ```
 
+初始 token 遗失时，只能由仍控制服务主机的操作者显式运行
+`upload-assistant admin token issue --username admin --name web-recovery --confirm` 签发新 token；
+签发会写入审计且 token 只显示一次。不得接受用户自行指定的 token 值。
+
 默认只绑定 `127.0.0.1:8080`。PostgreSQL 不发布宿主机端口；服务容器以 UID/GID 1000、
 只读根文件系统、drop ALL capabilities 和 no-new-privileges 运行。不要为了调试弱化这些
 默认值。远程访问应通过有 TLS 和访问控制的隧道或反向代理。

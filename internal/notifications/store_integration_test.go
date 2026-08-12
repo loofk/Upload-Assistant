@@ -13,12 +13,164 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/database"
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/schedules"
+	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
 
 type fakeRuntimeProvider struct{}
 
 func (fakeRuntimeProvider) GetRuntimeNotificationChannel(context.Context, string) (integrations.RuntimeNotificationChannel, error) {
 	return integrations.RuntimeNotificationChannel{}, nil
+}
+
+type probeRuntimeProvider struct {
+	runtime integrations.RuntimeNotificationChannel
+}
+
+func (provider probeRuntimeProvider) GetRuntimeNotificationChannel(context.Context, string) (integrations.RuntimeNotificationChannel, error) {
+	return provider.runtime, nil
+}
+
+func TestSystemEventOutboxOnlyEnqueuesExplicitSubscriptions(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	suffix := uuid.NewString()[:8]
+	subscribedName := "events-" + suffix
+	scheduleOnlyName := "schedule-only-" + suffix
+	var subscribedID, scheduleOnlyID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO notification_channels(name, adapter, enabled, config)
+		VALUES ($1, 'telegram_bot', true, '{"timeout_seconds":15,"event_types":["job.created"]}')
+		RETURNING id::text`, subscribedName).Scan(&subscribedID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO notification_channels(name, adapter, enabled, config)
+		VALUES ($1, 'discord_webhook', true, '{"timeout_seconds":15}')
+		RETURNING id::text`, scheduleOnlyName).Scan(&scheduleOnlyID); err != nil {
+		t.Fatal(err)
+	}
+	var jobID string
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM notifications WHERE notification_channel_id = ANY($1::uuid[])`, []string{subscribedID, scheduleOnlyID})
+		if jobID != "" {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM jobs WHERE id = $1`, jobID)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM notification_channels WHERE id = ANY($1::uuid[])`, []string{subscribedID, scheduleOnlyID})
+	})
+
+	workflowStore := workflow.NewStore(pool)
+	definition := workflow.RetorrentDefinition()
+	workflowID, err := workflowStore.EnsureDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := workflowStore.CreateJob(ctx, workflowID, definition, workflow.CreateJobInput{
+		Kind: "retorrent", ExecutionMode: workflow.ExecutionStep,
+		Input:          json.RawMessage(`{"source_url":"https://example.invalid/details.php?id=1","target":"MTEAM","confirm_upload":false}`),
+		IdempotencyKey: "system-event-" + uuid.NewString(), Owner: "integration-test",
+		Actor: workflow.Actor{Type: "test", ID: "system-event-outbox"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID = job.ID
+
+	var count int
+	var eventKey, eventType, payloadJobID, payloadSHA string
+	var hashMatches bool
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), min(event_key), min(payload->>'event_type'), min(payload->>'job_id'),
+		       min(payload_sha256), bool_and(payload_sha256 = encode(digest(convert_to(payload::text, 'UTF8'), 'sha256'), 'hex'))
+		FROM notifications WHERE notification_channel_id = $1`, subscribedID).
+		Scan(&count, &eventKey, &eventType, &payloadJobID, &payloadSHA, &hashMatches); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || !strings.HasPrefix(eventKey, "job-event:") || eventType != "job.created" ||
+		payloadJobID != job.ID || len(payloadSHA) != 64 || !hashMatches {
+		t.Fatalf("subscribed outbox = count=%d key=%q type=%q job=%q sha=%q valid=%t", count, eventKey, eventType, payloadJobID, payloadSHA, hashMatches)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE notification_channel_id = $1`, scheduleOnlyID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("schedule-only channel received %d unsolicited system event(s)", count)
+	}
+}
+
+func TestNotificationProbePersistsSingleAttemptIntent(t *testing.T) {
+	databaseURL := os.Getenv("UA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UA_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	name := "probe-" + uuid.NewString()[:8]
+	var channelID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO notification_channels(name, adapter, enabled, config)
+		VALUES ($1, 'discord_webhook', true, '{"timeout_seconds":15,"event_types":[]}')
+		RETURNING id::text`, name).Scan(&channelID); err != nil {
+		t.Fatal(err)
+	}
+	var notificationID string
+	t.Cleanup(func() {
+		if notificationID != "" {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM notifications WHERE id = $1`, notificationID)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM notification_channels WHERE id = $1`, channelID)
+	})
+	store := NewStore(pool, probeRuntimeProvider{runtime: integrations.RuntimeNotificationChannel{
+		NotificationChannel: integrations.NotificationChannel{Name: name, Adapter: "discord_webhook", Enabled: true},
+		ChannelConfig:       integrations.NotificationChannelConfig{TimeoutSeconds: 15},
+		Credentials:         map[string]string{"webhook_url": "https://example.invalid/api/webhooks/fixture"},
+	}})
+	probe, err := store.EnqueueProbe(ctx, name, workflow.Actor{Type: "test", ID: "probe"}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	notificationID = probe.NotificationID
+	var status, eventKey string
+	var attempts int
+	if err := pool.QueryRow(ctx, `SELECT status, attempts, event_key FROM notifications WHERE id = $1`, notificationID).Scan(&status, &attempts, &eventKey); err != nil {
+		t.Fatal(err)
+	}
+	if status != "queued" || attempts != 7 || !strings.HasPrefix(eventKey, "configuration-probe:") {
+		t.Fatalf("queued probe = status=%q attempts=%d event=%q", status, attempts, eventKey)
+	}
+	delivery, err := store.ClaimProbe(ctx, notificationID, "probe-worker", time.Now().UTC(), time.Minute)
+	if err != nil || delivery.Attempts != 8 {
+		t.Fatalf("ClaimProbe() = %#v, %v", delivery, err)
+	}
+	if err := store.FailProbe(ctx, notificationID, "probe-worker", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	var health string
+	if err := pool.QueryRow(ctx, `SELECT notification.status, channel.health_status FROM notifications notification JOIN notification_channels channel ON channel.id = notification.notification_channel_id WHERE notification.id = $1`, notificationID).Scan(&status, &health); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || health != "failed" {
+		t.Fatalf("terminal probe = status=%q health=%q", status, health)
+	}
 }
 
 func TestStoreReconcilesExpiredLeaseBeforeAnyRetryAndPersistsReceipts(t *testing.T) {

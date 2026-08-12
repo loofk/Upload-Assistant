@@ -1,23 +1,31 @@
-import {FormEvent, useCallback, useEffect, useMemo, useState} from "react";
+import {FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {ApiClient, ApiError} from "./api";
 import Candidates from "./Candidates";
-import Configuration from "./Configuration";
+import Configuration, {type ConfigTab} from "./Configuration";
 import Audit from "./Audit";
 import Readiness from "./Readiness";
+import Guide, {type GuideDestination, type GuideTab} from "./Guide";
+import OperationsCenter from "./OperationsCenter";
+import DownloaderDashboard from "./DownloaderDashboard";
 import type {
   Artifact,
   AuditEvent,
   Blocker,
   CreateJobInput,
   Job,
+	JobAttention,
+	JobAttentionAction,
   JobStatus,
   JobSummaryEnvelope,
   JsonValue,
   Step,
   StepAttempt,
+	UploadPreviewEnvelope,
 } from "./types";
 
 const tokenKey = "ua.v2.api-token";
+const themeKey = "ua.v2.theme";
+type ThemeMode = "system" | "light" | "dark";
 const activeStatuses = new Set<JobStatus>(["queued", "running"]);
 const terminalStatuses = new Set<JobStatus>(["complete", "cancelled"]);
 const downloadableArtifactKinds = new Set([
@@ -37,35 +45,79 @@ const statusLabels: Record<JobStatus, string> = {
   complete: "已完成",
   cancelled: "已取消",
 };
+type ConsoleSection = GuideDestination | "guide" | "operations" | "downloaders";
+const consoleSections = new Set<ConsoleSection>(["jobs", "guide", "candidates", "downloaders", "configuration", "readiness", "audit", "operations"]);
+const configTabs = new Set<ConfigTab>(["capabilities", "downloaders", "image-hosts", "notifications", "media-managers", "metadata-providers", "screenshots", "ai-models", "rules", "migration"]);
+const sectionMeta: Record<ConsoleSection, {title: string; description: string; group: string}> = {
+	jobs: {title: "任务", description: "查看持久步骤、门禁与证据", group: "工作"},
+	candidates: {title: "每日候选", description: "筛选候选并创建逐步任务", group: "工作"},
+	downloaders: {title: "下载器", description: "查看实时传输与任务状态", group: "工作"},
+	configuration: {title: "配置中心", description: "管理集成、规则和本地能力", group: "管理"},
+	operations: {title: "运维中心", description: "监控、诊断与安全恢复", group: "管理"},
+	readiness: {title: "环境检查", description: "执行不会联网的本地核对", group: "检查"},
+	audit: {title: "全局审计", description: "追溯配置变更与外部动作", group: "检查"},
+	guide: {title: "帮助中心", description: "人工操作与 Agent 接入指南", group: "支持"},
+};
 
 export default function App() {
+  const [theme, setTheme] = useThemePreference();
   const [token, setToken] = useState(() => sessionStorage.getItem(tokenKey) ?? "");
-  if (!token) {
-    return <ConnectScreen onConnect={(value) => {
+	const [sessionError, setSessionError] = useState("");
+	const disconnect = useCallback((message = "") => {
+		sessionStorage.removeItem(tokenKey);
+		setSessionError(message);
+		setToken("");
+	}, []);
+	if (!token) {
+		return <ConnectScreen theme={theme} onThemeChange={setTheme} initialError={sessionError} onConnect={async (value) => {
+			await new ApiClient(value).validateToken();
       sessionStorage.setItem(tokenKey, value);
+			setSessionError("");
       setToken(value);
     }} />;
   }
-  return <Console token={token} onDisconnect={() => {
-    sessionStorage.removeItem(tokenKey);
-    setToken("");
-  }} />;
+	return <Console
+		token={token}
+		theme={theme}
+		onThemeChange={setTheme}
+		onDisconnect={() => disconnect()}
+		onInvalidToken={() => disconnect("API Token 无效、已撤销或已过期，请重新输入服务签发的 Token。")}
+	/>;
 }
 
-function ConnectScreen({onConnect}: {onConnect: (token: string) => void}) {
+function ConnectScreen({initialError, onConnect, theme, onThemeChange}: {initialError: string; onConnect: (token: string) => Promise<void>; theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void}) {
   const [value, setValue] = useState("");
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState(initialError);
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		const token = value.trim();
+		if (!token) return;
+		setBusy(true);
+		setError("");
+		try {
+			await onConnect(token);
+		} catch (reason) {
+			if (reason instanceof ApiError && reason.status === 401) {
+				setError("Token 未通过验证。请输入由本服务签发且尚未撤销的 ua_… Token。");
+			} else if (reason instanceof ApiError && reason.status === 403) {
+				setError("Token 有效，但缺少进入 Web 控制台所需的 jobs:read 权限。");
+			} else {
+				setError(reason instanceof Error ? reason.message : "无法验证 Token，请确认本地服务可用。");
+			}
+		} finally {
+			setBusy(false);
+		}
+	};
   return (
     <main className="connect-shell">
+      <ThemeSelector value={theme} onChange={onThemeChange} className="connect-theme" />
       <section className="connect-card">
         <div className="brand-mark" aria-hidden="true">UA</div>
-        <p className="eyebrow">LOCAL CONTROL PLANE</p>
+        <p className="eyebrow">本地控制台</p>
         <h1>转种工作台</h1>
         <p className="connect-copy">查看每一个持久化步骤、规则门禁、证据文件与做种状态。服务默认仅监听本机，所有操作仍由 API 权限控制。</p>
-        <form onSubmit={(event) => {
-          event.preventDefault();
-          const token = value.trim();
-          if (token) onConnect(token);
-        }}>
+        <form onSubmit={(event) => void submit(event)}>
           <label htmlFor="api-token">API Token</label>
           <input
             id="api-token"
@@ -77,18 +129,29 @@ function ConnectScreen({onConnect}: {onConnect: (token: string) => void}) {
             minLength={32}
             required
           />
-          <button className="primary wide" type="submit">进入控制台</button>
+			{error && <p className="connect-error" role="alert">{error}</p>}
+			<button className="primary wide" type="submit" disabled={busy}>{busy ? "正在验证…" : "验证并进入"}</button>
         </form>
-        <p className="security-note">Token 只保存在当前浏览器标签会话的 sessionStorage，关闭标签后失效。</p>
+		<details className="connect-help">
+			<summary>第一次使用？查看 Token 获取方式</summary>
+			<div>
+				<strong>首次部署</strong>
+				<code>docker compose exec upload-assistant upload-assistant admin bootstrap --username admin</code>
+				<strong>Token 遗失</strong>
+				<code>docker compose exec upload-assistant upload-assistant admin token issue --username &lt;管理员名&gt; --name web-recovery --confirm</code>
+				<p>命令只显示一次 Token，请保存到密码管理器。不能在这里自行指定任意字符串。</p>
+			</div>
+		</details>
+		<p className="security-note">Token 仅保存在当前标签的 sessionStorage，关闭标签后失效。</p>
       </section>
     </main>
   );
 }
 
-function Console({token, onDisconnect}: {token: string; onDisconnect: () => void}) {
+function Console({token, theme, onThemeChange, onDisconnect, onInvalidToken}: {token: string; theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onDisconnect: () => void; onInvalidToken: () => void}) {
   const client = useMemo(() => new ApiClient(token), [token]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [selectedID, setSelectedID] = useState("");
+  const [selectedID, setSelectedID] = useState(() => new URLSearchParams(window.location.search).get("job") ?? "");
   const [detail, setDetail] = useState<JobSummaryEnvelope | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [attempts, setAttempts] = useState<StepAttempt[]>([]);
@@ -100,12 +163,47 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [section, setSection] = useState<"jobs" | "candidates" | "configuration" | "readiness" | "audit">("jobs");
+	const initialRoute = useMemo(readConsoleRoute, []);
+	const [section, setSection] = useState<ConsoleSection>(initialRoute.section);
+	const [configTab, setConfigTab] = useState<ConfigTab>(initialRoute.configTab);
+	const [guideTab, setGuideTab] = useState<GuideTab>(initialRoute.guideTab);
+	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+	const navigate = useCallback((nextSection: ConsoleSection, nextConfigTab: ConfigTab = configTab, nextGuideTab: GuideTab = guideTab) => {
+		const nextPath = consolePath(nextSection, nextConfigTab, nextGuideTab);
+		if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
+		setSection(nextSection);
+		if (nextSection === "configuration") setConfigTab(nextConfigTab);
+		if (nextSection === "guide") setGuideTab(nextGuideTab);
+		setMobileMenuOpen(false);
+		window.requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+	}, [configTab, guideTab]);
+	const navigateConfig = useCallback((nextTab: ConfigTab) => navigate("configuration", nextTab), [navigate]);
+	const navigateGuide = useCallback((nextTab: GuideTab) => navigate("guide", configTab, nextTab), [configTab, navigate]);
+	useEffect(() => {
+		const restore = () => { const route = readConsoleRoute(); setSection(route.section); setConfigTab(route.configTab); setGuideTab(route.guideTab); setMobileMenuOpen(false); };
+		window.addEventListener("popstate", restore);
+		return () => window.removeEventListener("popstate", restore);
+	}, []);
+	useEffect(() => {
+		if (!mobileMenuOpen) return;
+		const close = (event: KeyboardEvent) => { if (event.key === "Escape") setMobileMenuOpen(false); };
+		window.addEventListener("keydown", close);
+		return () => window.removeEventListener("keydown", close);
+	}, [mobileMenuOpen]);
+	useEffect(() => {
+		if (section !== "jobs") return;
+		const url = new URL(window.location.href);
+		if (selectedID) url.searchParams.set("job", selectedID); else url.searchParams.delete("job");
+		window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+	}, [section, selectedID]);
 
   const describeError = useCallback((reason: unknown) => {
-    if (reason instanceof ApiError && reason.status === 401) return "API Token 无效、已撤销或已过期。";
+		if (reason instanceof ApiError && reason.status === 401) {
+			onInvalidToken();
+			return "API Token 无效、已撤销或已过期。";
+		}
     return reason instanceof Error ? reason.message : "请求失败，请稍后重试。";
-  }, []);
+	}, [onInvalidToken]);
 
   const loadJobs = useCallback(async (cursor = "", append = false) => {
     setLoading(true);
@@ -115,7 +213,8 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
       setNextCursor(page.next_cursor);
       setHasMore(page.has_more);
       setError("");
-      if (!append && !selectedID && page.jobs.length > 0) setSelectedID(page.jobs[0].id);
+      const compactViewport = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 719px)").matches;
+      if (!append && !selectedID && page.jobs.length > 0 && !compactViewport) setSelectedID(page.jobs[0].id);
     } catch (reason) {
       setError(describeError(reason));
     } finally {
@@ -181,25 +280,45 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <div className="brand-mark small" aria-hidden="true">UA</div>
-          <div><strong>Upload Assistant</strong><span>可审计转种控制台</span></div>
-        </div>
-        <nav className="main-nav" aria-label="主导航"><button className={section === "jobs" ? "active" : ""} onClick={() => setSection("jobs")}>任务</button><button className={section === "candidates" ? "active" : ""} onClick={() => setSection("candidates")}>每日候选</button><button className={section === "configuration" ? "active" : ""} onClick={() => setSection("configuration")}>配置</button><button className={section === "readiness" ? "active" : ""} onClick={() => setSection("readiness")}>就绪检查</button><button className={section === "audit" ? "active" : ""} onClick={() => setSection("audit")}>审计</button></nav>
-        <div className="topbar-actions">
-          <span className="service-state"><i /> 本地服务已连接</span>
-          <button className="ghost" onClick={() => void refreshAll()}>刷新</button>
-          <button className="ghost" onClick={onDisconnect}>退出会话</button>
-        </div>
-      </header>
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
+		<header className="app-header">
+			<div className="global-toolbar">
+				<div className="brand-lockup">
+					<div className="brand-mark small" aria-hidden="true">UA</div>
+					<div><strong>Upload Assistant</strong><span>可审计转种控制台</span></div>
+				</div>
+				<button className="mobile-menu-trigger" type="button" aria-label={mobileMenuOpen ? "关闭主菜单" : "打开主菜单"} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((value) => !value)}><span /><span /><span /></button>
+				<nav className={`main-nav ${mobileMenuOpen ? "open" : ""}`} aria-label="主导航">
+					<ConsoleNavButton active={section === "jobs"} icon="jobs" label="任务" onClick={() => navigate("jobs")} />
+					<ConsoleNavButton active={section === "candidates"} icon="candidates" label="每日候选" onClick={() => navigate("candidates")} />
+					<ConsoleNavButton active={section === "downloaders"} icon="downloaders" label="下载器" onClick={() => navigate("downloaders")} />
+					<ConsoleNavButton active={section === "configuration"} icon="configuration" label="配置" onClick={() => navigate("configuration")} />
+					<ConsoleNavButton active={section === "operations"} icon="operations" label="运维中心" onClick={() => navigate("operations")} />
+					<ConsoleNavButton active={section === "readiness"} icon="readiness" label="环境检查" onClick={() => navigate("readiness")} />
+					<ConsoleNavButton active={section === "audit"} icon="audit" label="审计" onClick={() => navigate("audit")} />
+				</nav>
+				<div className="topbar-actions">
+					<span className="service-state" title="浏览器已连接本地 Upload Assistant 服务"><i /> <span>已连接</span></span>
+					<HelpMenu active={section === "guide"} onOpen={navigateGuide} />
+					<ThemeSelector value={theme} onChange={onThemeChange} className="toolbar-theme" />
+					<button className="ghost session-exit" onClick={onDisconnect}>退出</button>
+				</div>
+			</div>
+			<div className="topbar">
+				<div className="page-title"><span>{sectionMeta[section].group}</span><h1>{sectionMeta[section].title}</h1><p>{sectionMeta[section].description}</p></div>
+			</div>
+		</header>
+		{mobileMenuOpen && <button className="menu-scrim" type="button" aria-label="关闭主菜单" onClick={() => setMobileMenuOpen(false)} />}
 
-      {error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
+		<div className="app-frame">
 
-      {section === "audit" ? <Audit client={client} onError={(reason) => setError(describeError(reason))} /> : section === "readiness" ? <Readiness client={client} onError={(reason) => setError(describeError(reason))} /> : section === "configuration" ? <Configuration client={client} onError={(reason) => setError(describeError(reason))} /> : section === "candidates" ? <Candidates client={client} onError={(reason) => setError(describeError(reason))} onJobCreated={(jobID) => { setSection("jobs"); setSelectedID(jobID); void loadJobs(); }} /> : <div className="workspace">
+			{error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div>}
+
+			<div id="main-content" className="main-content" tabIndex={-1}>
+			{section === "guide" ? <Guide tab={guideTab} onTabChange={navigateGuide} onNavigate={navigate} onCreateJob={() => setCreateOpen(true)} /> : section === "operations" ? <OperationsCenter client={client} onError={(reason) => setError(describeError(reason))} /> : section === "audit" ? <Audit client={client} onError={(reason) => setError(describeError(reason))} /> : section === "readiness" ? <Readiness client={client} onError={(reason) => setError(describeError(reason))} /> : section === "configuration" ? <Configuration client={client} tab={configTab} onTabChange={navigateConfig} onError={(reason) => setError(describeError(reason))} /> : section === "downloaders" ? <DownloaderDashboard client={client} onError={(reason) => setError(describeError(reason))} onOpenConfiguration={() => navigate("configuration", "downloaders")} /> : section === "candidates" ? <Candidates client={client} onError={(reason) => setError(describeError(reason))} onJobCreated={(jobID) => { navigate("jobs"); setSelectedID(jobID); void loadJobs(); }} /> : <div className={`workspace ${selectedID ? "has-selection" : ""}`}>
         <aside className="job-sidebar">
           <div className="sidebar-heading">
-            <div><p className="eyebrow">DURABLE JOBS</p><h2>任务</h2></div>
+            <div><h2>任务列表</h2></div>
             <button className="primary compact" onClick={() => setCreateOpen(true)}>新建</button>
           </div>
           <label className="filter-label">
@@ -228,11 +347,14 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
               onChanged={refreshAll}
               onLoadMoreAttempts={loadMoreAttempts}
               onReplayed={(jobID) => { setSelectedID(jobID); void loadJobs(); }}
+			  onBack={() => setSelectedID("")}
               onError={(reason) => setError(describeError(reason))}
             /> : <DetailSkeleton />
-          ) : <WelcomePanel onCreate={() => setCreateOpen(true)} />}
+			) : <WelcomePanel onCreate={() => setCreateOpen(true)} onNavigate={navigate} />}
         </main>
-      </div>}
+			</div>}
+			</div>
+		</div>
 
       {createOpen && <CreateJobDialog
         client={client}
@@ -246,6 +368,71 @@ function Console({token, onDisconnect}: {token: string; onDisconnect: () => void
       />}
     </div>
   );
+}
+
+type ConsoleNavIcon = "jobs" | "candidates" | "downloaders" | "configuration" | "operations" | "readiness" | "audit";
+
+function ConsoleNavButton({active, icon, label, onClick}: {active: boolean; icon: ConsoleNavIcon; label: string; onClick: () => void}) {
+	return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} title={label} onClick={onClick}><ConsoleNavIcon name={icon} /><span>{label}</span></button>;
+}
+
+function ConsoleNavIcon({name}: {name: ConsoleNavIcon}) {
+	const paths: Record<ConsoleNavIcon, ReactNode> = {
+		jobs: <><rect x="3" y="4" width="18" height="16" rx="4" /><path d="M8 9h8M8 13h5" /></>,
+		candidates: <><path d="m12 3 2.3 4.7L19.5 9l-3.8 3.7.9 5.3-4.6-2.5L7.4 18l.9-5.3L4.5 9l5.2-1.3L12 3Z" /></>,
+		downloaders: <><path d="M4 7h16v10H4z" /><path d="M8 11h8M8 14h5" /><circle cx="17" cy="14" r="1" /></>,
+		configuration: <><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2-.7a7 7 0 0 0-.8-1.8l.9-1.9-2.2-2.2-1.9.9a7 7 0 0 0-1.8-.8l-.7-2h-3l-.7 2a7 7 0 0 0-1.8.8l-1.9-.9L.9 6.1 1.8 8a7 7 0 0 0-.8 1.8l-2 .7v3l2 .7a7 7 0 0 0 .8 1.8l-.9 1.9 2.2 2.2 1.9-.9a7 7 0 0 0 1.8.8l.7 2h3l.7-2a7 7 0 0 0 1.8-.8l1.9.9 2.2-2.2-.9-1.9a7 7 0 0 0 .8-1.8l2-.7Z" transform="translate(2) scale(.83)" /></>,
+		operations: <><path d="M4 17V9m5 8V5m5 12v-6m5 6V3" /><path d="M2 20h20" /></>,
+		readiness: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
+		audit: <><path d="M6 3h9l4 4v14H6z" /><path d="M15 3v5h4M9 12h7M9 16h7" /></>,
+	};
+	return <svg className="nav-icon" aria-hidden="true" viewBox="0 0 24 24">{paths[name]}</svg>;
+}
+
+function useThemePreference(): [ThemeMode, (theme: ThemeMode) => void] {
+  const [mode, setMode] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem(themeKey);
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
+  });
+  useEffect(() => {
+    const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    const apply = () => {
+      document.documentElement.dataset.theme = mode === "system" ? (media?.matches ? "dark" : "light") : mode;
+      document.documentElement.dataset.themeMode = mode;
+    };
+    localStorage.setItem(themeKey, mode);
+    apply();
+    if (mode === "system") media?.addEventListener("change", apply);
+    return () => media?.removeEventListener("change", apply);
+  }, [mode]);
+  return [mode, setMode];
+}
+
+function ThemeSelector({value, onChange, className = ""}: {value: ThemeMode; onChange: (theme: ThemeMode) => void; className?: string}) {
+  return <label className={`theme-selector ${className}`.trim()}><span>主题</span><select aria-label="主题" value={value} onChange={(event) => onChange(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>;
+}
+
+function HelpMenu({active, onOpen}: {active: boolean; onOpen: (tab: GuideTab) => void}) {
+	const open = (event: ReactMouseEvent<HTMLButtonElement>, tab: GuideTab) => {
+		onOpen(tab);
+		const details = event.currentTarget.closest("details");
+		if (details) details.open = false;
+	};
+	return <details className={`help-menu ${active ? "active" : ""}`}><summary>帮助</summary><div role="menu"><button role="menuitem" onClick={(event) => open(event, "operator")}><strong>人工使用指南</strong><span>从配置到创建任务</span></button><button role="menuitem" onClick={(event) => open(event, "agent")}><strong>Agent 接入说明</strong><span>工具发现与安全调用</span></button></div></details>;
+}
+
+function readConsoleRoute(): {section: ConsoleSection; configTab: ConfigTab; guideTab: GuideTab} {
+  const segments = window.location.pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  const sectionValue = segments[0] === "app" ? segments[1] : "jobs";
+	const section = sectionValue === "help" ? "guide" : consoleSections.has(sectionValue as ConsoleSection) ? sectionValue as ConsoleSection : "jobs";
+  const tabValue = section === "configuration" ? segments[2] : "downloaders";
+  const configTab = configTabs.has(tabValue as ConfigTab) ? tabValue as ConfigTab : "downloaders";
+	const guideTab = sectionValue === "help" && segments[2] === "agent" ? "agent" : "operator";
+  return {section, configTab, guideTab};
+}
+
+function consolePath(section: ConsoleSection, configTab: ConfigTab, guideTab: GuideTab): string {
+	return section === "configuration" ? `/app/configuration/${configTab}` : section === "guide" ? `/app/help/${guideTab}` : `/app/${section}`;
 }
 
 function JobCard({job, selected, onSelect}: {job: Job; selected: boolean; onSelect: (id: string) => void}) {
@@ -263,7 +450,7 @@ function JobCard({job, selected, onSelect}: {job: Job; selected: boolean; onSele
 }
 
 function JobDetail({
-  detail, events, attempts, attemptsHaveMore, client, onChanged, onLoadMoreAttempts, onReplayed, onError,
+  detail, events, attempts, attemptsHaveMore, client, onChanged, onLoadMoreAttempts, onReplayed, onBack, onError,
 }: {
   detail: JobSummaryEnvelope;
   events: AuditEvent[];
@@ -273,20 +460,23 @@ function JobDetail({
   onChanged: () => Promise<void>;
   onLoadMoreAttempts: () => Promise<void>;
   onReplayed: (jobID: string) => void;
+  onBack: () => void;
   onError: (reason: unknown) => void;
 }) {
-  const [tab, setTab] = useState<"steps" | "attempts" | "artifacts" | "events" | "summary">("steps");
+  const [tab, setTab] = useState<"steps" | "preview" | "attempts" | "artifacts" | "events" | "summary">("steps");
   const [resumeText, setResumeText] = useState("{}");
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [busy, setBusy] = useState(false);
   const confirmRequired = detail.blockers.some((blocker) => blocker.code === "confirm_upload_required");
 	const reconciliationRequired = detail.blockers.some((blocker) => blocker.code.endsWith("_outcome_unknown") || blocker.code.includes("requires_reconciliation"));
 	const reconciliationReady = reconciliationInputReady(resumeText);
+	const attention = detail.attention ?? fallbackAttention(detail);
 
   useEffect(() => {
     setResumeText(JSON.stringify(detail.resume_state ?? {}, null, 2));
     setConfirmUpload(false);
   }, [detail.job_id, detail.status, detail.current_step, detail.resume_state]);
+	useEffect(() => { if (confirmRequired) setTab("preview"); }, [confirmRequired, detail.job_id]);
 
   const transition = async (action: "pause" | "cancel") => {
     if (action === "cancel" && !window.confirm("确认取消这个任务？持久化证据和已下载数据不会被删除。")) return;
@@ -351,17 +541,40 @@ function JobDetail({
     }
   };
 
+	const applyAttentionAction = async (action: JobAttentionAction) => {
+		if (action.href) {
+			window.history.pushState({}, "", action.href);
+			window.dispatchEvent(new PopStateEvent("popstate"));
+			return;
+		}
+		if (!action.executable) {
+			if (action.id === "provide_reconciliation" || action.id === "review_upload_package") document.querySelector(".resume-panel")?.scrollIntoView({behavior: "smooth", block: "center"});
+			return;
+		}
+		if (action.requires_confirmation && !window.confirm(`${action.label}？\n\n${action.description}`)) return;
+		setBusy(true);
+		try {
+			await client.performJobAction(detail.job_id, {
+				actionID: action.id, expectedStatus: detail.status, expectedStep: detail.current_step,
+				expectedBlockerCode: attention.issue?.code, confirmed: action.requires_confirmation,
+			});
+			await onChanged();
+		} catch (reason) { onError(reason); }
+		finally { setBusy(false); }
+	};
+
   return (
     <article className="job-detail">
       <header className="detail-header">
         <div>
+		  <button className="mobile-detail-back ghost" type="button" onClick={onBack}>← 返回任务列表</button>
           <div className="title-row"><StatusPill status={detail.status} /><span className="mode-label">{detail.current_step || "流程结束"}</span></div>
           <h1>{detail.kind === "daily_candidates" ? "每日候选任务" : "转种任务"} <span>{shortID(detail.job_id)}</span></h1>
           <button className="copy-id" onClick={() => void navigator.clipboard?.writeText(detail.job_id)}>{detail.job_id} · 复制</button>
         </div>
         <div className="detail-actions">
           {canPause && <button className="secondary" disabled={busy} onClick={() => void transition("pause")}>暂停</button>}
-          {canResume && <button className="primary" disabled={busy || (reconciliationRequired && !reconciliationReady)} onClick={() => void resume()}>{reconciliationRequired ? "对账后续跑" : "续跑"}</button>}
+          {canResume && reconciliationRequired && <button className="primary" disabled={busy || !reconciliationReady} onClick={() => void resume()}>对账后续跑</button>}
           {canReplay && <button className="secondary" disabled={busy} onClick={() => void replay()}>重放新任务</button>}
           {!terminalStatuses.has(detail.status) && !externalWriteInFlight && <button className="danger" disabled={busy} onClick={() => void transition("cancel")}>取消</button>}
         </div>
@@ -373,10 +586,10 @@ function JobDetail({
         <b>{progress}%</b>
       </section>
 
-      {detail.blockers.length > 0 && <BlockerPanel blockers={detail.blockers} />}
+      {attention.needs_action && <AttentionPanel attention={attention} busy={busy} onAction={applyAttentionAction} />}
 
       {canResume && <section className="resume-panel">
-        <div className="section-title"><div><p className="eyebrow">RECOVERY INPUT</p><h2>恢复参数</h2></div><span>提交后会写入审计事件</span></div>
+		<div className="section-title"><div><h2>恢复任务</h2></div><span>提交内容会写入审计记录</span></div>
         <textarea aria-label="resume_state JSON" spellCheck={false} value={resumeText} onChange={(event) => setResumeText(event.target.value)} />
 		{reconciliationRequired && <div className="safety-callout"><strong>必须完成远端对账</strong><span>保留系统给出的 blocker_code 与 attempt_id；填写允许的 decision、confirmed=true、人工证据的 lowercase SHA-256 和 observed_at。普通 retry 与重放都会被后端拒绝。</span><span>目标站 verified_uploaded 必须绑定目标种子 ID 与 submitted torrent SHA；图床 verified_uploaded 必须绑定服务器生成的 pending evidence SHA；下载器 verified_remote_state 必须绑定系统给出的 expected infohash。恢复只会读取远端状态或补写本地回执，绝不再次执行外部写入。</span></div>}
         {confirmRequired && <label className="confirm-live">
@@ -387,20 +600,86 @@ function JobDetail({
       </section>}
 
       <nav className="tabs" aria-label="任务详情">
-        {(["steps", "attempts", "artifacts", "events", "summary"] as const).map((value) => (
+        {(["steps", ...(detail.artifacts.some((artifact) => artifact.kind === "target_package") ? ["preview" as const] : []), "attempts", "artifacts", "events", "summary"] as const).map((value) => (
           <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
-            {value === "steps" ? `步骤 ${detail.steps.length}` : value === "attempts" ? `尝试 ${attempts.length}` : value === "artifacts" ? `证据 ${detail.artifacts.length}` : value === "events" ? `日志 ${events.length}` : "总结"}
+            {value === "steps" ? `步骤 ${detail.steps.length}` : value === "preview" ? "发布预览" : value === "attempts" ? `尝试 ${attempts.length}` : value === "artifacts" ? `证据 ${detail.artifacts.length}` : value === "events" ? `日志 ${events.length}` : "总结"}
           </button>
         ))}
       </nav>
 
       {tab === "steps" && <StepsView steps={detail.steps} />}
+      {tab === "preview" && <UploadPreview jobID={detail.job_id} artifacts={detail.artifacts} client={client} onChanged={onChanged} onError={onError} />}
       {tab === "attempts" && <AttemptsView attempts={attempts} hasMore={attemptsHaveMore} onLoadMore={onLoadMoreAttempts} />}
       {tab === "artifacts" && <ArtifactsView artifacts={detail.artifacts} jobID={detail.job_id} client={client} onError={onError} />}
       {tab === "events" && <EventsView events={events} />}
       {tab === "summary" && <SummaryView summary={detail.summary} status={detail.status} />}
     </article>
   );
+}
+
+function UploadPreview({jobID, artifacts, client, onChanged, onError}: {jobID: string; artifacts: Artifact[]; client: ApiClient; onChanged: () => Promise<void>; onError: (reason: unknown) => void}) {
+	const screenshots = useMemo(() => artifacts.filter((artifact) => artifact.kind === "screenshot"), [artifacts]);
+	const [preview, setPreview] = useState<UploadPreviewEnvelope | null>(null);
+	const [images, setImages] = useState<Array<{id: string; url: string; filename: string}>>([]);
+	const [editing, setEditing] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [form, setForm] = useState({name: "", namingProfile: "", smallDescription: "", category: 0, categoryEvidence: "人工复核目标站当前分类", standard: 0, anonymous: false, description: ""});
+	useEffect(() => {
+		let active = true;
+		void client.getUploadPreview(jobID).then((value) => {
+			if (!active) return;
+			setPreview(value);
+			setForm({name: String(value.package.form_fields.name ?? ""), namingProfile: String(value.package.form_fields.namingProfile ?? ""), smallDescription: String(value.package.form_fields.smallDescr ?? ""), category: Number(value.package.form_fields.category ?? 0), categoryEvidence: "人工复核目标站当前分类", standard: Number(value.package.form_fields.standard ?? 0), anonymous: value.package.form_fields.anonymous === true, description: value.package.description});
+		}).catch(onError);
+		return () => { active = false; };
+	}, [client, jobID, onError]);
+	useEffect(() => {
+		let active = true;
+		const urls: string[] = [];
+		void Promise.all(screenshots.map(async (artifact) => {
+			const blob = await client.downloadArtifact(jobID, artifact.id);
+			const url = URL.createObjectURL(blob); urls.push(url);
+			return {id: artifact.id, url, filename: artifact.filename};
+		})).then((items) => { if (active) setImages(items); else items.forEach((item) => URL.revokeObjectURL(item.url)); }).catch(onError);
+		return () => { active = false; urls.forEach((url) => URL.revokeObjectURL(url)); };
+	}, [client, jobID, onError, screenshots]);
+	if (!preview) return <DetailSkeleton />;
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		if (!window.confirm("生成新的不可变发布包？旧版本会保留，后续查重与目标种子会重新生成，live 上传确认会被清除。")) return;
+		setBusy(true);
+		try { await client.reviseUploadPreview(jobID, {expectedPackageSHA256: preview.package_artifact.sha256, ...form}); setEditing(false); await onChanged(); }
+		catch (reason) { onError(reason); }
+		finally { setBusy(false); }
+	};
+	return <section className="upload-preview">
+		<header><div><p className="eyebrow">MTEAM 发布包 · revision {preview.package_revision}</p><h2>{String(preview.package.form_fields.name ?? "未命名发布")}</h2><span>{String(preview.package.form_fields.smallDescr ?? "")}</span></div><div><code title={preview.package_artifact.sha256}>{shortHash(preview.package_artifact.sha256)}</code>{preview.can_revise && <button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "关闭修改" : "修改并重新生成"}</button>}</div></header>
+		{preview.package.warnings.length > 0 && <div className="preview-warnings">{preview.package.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>}
+		<div className="preview-meta"><article><span>命名配置档</span><strong>{preview.package.naming_profiles?.find((item) => item.id === preview.package.form_fields.namingProfile)?.label ?? String(preview.package.form_fields.namingProfile || "全站通用")}</strong></article><article><span>分类 ID</span><strong>{String(preview.package.form_fields.category ?? "—")}</strong></article><article><span>规格 ID</span><strong>{String(preview.package.form_fields.standard ?? "—")}</strong></article><article><span>发布方式</span><strong>{preview.package.form_fields.anonymous ? "匿名" : "实名"}</strong></article><article><span>内容</span><strong>{preview.package.content.file_count} 个文件 · {formatBytes(preview.package.content.total_size_bytes)}</strong></article></div>
+		{editing && <form className="preview-edit-form" onSubmit={submit}><label>主标题<input required maxLength={255} value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} /></label><label>命名配置档<select required={Boolean(preview.package.naming_profiles?.length)} value={form.namingProfile} onChange={(event) => setForm({...form, namingProfile: event.target.value})}><option value="">{preview.package.naming_profiles?.length ? "请选择资源类型" : "全站通用"}</option>{preview.package.naming_profiles?.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.release_title.template ?? item.id}</option>)}</select></label><label>副标题<input required maxLength={255} value={form.smallDescription} onChange={(event) => setForm({...form, smallDescription: event.target.value})} /></label><label>分类 ID<input required type="number" min="1" max="100000" value={form.category} onChange={(event) => setForm({...form, category: Number(event.target.value)})} /></label><label>规格 ID<select value={form.standard} onChange={(event) => setForm({...form, standard: Number(event.target.value)})}>{[1, 2, 3, 5, 6, 7].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label className="full">分类判断依据<input required maxLength={500} value={form.categoryEvidence} onChange={(event) => setForm({...form, categoryEvidence: event.target.value})} /></label><label className="full"><input type="checkbox" checked={form.anonymous} onChange={(event) => setForm({...form, anonymous: event.target.checked})} /> 匿名发布</label><label className="full">发布描述<textarea required value={form.description} onChange={(event) => setForm({...form, description: event.target.value})} /></label><button className="primary full" disabled={busy}>{busy ? "正在排队生成…" : "保存为新 revision"}</button></form>}
+		{images.length > 0 && <section className="preview-gallery"><h3>原始截图</h3><div>{images.map((item) => <figure key={item.id}><img src={item.url} alt={item.filename} /><figcaption>{item.filename}</figcaption></figure>)}</div></section>}
+		<div className="preview-documents"><details open><summary>目标站描述</summary><pre>{preview.package.description}</pre></details><details><summary>MediaInfo / BDInfo</summary><pre>{typeof preview.package.mediainfo === "string" ? preview.package.mediainfo : JSON.stringify(preview.package.mediainfo, null, 2)}</pre></details><details><summary>字段推导与证据</summary><JsonBlock value={preview.package.decisions as unknown as JsonValue} /></details></div>
+	</section>;
+}
+
+function fallbackAttention(detail: JobSummaryEnvelope): JobAttention {
+	const blocker = detail.blockers[0];
+	if (!blocker && !["paused", "failed"].includes(detail.status)) return {status: "working", needs_action: false, solutions: []};
+	return {
+		status: "action_required", needs_action: true,
+		issue: {code: blocker?.code ?? (detail.status === "paused" ? "job_paused" : "step_execution_failed"), title: detail.status === "paused" ? "任务已暂停" : "任务需要处理", summary: blocker?.message ?? "请查看当前步骤后决定是否重试。", current_step: detail.current_step, site_code: blocker?.site_code, severity: "warning"},
+		solutions: [],
+	};
+}
+
+function AttentionPanel({attention, busy, onAction}: {attention: JobAttention; busy: boolean; onAction: (action: JobAttentionAction) => Promise<void>}) {
+	if (!attention.issue) return null;
+	return <section className={`attention-panel severity-${attention.issue.severity}`}>
+		<div className="attention-icon">!</div><div className="attention-content"><p className="eyebrow">当前只需处理这一项</p><h2>{attention.issue.title}</h2><p>{attention.issue.summary || "系统没有提供额外说明。"}</p>
+			<div className="attention-context">{attention.issue.site_code && <span>{attention.issue.site_code}</span>}{attention.issue.current_step && <span>{attention.issue.current_step}</span>}<code>{attention.issue.code}</code></div>
+			{attention.solutions.length > 0 && <div className="attention-solutions">{attention.solutions.map((action) => <article key={action.id}><div><strong>{action.label}</strong><span>{action.description}</span></div><button className={action.kind === "safe_repair" || action.kind === "retry" ? "primary" : "secondary"} disabled={busy} onClick={() => void onAction(action)}>{action.label}</button></article>)}</div>}
+		</div>
+	</section>;
 }
 
 function reconciliationInputReady(raw: string): boolean {
@@ -428,7 +707,7 @@ function reconciliationInputReady(raw: string): boolean {
 }
 
 function BlockerPanel({blockers}: {blockers: Blocker[]}) {
-  return <section className="blocker-panel"><div className="blocker-icon">!</div><div><p className="eyebrow">HARD GATE</p><h2>任务需要人工处理</h2>{blockers.map((blocker) => (
+  return <section className="blocker-panel"><div className="blocker-icon">!</div><div><p className="eyebrow">安全门禁</p><h2>任务需要人工处理</h2>{blockers.map((blocker) => (
     <div className="blocker-row" key={`${blocker.code}-${blocker.site_code ?? ""}`}><code>{blocker.code}</code><span>{blocker.message || "未提供说明"}</span>{blocker.site_code && <b>{blocker.site_code}</b>}</div>
   ))}</div></section>;
 }
@@ -517,10 +796,10 @@ function SummaryView({summary, status}: {summary: Record<string, JsonValue>; sta
   const audit = asRecord(summary.audit);
   return <section className="summary-view">
     <div className="summary-grid">
-      <article><p className="eyebrow">SOURCE</p><strong>{String(source.site_code ?? "—")} #{String(source.torrent_id ?? "—")}</strong><span>{String(source.name ?? "")}</span></article>
-      <article><p className="eyebrow">TARGET</p><strong>{String(target.site_code ?? "—")} #{String(target.torrent_id ?? "—")}</strong><span>{String(target.details_url ?? "")}</span></article>
-      <article><p className="eyebrow">SEEDING</p><strong>{String(seeding.downloader_name ?? "—")}</strong><span>{shortHash(String(seeding.torrent_hash ?? ""))}</span></article>
-      <article><p className="eyebrow">EVIDENCE</p><strong>{String(audit.artifact_count ?? "0")} artifacts</strong><span>规则、查重、上传、注入与做种均已绑定</span></article>
+      <article><p className="eyebrow">源资源</p><strong>{String(source.site_code ?? "—")} #{String(source.torrent_id ?? "—")}</strong><span>{String(source.name ?? "")}</span></article>
+      <article><p className="eyebrow">目标资源</p><strong>{String(target.site_code ?? "—")} #{String(target.torrent_id ?? "—")}</strong><span>{String(target.details_url ?? "")}</span></article>
+      <article><p className="eyebrow">做种状态</p><strong>{String(seeding.downloader_name ?? "—")}</strong><span>{shortHash(String(seeding.torrent_hash ?? ""))}</span></article>
+      <article><p className="eyebrow">审计证据</p><strong>{String(audit.artifact_count ?? "0")} 个文件</strong><span>规则、查重、上传、注入与做种均已绑定</span></article>
     </div>
     <JsonBlock value={summary} />
   </section>;
@@ -532,12 +811,31 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
   onCreated: (jobID: string) => void;
   onError: (reason: unknown) => void;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const [form, setForm] = useState<CreateJobInput>({
     sourceURL: "", target: "MTEAM", executionMode: "step", stopAfterStep: "",
 		downloaderName: "default", savePath: "/downloads", applyLabels: true, screenshotProfile: "default", imageHost: "default",
 		tmdbProvider: "", ptgenProvider: "",
   });
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])") ?? []);
+    (dialog?.querySelector<HTMLElement>('input[type="url"]') ?? focusable()[0])?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => { window.removeEventListener("keydown", handleKey); returnFocusRef.current?.focus(); };
+  }, [onClose]);
   const update = <K extends keyof CreateJobInput>(key: K, value: CreateJobInput[K]) => setForm((current) => ({...current, [key]: value}));
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -552,8 +850,8 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
     }
   };
   return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-    <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="create-title">
-      <header><div><p className="eyebrow">NEW RETORRENT</p><h2 id="create-title">创建转种任务</h2></div><button className="close-button" onClick={onClose} aria-label="关闭">×</button></header>
+    <section ref={dialogRef} className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="create-title">
+      <header><div><h2 id="create-title">创建转种任务</h2></div><button className="close-button" onClick={onClose} aria-label="关闭">×</button></header>
       <form onSubmit={(event) => void submit(event)}>
         <label className="full">源站详情链接<input type="url" required placeholder="https://u2.dmhy.org/details.php?id=…" value={form.sourceURL} onChange={(event) => update("sourceURL", event.target.value)} /></label>
         <label>目标站<input required value={form.target} onChange={(event) => update("target", event.target.value.toUpperCase())} /></label>
@@ -573,8 +871,22 @@ function CreateJobDialog({client, onClose, onCreated, onError}: {
   </div>;
 }
 
-function WelcomePanel({onCreate}: {onCreate: () => void}) {
-  return <section className="welcome-panel"><p className="eyebrow">AUDITABLE BY DESIGN</p><h1>每一步都可停、可查、可恢复。</h1><p>创建任务后，服务会依次验证源站、规则、内容、素材、目标查重、上传包、live 确认和做种义务。任何缺口都会成为明确 blocker。</p><button className="primary" onClick={onCreate}>创建第一个任务</button></section>;
+function WelcomePanel({onCreate, onNavigate}: {onCreate: () => void; onNavigate: (destination: ConsoleSection) => void}) {
+  return (
+		<section className="welcome-panel">
+			<div className="welcome-heading">
+				<h1>从配置到第一条任务</h1>
+				<p>这是一个有安全门禁的任务控制台。首次使用请先完成站点、规则和工具链配置，再运行本地就绪检查。</p>
+			</div>
+			<div className="welcome-actions">
+				<button className="primary" onClick={() => onNavigate("guide")}>打开帮助中心</button>
+				<button className="secondary" onClick={() => onNavigate("configuration")}>打开配置中心</button>
+				<button className="secondary" onClick={() => onNavigate("readiness")}>运行就绪检查</button>
+				<button className="secondary" onClick={onCreate}>创建逐步任务</button>
+			</div>
+			<p className="welcome-safety"><strong>安全默认：</strong>新任务不会自动接受站点规则，也不会确认 live 上传。任何缺口都会以 blocker 和下一步操作明确展示。</p>
+		</section>
+	);
 }
 
 function DetailSkeleton() {

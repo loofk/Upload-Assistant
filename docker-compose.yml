@@ -39,6 +39,8 @@ services:
       UA_LISTEN_ADDR: 0.0.0.0:8080
       UA_DATABASE_URL: postgres://${UA_POSTGRES_USER:-upload_assistant}:${UA_POSTGRES_PASSWORD:?Set a random UA_POSTGRES_PASSWORD in .env}@postgres:5432/${UA_POSTGRES_DB:-upload_assistant}?sslmode=disable
       UA_DATA_DIR: /data
+      UA_DOWNLOADS_DIR: /downloads
+      UA_BACKUPS_DIR: /backups
       UA_LEGACY_DIR: /legacy
       UA_MASTER_KEY_FILE: /data/master-keys
       UA_LOG_LEVEL: ${UA_LOG_LEVEL:-info}
@@ -58,6 +60,7 @@ services:
       - "127.0.0.1:${UA_HTTP_PORT:-8080}:8080"
     volumes:
       - ${UA_DATA_SOURCE:-ua-data}:/data
+      - ${UA_BACKUPS_SOURCE:-ua-backups}:/backups
       - ${UA_DOWNLOADS_HOST_PATH:-./tmp/downloads}:/downloads:rw
       - ${UA_LEGACY_DATA_HOST_PATH:-./data}:/legacy:ro
     healthcheck:
@@ -72,6 +75,7 @@ services:
 volumes:
   ua-postgres:
   ua-data:
+  ua-backups:
 
 networks:
   ua-net:

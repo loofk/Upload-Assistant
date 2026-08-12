@@ -33,6 +33,11 @@ func (catalog *fakeSummaryCatalog) RegisterArtifact(_ context.Context, input wor
 
 func TestSummaryStepCompletesWithBoundEvidenceAndNoSourceSecret(t *testing.T) {
 	execution, store, catalog := summaryExecution(t)
+	for _, artifact := range catalog.artifacts {
+		if artifact.JobID != execution.Job.ID || artifact.ID == "" || artifact.Kind == "" || artifact.StoragePath == "" || len(artifact.SHA256) != 64 {
+			t.Fatalf("invalid summary fixture artifact = %#v", artifact)
+		}
+	}
 	output, err := (summaryExecutor{
 		artifacts: store, catalog: catalog, now: func() time.Time { return time.Unix(20_000, 0) },
 	}).Execute(context.Background(), execution)

@@ -298,14 +298,17 @@ func (executor targetTorrentExecutor) inputs(snapshotBody json.RawMessage) (targ
 	}
 
 	var targetPackage struct {
-		Prepared           bool   `json:"prepared"`
-		Target             string `json:"target"`
-		PackageArtifactID  string `json:"package_artifact_id"`
-		PackageSHA256      string `json:"package_sha256"`
-		PackageStoragePath string `json:"package_storage_path"`
-		PackageSizeBytes   int64  `json:"package_size_bytes"`
+		Prepared              bool   `json:"prepared"`
+		Target                string `json:"target"`
+		TargetRuleRevisionID  string `json:"target_rule_revision_id"`
+		TargetRuleFingerprint string `json:"target_rule_fingerprint"`
+		PackageArtifactID     string `json:"package_artifact_id"`
+		PackageSHA256         string `json:"package_sha256"`
+		PackageStoragePath    string `json:"package_storage_path"`
+		PackageSizeBytes      int64  `json:"package_size_bytes"`
 	}
 	if !decodePrevious(snapshot.PreviousSteps, "target_package", &targetPackage) || !targetPackage.Prepared || targetPackage.Target != parsed.Target ||
+		targetPackage.TargetRuleRevisionID == "" || len(targetPackage.TargetRuleFingerprint) != 64 ||
 		targetPackage.PackageArtifactID == "" || targetPackage.PackageSHA256 == "" || targetPackage.PackageStoragePath == "" {
 		return targetTorrentBindings{}, fmt.Errorf("target_package evidence is missing")
 	}
@@ -321,6 +324,11 @@ func (executor targetTorrentExecutor) inputs(snapshotBody json.RawMessage) (targ
 	if json.Unmarshal(packageBody, &prepared) != nil || prepared.SchemaVersion != 1 || prepared.Target != parsed.Target ||
 		prepared.Adapter == "" || prepared.Content.ManifestSHA256 != content.ManifestSHA256 {
 		return targetTorrentBindings{}, fmt.Errorf("target package artifact is invalid or mismatched")
+	}
+	targetRuleEvidence, validTargetRuleEvidence := prepared.Evidence["target_rule"].(map[string]any)
+	if !validTargetRuleEvidence || targetRuleEvidence["revision_id"] != targetPackage.TargetRuleRevisionID ||
+		targetRuleEvidence["fingerprint"] != targetPackage.TargetRuleFingerprint {
+		return targetTorrentBindings{}, fmt.Errorf("target package rule evidence is invalid or mismatched")
 	}
 	bindings.TargetAdapter = prepared.Adapter
 
@@ -362,6 +370,9 @@ func (executor targetTorrentExecutor) inputs(snapshotBody json.RawMessage) (targ
 	if !decodePrevious(snapshot.PreviousSteps, "target_rules", &rule) || rule.SiteCode != parsed.Target || rule.Role != "target" ||
 		!rule.Accepted || len(rule.Fingerprint) != 64 || len(rule.AcceptanceSHA) != 64 || rule.RevisionID == "" {
 		return targetTorrentBindings{}, fmt.Errorf("accepted target_rules evidence is missing")
+	}
+	if rule.RevisionID != targetPackage.TargetRuleRevisionID || !strings.EqualFold(rule.Fingerprint, targetPackage.TargetRuleFingerprint) {
+		return targetTorrentBindings{}, fmt.Errorf("target package was prepared against a different active rule revision")
 	}
 	bindings.RuleRevisionID, bindings.RuleFingerprint, bindings.RuleAcceptanceSHA = rule.RevisionID, rule.Fingerprint, rule.AcceptanceSHA
 	return bindings, nil

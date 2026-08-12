@@ -196,6 +196,7 @@ func (executor targetSeedVerifyExecutor) inputs(snapshotBody json.RawMessage) (t
 func equalTargetInjectOptions(left, right targetInjectOptionsReceipt) bool {
 	return left.DownloaderName == right.DownloaderName && left.SavePath == right.SavePath && left.Category == right.Category &&
 		slices.Equal(left.Tags, right.Tags) && left.DownloadLimit == right.DownloadLimit && left.UploadLimit == right.UploadLimit &&
+		left.NetworkClass == right.NetworkClass && left.SeedboxUploadLimit == right.SeedboxUploadLimit &&
 		left.ApplyLabels == right.ApplyLabels && left.SkipChecking == right.SkipChecking && left.Paused == right.Paused
 }
 

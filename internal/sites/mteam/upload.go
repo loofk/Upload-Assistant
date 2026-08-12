@@ -36,6 +36,14 @@ const (
 var _ sites.TargetUploadAdapter = (*Client)(nil)
 
 func (client *Client) Upload(ctx context.Context, request sites.TargetUploadRequest, actor workflow.Actor) (sites.TargetUploadEvidence, error) {
+	return sites.WithAccess(ctx, client.accessGate, sites.AccessRequest{
+		SiteCode: "MTEAM", Operation: "target.upload", Class: sites.AccessGeneral,
+	}, func(access *sites.AccessResult) (sites.TargetUploadEvidence, error) {
+		return client.upload(ctx, request, actor, access)
+	})
+}
+
+func (client *Client) upload(ctx context.Context, request sites.TargetUploadRequest, actor workflow.Actor, access *sites.AccessResult) (sites.TargetUploadEvidence, error) {
 	fields, inspection, err := validateUploadRequest(request)
 	if err != nil {
 		return sites.TargetUploadEvidence{}, sites.NewAdapterError("target_upload_request_invalid", err.Error(), false, err)
@@ -91,6 +99,7 @@ func (client *Client) Upload(ctx context.Context, request sites.TargetUploadRequ
 		)
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, maxAPIResponse+1))
 	if readErr != nil || len(responseBody) > maxAPIResponse {
 		client.auditUploadOutcome(ctx, request, configurationSHA, "unknown", "unreadable_response", "", actor)
@@ -100,6 +109,7 @@ func (client *Client) Upload(ctx context.Context, request sites.TargetUploadRequ
 	}
 	responseDigest := sha256.Sum256(responseBody)
 	responseSHA := hex.EncodeToString(responseDigest[:])
+	access.ResponseSHA256 = responseSHA
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		client.auditUploadOutcome(ctx, request, configurationSHA, "rejected", "authentication_failed", responseSHA, actor)
 		return sites.TargetUploadEvidence{}, sites.NewAdapterError("site_authentication_failed", "MTEAM rejected the API key before accepting the upload", false, nil)

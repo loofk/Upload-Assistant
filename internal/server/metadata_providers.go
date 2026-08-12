@@ -12,6 +12,7 @@ import (
 )
 
 type MetadataProviderService interface {
+	Probe(context.Context, string, workflow.Actor) (metadataproviders.ProbeResult, error)
 	Resolve(context.Context, string, metadataproviders.ResolveRequest, workflow.Actor) (metadataproviders.ResolveResult, error)
 }
 
@@ -19,7 +20,21 @@ type metadataProviderAPI struct{ service MetadataProviderService }
 
 func registerMetadataProviderRoutes(mux *http.ServeMux, service MetadataProviderService) {
 	api := metadataProviderAPI{service: service}
+	mux.HandleFunc("POST /api/v2/metadata-providers/{name}/probe", api.probe)
 	mux.HandleFunc("POST /api/v2/metadata-providers/{name}/resolve", api.resolve)
+}
+
+func (api metadataProviderAPI) probe(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "config:manage")
+	if !ok {
+		return
+	}
+	result, err := api.service.Probe(r.Context(), strings.TrimSpace(r.PathValue("name")), workflow.Actor{Type: "user", ID: principal.UserID})
+	if err != nil {
+		writeMetadataProviderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "ready", "probe": result, "blockers": []any{}, "next_actions": []any{}})
 }
 
 func (api metadataProviderAPI) resolve(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +68,17 @@ func writeMetadataProviderError(w http.ResponseWriter, err error) {
 	case errors.Is(err, integrations.ErrValidation), errors.Is(err, metadataproviders.ErrValidation):
 		writeProblem(w, http.StatusBadRequest, "invalid_metadata_provider_request", err.Error())
 	default:
-		writeProblem(w, http.StatusBadGateway, "metadata_provider_request_failed", "the metadata provider request failed; inspect its health and audit events")
+		code := metadataproviders.ErrorCode(err)
+		if code == "" {
+			writeProblem(w, http.StatusBadGateway, "metadata_provider_request_failed", "the metadata provider request failed; inspect its health and audit events")
+			return
+		}
+		status := http.StatusBadGateway
+		if code == "provider_timeout" {
+			status = http.StatusGatewayTimeout
+		} else if code == "provider_rate_limited" {
+			status = http.StatusTooManyRequests
+		}
+		writeProblem(w, status, "metadata_"+code, metadataproviders.SafeErrorDetail(err))
 	}
 }

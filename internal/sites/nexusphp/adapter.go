@@ -44,10 +44,11 @@ type Adapter struct {
 	profile    Profile
 	baseURL    *url.URL
 	provider   RuntimeSiteProvider
+	accessGate sites.AccessGate
 	httpClient *http.Client
 }
 
-func New(profile Profile, provider RuntimeSiteProvider, client *http.Client) (*Adapter, error) {
+func New(profile Profile, provider RuntimeSiteProvider, accessGate sites.AccessGate, client *http.Client) (*Adapter, error) {
 	profile.SiteCode = strings.ToUpper(strings.TrimSpace(profile.SiteCode))
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(profile.BaseURL), "/"))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
@@ -56,8 +57,8 @@ func New(profile Profile, provider RuntimeSiteProvider, client *http.Client) (*A
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, fmt.Errorf("NexusPHP base URL must not contain credentials, query, or fragment")
 	}
-	if profile.SiteCode == "" || provider == nil {
-		return nil, fmt.Errorf("NexusPHP site code and credential provider are required")
+	if profile.SiteCode == "" || provider == nil || accessGate == nil {
+		return nil, fmt.Errorf("NexusPHP site code, credential provider, and access gate are required")
 	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -71,12 +72,20 @@ func New(profile Profile, provider RuntimeSiteProvider, client *http.Client) (*A
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	return &Adapter{profile: profile, baseURL: parsed, provider: provider, httpClient: client}, nil
+	return &Adapter{profile: profile, baseURL: parsed, provider: provider, accessGate: accessGate, httpClient: client}, nil
 }
 
 func (adapter *Adapter) SiteCode() string { return adapter.profile.SiteCode }
 
 func (adapter *Adapter) Inspect(ctx context.Context, reference sites.SourceReference) (sites.SourceInfo, error) {
+	return sites.WithAccess(ctx, adapter.accessGate, sites.AccessRequest{
+		SiteCode: adapter.profile.SiteCode, Operation: "source.inspect", Class: sites.AccessGeneral,
+	}, func(access *sites.AccessResult) (sites.SourceInfo, error) {
+		return adapter.inspect(ctx, reference, access)
+	})
+}
+
+func (adapter *Adapter) inspect(ctx context.Context, reference sites.SourceReference, access *sites.AccessResult) (sites.SourceInfo, error) {
 	if err := adapter.validateReference(reference); err != nil {
 		return sites.SourceInfo{}, err
 	}
@@ -96,6 +105,7 @@ func (adapter *Adapter) Inspect(ctx context.Context, reference sites.SourceRefer
 		return sites.SourceInfo{}, err
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	if err := validateStatus(response, "source details"); err != nil {
 		return sites.SourceInfo{}, err
 	}
@@ -103,6 +113,8 @@ func (adapter *Adapter) Inspect(ctx context.Context, reference sites.SourceRefer
 	if err != nil {
 		return sites.SourceInfo{}, sites.NewAdapterError("source_details_invalid", "source details response is too large or unreadable", false, err)
 	}
+	digest := sha256.Sum256(body)
+	access.ResponseSHA256 = hex.EncodeToString(digest[:])
 	if !looksLikeHTML(response.Header.Get("Content-Type"), body) {
 		return sites.SourceInfo{}, sites.NewAdapterError("source_details_invalid", "source details response is not HTML", false, nil)
 	}
@@ -114,6 +126,14 @@ func (adapter *Adapter) Inspect(ctx context.Context, reference sites.SourceRefer
 }
 
 func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceReference) (sites.DownloadedTorrent, error) {
+	return sites.WithAccess(ctx, adapter.accessGate, sites.AccessRequest{
+		SiteCode: adapter.profile.SiteCode, Operation: "source.torrent_download", Class: sites.AccessGeneral,
+	}, func(access *sites.AccessResult) (sites.DownloadedTorrent, error) {
+		return adapter.download(ctx, reference, access)
+	})
+}
+
+func (adapter *Adapter) download(ctx context.Context, reference sites.SourceReference, access *sites.AccessResult) (sites.DownloadedTorrent, error) {
 	if err := adapter.validateReference(reference); err != nil {
 		return sites.DownloadedTorrent{}, err
 	}
@@ -135,6 +155,7 @@ func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceRefe
 		return sites.DownloadedTorrent{}, err
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	if err := validateStatus(response, "source torrent"); err != nil {
 		return sites.DownloadedTorrent{}, err
 	}
@@ -142,6 +163,8 @@ func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceRefe
 	if err != nil {
 		return sites.DownloadedTorrent{}, sites.NewAdapterError("source_torrent_invalid", "source torrent response is too large or unreadable", false, err)
 	}
+	digest := sha256.Sum256(body)
+	access.ResponseSHA256 = hex.EncodeToString(digest[:])
 	if looksLikeHTML(response.Header.Get("Content-Type"), body) || looksLikeLogin(string(body)) {
 		return sites.DownloadedTorrent{}, sites.NewAdapterError("site_authentication_failed", "source site did not return a torrent; refresh cookie/passkey credentials", false, nil)
 	}
@@ -149,7 +172,6 @@ func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceRefe
 	if err != nil {
 		return sites.DownloadedTorrent{}, sites.NewAdapterError("source_torrent_invalid", "source site returned invalid torrent metainfo", false, err)
 	}
-	digest := sha256.Sum256(body)
 	// A tracker-controlled Content-Disposition filename is not evidence and can
 	// contain account-specific material. Persist a deterministic local name.
 	filename := adapter.profile.SiteCode + "-" + reference.TorrentID + ".torrent"
@@ -160,6 +182,14 @@ func (adapter *Adapter) Download(ctx context.Context, reference sites.SourceRefe
 }
 
 func (adapter *Adapter) ListCandidates(ctx context.Context, request sites.CandidateScanRequest) (sites.CandidateScanEvidence, error) {
+	return sites.WithAccess(ctx, adapter.accessGate, sites.AccessRequest{
+		SiteCode: adapter.profile.SiteCode, Operation: "source.candidates", Class: sites.AccessSearch,
+	}, func(access *sites.AccessResult) (sites.CandidateScanEvidence, error) {
+		return adapter.listCandidates(ctx, request, access)
+	})
+}
+
+func (adapter *Adapter) listCandidates(ctx context.Context, request sites.CandidateScanRequest, access *sites.AccessResult) (sites.CandidateScanEvidence, error) {
 	if request.Limit <= 0 {
 		request.Limit = 20
 	}
@@ -185,6 +215,7 @@ func (adapter *Adapter) ListCandidates(ctx context.Context, request sites.Candid
 		return sites.CandidateScanEvidence{}, err
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	if err := validateStatus(response, "source candidate listing"); err != nil {
 		return sites.CandidateScanEvidence{}, err
 	}
@@ -192,6 +223,8 @@ func (adapter *Adapter) ListCandidates(ctx context.Context, request sites.Candid
 	if err != nil || !looksLikeHTML(response.Header.Get("Content-Type"), body) {
 		return sites.CandidateScanEvidence{}, sites.NewAdapterError("source_candidate_listing_invalid", "source candidate listing is unreadable or not HTML", false, err)
 	}
+	digest := sha256.Sum256(body)
+	access.ResponseSHA256 = hex.EncodeToString(digest[:])
 	if looksLikeLogin(string(body)) {
 		return sites.CandidateScanEvidence{}, sites.NewAdapterError("site_authentication_failed", "source site returned a login page; refresh the cookie credential", false, nil)
 	}

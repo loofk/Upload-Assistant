@@ -10,17 +10,17 @@ var downloaderAdapterCatalog = []DownloaderAdapterCapability{
 	{
 		Adapter: "qbittorrent", DisplayName: "qBittorrent", RuntimeSupported: true,
 		CredentialFields: []string{"api_key", "password", "username"},
-		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: true, Tags: true, SkipChecking: true},
+		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListTorrents: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: true, Tags: true, SkipChecking: true},
 	},
 	{
 		Adapter: "transmission", DisplayName: "Transmission", RuntimeSupported: true,
 		CredentialFields: []string{"password", "username"},
-		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: true, Tags: true, SkipChecking: false},
+		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListTorrents: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: true, Tags: true, SkipChecking: false},
 	},
 	{
 		Adapter: "deluge", DisplayName: "Deluge", RuntimeSupported: true,
 		CredentialFields: []string{"password"},
-		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: false, Tags: false, SkipChecking: false},
+		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListTorrents: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: false, Tags: false, SkipChecking: false},
 		Constraints: []string{
 			"endpoint must be the Deluge Web JSON-RPC service and the Web session must already be connected to a daemon",
 			"authentication uses the Deluge Web password; native daemon RPC credentials are not accepted",
@@ -31,7 +31,7 @@ var downloaderAdapterCatalog = []DownloaderAdapterCapability{
 	{
 		Adapter: "rtorrent", DisplayName: "rTorrent", RuntimeSupported: true,
 		CredentialFields: []string{"password", "username"},
-		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: true, Tags: true, SkipChecking: false},
+		Operations:       DownloaderOperations{Probe: true, AddTorrent: true, Inspect: true, ListTorrents: true, ListFiles: true, SetLimits: true, WaitComplete: true, Category: true, Tags: true, SkipChecking: false},
 		Constraints: []string{
 			"category and tags are stored as one comma-separated custom1 label",
 			"per-torrent named throttles require non-zero effective global throttles and are verified after assignment",

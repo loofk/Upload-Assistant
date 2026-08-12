@@ -34,6 +34,7 @@ type PathMapping struct {
 type DownloaderInput struct {
 	Adapter      string            `json:"adapter"`
 	Enabled      *bool             `json:"enabled,omitempty"`
+	NetworkClass string            `json:"network_class,omitempty"`
 	Config       EndpointConfig    `json:"config"`
 	Credentials  map[string]string `json:"credentials,omitempty"`
 	PathMappings []PathMapping     `json:"path_mappings,omitempty"`
@@ -43,6 +44,7 @@ type DownloaderOperations struct {
 	Probe        bool `json:"probe"`
 	AddTorrent   bool `json:"add_torrent"`
 	Inspect      bool `json:"inspect"`
+	ListTorrents bool `json:"list_torrents"`
 	ListFiles    bool `json:"list_files"`
 	SetLimits    bool `json:"set_limits"`
 	WaitComplete bool `json:"wait_complete"`
@@ -69,6 +71,7 @@ type Downloader struct {
 	Name              string                      `json:"name"`
 	Adapter           string                      `json:"adapter"`
 	Enabled           bool                        `json:"enabled"`
+	NetworkClass      string                      `json:"network_class"`
 	Config            json.RawMessage             `json:"config"`
 	CredentialFields  []string                    `json:"credential_fields"`
 	PathMappings      []PathMapping               `json:"path_mappings"`
@@ -116,7 +119,21 @@ type RuntimeImageHost struct {
 
 type NotificationChannelConfig struct {
 	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
+	EventTypes     []string       `json:"event_types"`
 	Options        map[string]any `json:"options,omitempty"`
+}
+
+var NotificationEventTypes = []string{
+	"job.created",
+	"job.paused",
+	"job.resumed",
+	"job.cancelled",
+	"job.completed",
+	"step.blocked",
+	"step.failed",
+	"step.deferred",
+	"target_package.revision_requested",
+	"job.reconciliation_acknowledged",
 }
 
 type NotificationChannelInput struct {
@@ -346,6 +363,15 @@ func validateNotificationChannelConfig(config NotificationChannelConfig) ([]byte
 	if containsSecretLikeKey(config.Options) {
 		return nil, fmt.Errorf("%w: secret-like options must be supplied through credentials", ErrValidation)
 	}
+	for index, eventType := range config.EventTypes {
+		eventType = strings.TrimSpace(eventType)
+		if !slices.Contains(NotificationEventTypes, eventType) {
+			return nil, fmt.Errorf("%w: unsupported notification event type %q", ErrValidation, eventType)
+		}
+		config.EventTypes[index] = eventType
+	}
+	slices.Sort(config.EventTypes)
+	config.EventTypes = slices.Compact(config.EventTypes)
 	if config.Options == nil {
 		config.Options = map[string]any{}
 	}

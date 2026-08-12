@@ -50,6 +50,19 @@ func TestAuthBootstrapTokenAndEncryptedSecret(t *testing.T) {
 	if _, err := auth.BootstrapAdmin(ctx, "second-admin", "correct horse battery staple"); !errors.Is(err, ErrBootstrap) {
 		t.Fatalf("second BootstrapAdmin() error = %v, want ErrBootstrap", err)
 	}
+	recovery, err := auth.IssueAdminToken(ctx, "integration-admin", "web-recovery")
+	if err != nil {
+		t.Fatalf("IssueAdminToken() error = %v", err)
+	}
+	if recovery.Token == result.Token || recovery.Name != "web-recovery" {
+		t.Fatalf("IssueAdminToken() returned an invalid recovery result")
+	}
+	if principal, err := auth.AuthenticateToken(ctx, recovery.Token); err != nil || principal.UserID != result.UserID {
+		t.Fatalf("AuthenticateToken() recovery principal/error = %#v/%v", principal, err)
+	}
+	if _, err := auth.IssueAdminToken(ctx, "missing-admin", "web-recovery"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("IssueAdminToken() missing administrator error = %v, want ErrUnauthorized", err)
+	}
 
 	masterKey := make([]byte, 32)
 	if _, err := rand.Read(masterKey); err != nil {

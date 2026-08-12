@@ -39,10 +39,13 @@ func TestCandidateEvaluationRequiresDownloadMetadataAndClearDuplicate(t *testing
 	targetPolicy := policy
 	targetPolicy.Site = rules.Site{Code: "MTEAM", Roles: []string{"target"}}
 	targetPolicy.Automation = rules.Automation{Upload: true, Retorrent: true}
-	result := executor.evaluateOne(context.Background(), dailyCandidateInput{Source: "U2", Target: "MTEAM"}, candidateRuleSnapshot{
+	result, err := executor.evaluateOne(context.Background(), dailyCandidateInput{Source: "U2", Target: "MTEAM"}, candidateRuleSnapshot{
 		Source: candidateRuleSite{SiteCode: "U2", Fingerprint: "source", Policy: policy},
 		Target: candidateRuleSite{SiteCode: "MTEAM", Fingerprint: "target", Policy: targetPolicy},
 	}, sites.SourceCandidate{Tracker: "U2", TorrentID: "7", DetailsURL: "https://u2.dmhy.org/details.php?id=7", Title: "Fixture", Downloadable: true, Free: true, SizeBytes: 1024, PublishedAt: &published}, workflow.Actor{Type: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !result.Ready || len(result.Blockers) != 0 || result.DuplicateCheck == nil || result.Score <= 0 {
 		t.Fatalf("candidate evaluation = %#v", result)
 	}

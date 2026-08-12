@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -27,11 +29,48 @@ const (
 )
 
 var (
-	ErrValidation  = errors.New("metadata provider request is invalid")
-	imdbPattern    = regexp.MustCompile(`^tt[0-9]{5,12}$`)
-	numericPattern = regexp.MustCompile(`^[0-9]{1,16}$`)
-	doubanURL      = regexp.MustCompile(`https?://movie\.douban\.com/subject/([0-9]{1,16})/?`)
+	ErrValidation       = errors.New("metadata provider request is invalid")
+	errRedirectDisabled = errors.New("metadata provider redirects are disabled")
+	imdbPattern         = regexp.MustCompile(`^tt[0-9]{5,12}$`)
+	numericPattern      = regexp.MustCompile(`^[0-9]{1,16}$`)
+	doubanURL           = regexp.MustCompile(`https?://movie\.douban\.com/subject/([0-9]{1,16})/?`)
 )
+
+// ProviderError carries only a stable classification and a bounded message
+// that is safe to return to operators. It deliberately never retains the
+// request URL because legacy metadata APIs put credentials in query strings.
+type ProviderError struct {
+	Code    string
+	Message string
+	cause   error
+}
+
+func (err *ProviderError) Error() string { return err.Message }
+
+func (err *ProviderError) Unwrap() error { return err.cause }
+
+func providerError(code, message string, cause error) error {
+	return &ProviderError{Code: code, Message: message, cause: cause}
+}
+
+func ErrorCode(err error) string {
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		return providerErr.Code
+	}
+	return ""
+}
+
+func SafeErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.TrimSpace(err.Error())
+	if len(detail) > 512 {
+		detail = detail[:512]
+	}
+	return detail
+}
 
 type RuntimeStore interface {
 	GetRuntimeMetadataProvider(context.Context, string) (integrations.RuntimeMetadataProvider, error)
@@ -78,13 +117,57 @@ type ResolveResult struct {
 	Calls               []CallEvidence `json:"calls"`
 }
 
+// ProbeResult deliberately excludes titles, descriptions and other remote
+// content. A probe verifies the configured production contract with a stable,
+// public reference and persists the same bounded evidence as a normal lookup.
+type ProbeResult struct {
+	Name                string         `json:"name"`
+	Adapter             string         `json:"adapter"`
+	Status              string         `json:"status"`
+	Matched             bool           `json:"matched"`
+	ConfigurationSHA256 string         `json:"configuration_sha256"`
+	QuerySHA256         string         `json:"query_sha256"`
+	Calls               []CallEvidence `json:"calls"`
+}
+
 func NewManager(store RuntimeStore, client *http.Client) *Manager {
 	if client == nil {
 		client = &http.Client{}
 	}
 	clone := *client
-	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("redirects are disabled") }
+	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return errRedirectDisabled }
 	return &Manager{store: store, client: &clone}
+}
+
+func (m *Manager) Probe(ctx context.Context, name string, actor workflow.Actor) (ProbeResult, error) {
+	runtime, err := m.store.GetRuntimeMetadataProvider(ctx, name)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	var request ResolveRequest
+	switch runtime.Adapter {
+	case "tmdb":
+		request = ResolveRequest{TMDbID: "550", TMDbType: "movie"}
+	case "ptgen":
+		request = ResolveRequest{IMDbID: "tt0111161"}
+	default:
+		return ProbeResult{}, fmt.Errorf("%w: unsupported adapter", ErrValidation)
+	}
+	result, err := m.Resolve(ctx, name, request, actor)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	if !result.Matched {
+		_ = m.store.RecordMetadataProviderHealth(ctx, runtime.Name, "failed", map[string]any{
+			"operation": "probe", "adapter": runtime.Adapter, "error_code": "probe_reference_not_found",
+			"configuration_sha256": runtime.ConfigurationSHA256, "query_sha256": result.QuerySHA256,
+		}, actor)
+		return ProbeResult{}, fmt.Errorf("metadata provider did not resolve the stable probe reference")
+	}
+	return ProbeResult{
+		Name: result.Name, Adapter: result.Adapter, Status: "ready", Matched: result.Matched,
+		ConfigurationSHA256: result.ConfigurationSHA256, QuerySHA256: result.QuerySHA256, Calls: result.Calls,
+	}, nil
 }
 
 func (m *Manager) Resolve(ctx context.Context, name string, input ResolveRequest, actor workflow.Actor) (ResolveResult, error) {
@@ -110,8 +193,13 @@ func (m *Manager) Resolve(ctx context.Context, name string, input ResolveRequest
 		err = fmt.Errorf("%w: unsupported adapter", ErrValidation)
 	}
 	if err != nil {
+		errorCode := ErrorCode(err)
+		if errorCode == "" {
+			errorCode = "request_failed"
+		}
 		_ = m.store.RecordMetadataProviderHealth(ctx, runtime.Name, "failed", map[string]any{
-			"operation": "resolve", "adapter": runtime.Adapter, "error_code": "request_failed",
+			"operation": "resolve", "adapter": runtime.Adapter, "error_code": errorCode,
+			"error_detail":         SafeErrorDetail(err),
 			"configuration_sha256": runtime.ConfigurationSHA256, "query_sha256": result.QuerySHA256,
 		}, actor)
 		return ResolveResult{}, err
@@ -220,8 +308,11 @@ func (m *Manager) resolvePTGen(ctx context.Context, runtime integrations.Runtime
 		}
 	}
 	description := strings.TrimSpace(first.Format)
+	if description == "" {
+		return Identity{}, "", nil, providerError("provider_output_missing", "metadata provider returned no PTGen description", nil)
+	}
 	if len([]byte(description)) > maxDescriptionBytes || !utf8.ValidString(description) || strings.ContainsRune(description, '\x00') {
-		return Identity{}, "", nil, fmt.Errorf("metadata provider returned an invalid or oversized PTGen description")
+		return Identity{}, "", nil, providerError("provider_output_invalid", "metadata provider returned an invalid or oversized PTGen description", nil)
 	}
 	return identity, description, calls, nil
 }
@@ -243,7 +334,7 @@ func (m *Manager) requestPTGen(ctx context.Context, runtime integrations.Runtime
 		return ptgenResponse{}, CallEvidence{}, nil, err
 	}
 	if !response.Success || hasJSONError(response.Error) {
-		return ptgenResponse{}, CallEvidence{}, nil, fmt.Errorf("metadata provider returned an unsuccessful PTGen response")
+		return ptgenResponse{}, CallEvidence{}, nil, providerError("provider_rejected", "metadata provider returned an unsuccessful PTGen response", nil)
 	}
 	return response, call, raw, nil
 }
@@ -281,25 +372,72 @@ func (m *Manager) doJSONEndpoint(ctx context.Context, runtime integrations.Runti
 	if err != nil {
 		// net/http errors can include the complete request URL. That URL contains
 		// query credentials for these legacy APIs, so never propagate it.
-		return CallEvidence{}, nil, fmt.Errorf("metadata provider request failed")
+		return CallEvidence{}, nil, classifyTransportError(err, parsed.Hostname(), requestCtx.Err())
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return CallEvidence{}, nil, fmt.Errorf("read metadata provider response: %w", err)
+		return CallEvidence{}, nil, providerError("provider_response_unreadable", "metadata provider response could not be read", err)
 	}
 	if len(body) > maxResponseBytes {
-		return CallEvidence{}, nil, fmt.Errorf("metadata provider response exceeds %d bytes", maxResponseBytes)
+		return CallEvidence{}, nil, providerError("provider_response_too_large", fmt.Sprintf("metadata provider response exceeds %d bytes", maxResponseBytes), nil)
 	}
 	queryEvidence, _ := json.Marshal(map[string]any{"method": method, "endpoint_path": parsed.Path, "query": publicQuery})
 	call := CallEvidence{Purpose: purpose, QuerySHA256: sha256Hex(queryEvidence), ResponseSHA256: sha256Hex(body), StatusCode: response.StatusCode}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return CallEvidence{}, nil, fmt.Errorf("metadata provider returned HTTP %d", response.StatusCode)
+		return CallEvidence{}, nil, classifyHTTPStatus(response.StatusCode)
 	}
 	if err := json.Unmarshal(body, target); err != nil {
-		return CallEvidence{}, nil, fmt.Errorf("decode metadata provider response: %w", err)
+		return CallEvidence{}, nil, providerError("provider_response_invalid", "metadata provider returned invalid JSON", err)
 	}
 	return call, body, nil
+}
+
+func classifyTransportError(err error, hostname string, requestContextErr error) error {
+	if errors.Is(requestContextErr, context.Canceled) || errors.Is(err, context.Canceled) {
+		return providerError("provider_request_cancelled", "metadata provider request was cancelled", err)
+	}
+	if errors.Is(requestContextErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return providerError("provider_timeout", "metadata provider request timed out", err)
+	}
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(hostname)), ".workers.dev") {
+		return providerError(
+			"provider_workers_dev_unreachable",
+			"the configured workers.dev endpoint is unreachable from this runtime; bind the Worker to a reachable custom domain and save its /api URL",
+			err,
+		)
+	}
+	if errors.Is(err, errRedirectDisabled) {
+		return providerError("provider_redirect_rejected", "metadata provider returned a redirect; save the final HTTPS API endpoint", err)
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return providerError("provider_dns_failed", "metadata provider hostname could not be resolved", err)
+	}
+	var hostnameErr x509.HostnameError
+	var authorityErr x509.UnknownAuthorityError
+	var certificateErr x509.CertificateInvalidError
+	if errors.As(err, &hostnameErr) || errors.As(err, &authorityErr) || errors.As(err, &certificateErr) {
+		return providerError("provider_tls_failed", "metadata provider TLS certificate validation failed", err)
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return providerError("provider_timeout", "metadata provider request timed out", err)
+	}
+	return providerError("provider_connection_failed", "metadata provider connection failed", err)
+}
+
+func classifyHTTPStatus(statusCode int) error {
+	switch {
+	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+		return providerError("provider_authentication_failed", fmt.Sprintf("metadata provider rejected authentication with HTTP %d", statusCode), nil)
+	case statusCode == http.StatusTooManyRequests:
+		return providerError("provider_rate_limited", "metadata provider rate limit was exceeded (HTTP 429)", nil)
+	case statusCode >= 500:
+		return providerError("provider_upstream_failed", fmt.Sprintf("metadata provider returned HTTP %d", statusCode), nil)
+	default:
+		return providerError("provider_http_error", fmt.Sprintf("metadata provider returned HTTP %d", statusCode), nil)
+	}
 }
 
 func normalizeRequest(input ResolveRequest) ResolveRequest {

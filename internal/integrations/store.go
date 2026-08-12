@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/loofk/upload-assistant/v2/internal/operations"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
@@ -211,6 +213,13 @@ func (s *Store) AuditSiteAction(ctx context.Context, siteCode, action string, de
 func (s *Store) UpsertDownloader(ctx context.Context, name string, input DownloaderInput, actor workflow.Actor) (Downloader, error) {
 	name = strings.TrimSpace(name)
 	input.Adapter = strings.ToLower(strings.TrimSpace(input.Adapter))
+	input.NetworkClass = strings.ToLower(strings.TrimSpace(input.NetworkClass))
+	if input.NetworkClass == "" {
+		input.NetworkClass = "unknown"
+	}
+	if input.NetworkClass != "unknown" && input.NetworkClass != "home" && input.NetworkClass != "seedbox" {
+		return Downloader{}, fmt.Errorf("%w: downloader network_class must be unknown, home, or seedbox", ErrValidation)
+	}
 	if err := validateResourceName("downloader", name); err != nil {
 		return Downloader{}, err
 	}
@@ -264,21 +273,21 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 	var secretID string
 	var healthChecked pgtype.Timestamptz
 	err = tx.QueryRow(ctx, `
-		INSERT INTO downloaders(name, adapter, enabled, config, secret_id)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO downloaders(name, adapter, enabled, network_class, config, secret_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (name) DO UPDATE SET
-			adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled, config = EXCLUDED.config,
+			adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled, network_class = EXCLUDED.network_class, config = EXCLUDED.config,
 			secret_id = CASE
 				WHEN downloaders.adapter IS DISTINCT FROM EXCLUDED.adapter THEN EXCLUDED.secret_id
 				ELSE COALESCE(EXCLUDED.secret_id, downloaders.secret_id)
 			END,
 			updated_at = now()
-		RETURNING id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
+		RETURNING id::text, name, adapter, enabled, network_class, config, COALESCE(secret_id::text, ''),
 		          health_status, last_health_check_at, created_at, updated_at`,
-		name, input.Adapter, enabled, config, newSecretID,
+		name, input.Adapter, enabled, input.NetworkClass, config, newSecretID,
 	).Scan(
 		&downloader.ID, &downloader.Name, &downloader.Adapter, &downloader.Enabled,
-		&downloader.Config, &secretID, &downloader.HealthStatus, &healthChecked,
+		&downloader.NetworkClass, &downloader.Config, &secretID, &downloader.HealthStatus, &healthChecked,
 		&downloader.CreatedAt, &downloader.UpdatedAt,
 	)
 	if err != nil {
@@ -301,7 +310,7 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 		}
 	}
 	if err := audit(ctx, tx, actor, "downloader.upsert", "downloader", downloader.ID, map[string]any{
-		"name": name, "adapter": input.Adapter, "enabled": enabled,
+		"name": name, "adapter": input.Adapter, "enabled": enabled, "network_class": input.NetworkClass,
 		"credential_fields": credentialFields, "path_mapping_count": len(input.PathMappings),
 	}); err != nil {
 		return Downloader{}, err
@@ -324,7 +333,7 @@ func (s *Store) UpsertDownloader(ctx context.Context, name string, input Downloa
 
 func (s *Store) ListDownloaders(ctx context.Context) ([]Downloader, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
+		SELECT id::text, name, adapter, enabled, network_class, config, COALESCE(secret_id::text, ''),
 		       health_status, last_health_check_at, created_at, updated_at
 		FROM downloaders ORDER BY name`)
 	if err != nil {
@@ -337,7 +346,7 @@ func (s *Store) ListDownloaders(ctx context.Context) ([]Downloader, error) {
 		var secretID string
 		var healthChecked pgtype.Timestamptz
 		if err := rows.Scan(
-			&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.Config, &secretID,
+			&item.ID, &item.Name, &item.Adapter, &item.Enabled, &item.NetworkClass, &item.Config, &secretID,
 			&item.HealthStatus, &healthChecked, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan downloader: %w", err)
@@ -365,10 +374,10 @@ func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeD
 	var secretID string
 	var healthChecked pgtype.Timestamptz
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, name, adapter, enabled, config, COALESCE(secret_id::text, ''),
+		SELECT id::text, name, adapter, enabled, network_class, config, COALESCE(secret_id::text, ''),
 		       health_status, last_health_check_at, created_at, updated_at
 		FROM downloaders WHERE name = $1`, strings.TrimSpace(name)).Scan(
-		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.Config,
+		&runtime.ID, &runtime.Name, &runtime.Adapter, &runtime.Enabled, &runtime.NetworkClass, &runtime.Config,
 		&secretID, &runtime.HealthStatus, &healthChecked, &runtime.CreatedAt, &runtime.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -416,7 +425,7 @@ func (s *Store) GetRuntimeDownloader(ctx context.Context, name string) (RuntimeD
 	}
 	slices.Sort(runtime.CredentialFields)
 	configurationHash := sha256.New()
-	_, _ = configurationHash.Write([]byte(runtime.ID + "\x00" + runtime.Name + "\x00" + runtime.Adapter + "\x00" + runtime.UpdatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + secretID + "\x00"))
+	_, _ = configurationHash.Write([]byte(runtime.ID + "\x00" + runtime.Name + "\x00" + runtime.Adapter + "\x00" + runtime.NetworkClass + "\x00" + runtime.UpdatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + secretID + "\x00"))
 	_, _ = configurationHash.Write(runtime.Config)
 	for _, mapping := range runtime.PathMappings {
 		_, _ = configurationHash.Write([]byte("\x00" + mapping.RemotePath + "\x00" + mapping.LocalPath + "\x00" + strconv.Itoa(mapping.Priority)))
@@ -513,13 +522,39 @@ func (s *Store) UpsertImageHost(ctx context.Context, name string, input ImageHos
 	if err := validateResourceName("image host adapter", input.Adapter); err != nil {
 		return ImageHost{}, err
 	}
+	requiredCredentialFields, supported := imageHostCredentialFields(input.Adapter)
+	if !supported {
+		return ImageHost{}, fmt.Errorf("%w: unsupported image host adapter %q", ErrValidation, input.Adapter)
+	}
 	config, err := validateEndpointConfig(input.Config)
 	if err != nil {
+		return ImageHost{}, err
+	}
+	if err := ValidateImageHostEndpoint(input.Adapter, input.Config.Endpoint); err != nil {
 		return ImageHost{}, err
 	}
 	credentialFields, credentialPayload, err := validateCredentials(input.Credentials)
 	if err != nil {
 		return ImageHost{}, err
+	}
+	if len(credentialFields) > 0 && !slices.Equal(credentialFields, requiredCredentialFields) {
+		if len(requiredCredentialFields) == 0 {
+			return ImageHost{}, fmt.Errorf("%w: %s does not accept credentials", ErrValidation, input.Adapter)
+		}
+		return ImageHost{}, fmt.Errorf("%w: %s only accepts %s credentials", ErrValidation, input.Adapter, strings.Join(requiredCredentialFields, ", "))
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	if enabled && len(requiredCredentialFields) > 0 && len(credentialFields) == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM image_hosts WHERE name = $1 AND adapter = $2 AND secret_id IS NOT NULL)`, name, input.Adapter).Scan(&exists); err != nil {
+			return ImageHost{}, fmt.Errorf("check image host credentials: %w", err)
+		}
+		if !exists {
+			return ImageHost{}, fmt.Errorf("%w: enabled %s requires %s", ErrValidation, input.Adapter, strings.Join(requiredCredentialFields, " and "))
+		}
 	}
 	var newSecretID any
 	if credentialPayload != nil {
@@ -528,10 +563,6 @@ func (s *Store) UpsertImageHost(ctx context.Context, name string, input ImageHos
 			return ImageHost{}, err
 		}
 		newSecretID = secretID
-	}
-	enabled := true
-	if input.Enabled != nil {
-		enabled = *input.Enabled
 	}
 	if input.Priority == 0 {
 		input.Priority = 100
@@ -549,7 +580,12 @@ func (s *Store) UpsertImageHost(ctx context.Context, name string, input ImageHos
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (name) DO UPDATE SET
 			adapter = EXCLUDED.adapter, enabled = EXCLUDED.enabled, priority = EXCLUDED.priority,
-			config = EXCLUDED.config, secret_id = COALESCE(EXCLUDED.secret_id, image_hosts.secret_id), updated_at = now()
+			config = EXCLUDED.config,
+			secret_id = CASE
+				WHEN image_hosts.adapter IS DISTINCT FROM EXCLUDED.adapter THEN EXCLUDED.secret_id
+				ELSE COALESCE(EXCLUDED.secret_id, image_hosts.secret_id)
+			END,
+			updated_at = now()
 		RETURNING id::text, name, adapter, enabled, priority, config, COALESCE(secret_id::text, ''),
 		          health_status, last_health_check_at, created_at, updated_at`,
 		name, input.Adapter, enabled, input.Priority, config, newSecretID,
@@ -577,6 +613,17 @@ func (s *Store) UpsertImageHost(ctx context.Context, name string, input ImageHos
 		imageHost.CredentialFields = credentialFields
 	}
 	return imageHost, err
+}
+
+func imageHostCredentialFields(adapter string) ([]string, bool) {
+	switch adapter {
+	case "imgbb", "ptpimg":
+		return []string{"api_key"}, true
+	case "imgbox", "pixhost":
+		return []string{}, true
+	default:
+		return nil, false
+	}
 }
 
 func (s *Store) ListImageHosts(ctx context.Context) ([]ImageHost, error) {
@@ -703,7 +750,7 @@ func (s *Store) UpsertNotificationChannel(ctx context.Context, name string, inpu
 	if err := validateResourceName("notification channel", name); err != nil {
 		return NotificationChannel{}, err
 	}
-	if input.Adapter != "discord_webhook" {
+	if !slices.Contains([]string{"discord_webhook", "telegram_bot", "wecom_bot", "feishu_bot"}, input.Adapter) {
 		return NotificationChannel{}, fmt.Errorf("%w: unsupported notification adapter %q", ErrValidation, input.Adapter)
 	}
 	config, err := validateNotificationChannelConfig(input.Config)
@@ -714,13 +761,12 @@ func (s *Store) UpsertNotificationChannel(ctx context.Context, name string, inpu
 	if err != nil {
 		return NotificationChannel{}, err
 	}
-	if len(fields) > 0 && !slices.Equal(fields, []string{"webhook_url"}) {
-		return NotificationChannel{}, fmt.Errorf("%w: discord_webhook only accepts webhook_url credentials", ErrValidation)
+	requiredFields := notificationCredentialFields(input.Adapter)
+	if len(fields) > 0 && !slices.Equal(fields, requiredFields) {
+		return NotificationChannel{}, fmt.Errorf("%w: %s only accepts %s credentials", ErrValidation, input.Adapter, strings.Join(requiredFields, ", "))
 	}
-	if value := strings.TrimSpace(input.Credentials["webhook_url"]); value != "" {
-		if err := validateSecretHTTPURL(value); err != nil {
-			return NotificationChannel{}, fmt.Errorf("%w: invalid Discord webhook URL", ErrValidation)
-		}
+	if err := validateNotificationCredentials(input.Adapter, input.Credentials, false); err != nil {
+		return NotificationChannel{}, err
 	}
 	enabled := true
 	if input.Enabled != nil {
@@ -732,7 +778,7 @@ func (s *Store) UpsertNotificationChannel(ctx context.Context, name string, inpu
 			return NotificationChannel{}, fmt.Errorf("check notification credentials: %w", err)
 		}
 		if !exists {
-			return NotificationChannel{}, fmt.Errorf("%w: enabled discord_webhook requires webhook_url", ErrValidation)
+			return NotificationChannel{}, fmt.Errorf("%w: enabled %s requires %s", ErrValidation, input.Adapter, strings.Join(requiredFields, " and "))
 		}
 	}
 	var newSecretID any
@@ -845,11 +891,79 @@ func (s *Store) GetRuntimeNotificationChannel(ctx context.Context, name string) 
 			return RuntimeNotificationChannel{}, fmt.Errorf("decode runtime notification credentials: %w", err)
 		}
 	}
-	if err := validateSecretHTTPURL(runtime.Credentials["webhook_url"]); err != nil {
-		return RuntimeNotificationChannel{}, fmt.Errorf("%w: stored Discord webhook URL is invalid", ErrValidation)
+	if err := validateNotificationCredentials(runtime.Adapter, runtime.Credentials, true); err != nil {
+		return RuntimeNotificationChannel{}, err
 	}
 	runtime.ConfigurationSHA256 = integrationConfigurationSHA(runtime.ID, runtime.Adapter, runtime.Config, secretID, runtime.UpdatedAt)
 	return runtime, nil
+}
+
+func notificationCredentialFields(adapter string) []string {
+	if adapter == "telegram_bot" {
+		return []string{"bot_token", "chat_id"}
+	}
+	return []string{"webhook_url"}
+}
+
+func validateNotificationCredentials(adapter string, credentials map[string]string, required bool) error {
+	fields := notificationCredentialFields(adapter)
+	if required {
+		for _, field := range fields {
+			if strings.TrimSpace(credentials[field]) == "" {
+				return fmt.Errorf("%w: stored %s credential %s is missing", ErrValidation, adapter, field)
+			}
+		}
+	}
+	if adapter == "telegram_bot" {
+		if token := strings.TrimSpace(credentials["bot_token"]); token != "" {
+			parts := strings.Split(token, ":")
+			if len(parts) != 2 || len(parts[0]) < 5 || len(parts[1]) < 20 {
+				return fmt.Errorf("%w: invalid Telegram bot token", ErrValidation)
+			}
+			for _, character := range parts[0] {
+				if character < '0' || character > '9' {
+					return fmt.Errorf("%w: invalid Telegram bot token", ErrValidation)
+				}
+			}
+			for _, character := range parts[1] {
+				if (character < 'a' || character > 'z') &&
+					(character < 'A' || character > 'Z') &&
+					(character < '0' || character > '9') && character != '_' && character != '-' {
+					return fmt.Errorf("%w: invalid Telegram bot token", ErrValidation)
+				}
+			}
+		}
+		if chatID := strings.TrimSpace(credentials["chat_id"]); chatID != "" {
+			if len(chatID) > 128 || strings.ContainsAny(chatID, "\r\n\x00") {
+				return fmt.Errorf("%w: invalid Telegram chat id", ErrValidation)
+			}
+		}
+		return nil
+	}
+	if value := strings.TrimSpace(credentials["webhook_url"]); value != "" {
+		if err := validateNotificationWebhookURL(value); err != nil {
+			return fmt.Errorf("%w: invalid %s webhook URL", ErrValidation, adapter)
+		}
+	}
+	return nil
+}
+
+func validateNotificationWebhookURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ErrValidation
+	}
+	if parsed.User != nil || parsed.Fragment != "" || strings.Contains(parsed.EscapedPath(), "..") {
+		return ErrValidation
+	}
+	if parsed.Scheme == "http" {
+		hostname := strings.ToLower(parsed.Hostname())
+		address := net.ParseIP(hostname)
+		if hostname != "localhost" && (address == nil || !address.IsLoopback()) {
+			return ErrValidation
+		}
+	}
+	return nil
 }
 
 func (s *Store) UpsertMediaManager(ctx context.Context, name string, input MediaManagerInput, actor workflow.Actor) (MediaManager, error) {
@@ -1392,10 +1506,11 @@ func audit(ctx context.Context, tx pgx.Tx, actor workflow.Actor, action, resourc
 	if err != nil {
 		return fmt.Errorf("serialize integration audit event: %w", err)
 	}
+	traceID := operations.CorrelationFromContext(ctx).TraceID
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_events(actor_type, actor_id, action, resource_type, resource_id, payload)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6)`,
-		actor.Type, actor.ID, action, resourceType, resourceID, body,
+		INSERT INTO audit_events(actor_type, actor_id, action, resource_type, resource_id, trace_id, payload)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, NULLIF($6,'')::uuid, $7)`,
+		actor.Type, actor.ID, action, resourceType, resourceID, traceID, body,
 	); err != nil {
 		return fmt.Errorf("write integration audit event: %w", err)
 	}

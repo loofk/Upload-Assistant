@@ -10,6 +10,70 @@ import (
 	"github.com/loofk/upload-assistant/v2/internal/torrentmeta"
 )
 
+type AccessClass string
+
+const (
+	AccessGeneral AccessClass = "general"
+	AccessSearch  AccessClass = "search"
+)
+
+type AccessRequest struct {
+	SiteCode  string      `json:"site_code"`
+	Operation string      `json:"operation"`
+	Class     AccessClass `json:"request_class"`
+}
+
+type AccessLease struct {
+	ID                string      `json:"id"`
+	SiteCode          string      `json:"site_code"`
+	Operation         string      `json:"operation"`
+	Class             AccessClass `json:"request_class"`
+	PolicyFingerprint string      `json:"policy_fingerprint"`
+}
+
+type AccessResult struct {
+	StatusCode     int
+	ResponseSHA256 string
+	Outcome        string
+	RetryAfter     time.Duration
+}
+
+// AccessGate is required by every production tracker adapter. Implementations
+// must fail closed when no approved rule and operator policy are active.
+type AccessGate interface {
+	Acquire(context.Context, AccessRequest) (AccessLease, error)
+	Complete(context.Context, AccessLease, AccessResult) error
+}
+
+// WithAccess runs one logical tracker operation under a durable access lease.
+// The callback may populate status/hash evidence after receiving a response.
+// A failed completion leaves the lease active, which deliberately fails closed
+// through the concurrency gate until its short expiry.
+func WithAccess[T any](ctx context.Context, gate AccessGate, request AccessRequest, execute func(*AccessResult) (T, error)) (value T, err error) {
+	if gate == nil {
+		return value, NewAdapterError("site_access_gate_required", "site access gate is not configured", false, nil)
+	}
+	lease, err := gate.Acquire(ctx, request)
+	if err != nil {
+		return value, err
+	}
+	result := AccessResult{Outcome: "failed"}
+	value, err = execute(&result)
+	if err == nil && result.Outcome == "failed" {
+		result.Outcome = "completed"
+	}
+	if completeErr := gate.Complete(context.WithoutCancel(ctx), lease, result); completeErr != nil && err == nil {
+		var zero T
+		return zero, NewAdapterError(
+			"site_access_audit_failed",
+			"site request completed but its access audit could not be finalized; wait for the lease to expire before retrying",
+			true,
+			completeErr,
+		)
+	}
+	return value, err
+}
+
 type SourceInfo struct {
 	Tracker           string    `json:"tracker"`
 	TorrentID         string    `json:"torrent_id"`

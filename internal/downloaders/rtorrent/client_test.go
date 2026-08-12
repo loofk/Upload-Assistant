@@ -96,6 +96,8 @@ func (fixture *rtorrentFixture) handler(w http.ResponseWriter, r *http.Request) 
 		response = fixture.upMax
 	case "system.multicall":
 		response = fixture.multicall(params)
+	case "d.multicall2":
+		response = []any{fixture.snapshotRow()}
 	case "f.multicall":
 		response = []any{[]any{"release/video.mkv", int64(1024), int64(4), int64(4), int64(1)}}
 	default:
@@ -107,7 +109,17 @@ func (fixture *rtorrentFixture) handler(w http.ResponseWriter, r *http.Request) 
 
 func (fixture *rtorrentFixture) multicall(params []any) []any {
 	calls, _ := params[0].([]any)
-	values := map[string]any{
+	values := fixture.snapshotValues()
+	result := make([]any, 0, len(calls))
+	for _, rawCall := range calls {
+		call, _ := rawCall.(map[string]any)
+		result = append(result, []any{values[stringValue(call["methodName"])]})
+	}
+	return result
+}
+
+func (fixture *rtorrentFixture) snapshotValues() map[string]any {
+	return map[string]any{
 		"d.hash": fixture.hash, "d.name": fixture.name, "d.directory": fixture.dir,
 		"d.custom1": fixture.label, "d.throttle_name": fixture.throttle, "d.message": "",
 		"d.complete": int64(1), "d.state": int64(1), "d.is_active": int64(1),
@@ -116,12 +128,16 @@ func (fixture *rtorrentFixture) multicall(params []any) []any {
 		"d.down.total": int64(1024), "d.up.rate": int64(128), "d.up.total": int64(2048),
 		"d.ratio": int64(2000), "d.load_date": int64(100), "d.timestamp.started": int64(105), "d.timestamp.finished": int64(110),
 	}
-	result := make([]any, 0, len(calls))
-	for _, rawCall := range calls {
-		call, _ := rawCall.(map[string]any)
-		result = append(result, []any{values[stringValue(call["methodName"])]})
+
+}
+
+func (fixture *rtorrentFixture) snapshotRow() []any {
+	values := fixture.snapshotValues()
+	row := make([]any, 0, len(snapshotCalls))
+	for _, method := range snapshotCalls {
+		row = append(row, values[method])
 	}
-	return result
+	return row
 }
 
 func TestClientProbeAddInspectFilesLimitsAndWait(t *testing.T) {
@@ -157,6 +173,10 @@ func TestClientProbeAddInspectFilesLimitsAndWait(t *testing.T) {
 	}
 	if result.Observed.DownloadLimit != 4096 || result.Observed.UploadLimit != 8192 || result.Observed.State != "seeding" {
 		t.Fatalf("Add() observed limits/state = %#v", result.Observed)
+	}
+	torrents, err := client.List(ctx)
+	if err != nil || len(torrents) != 1 || torrents[0].Name != "release" {
+		t.Fatalf("List() torrents/error = %#v/%v", torrents, err)
 	}
 	files, err := client.Files(ctx, hashes.V1SHA1)
 	if err != nil || len(files) != 1 || files[0].Name != "release/video.mkv" || files[0].Size != 1024 || !files[0].Seed {

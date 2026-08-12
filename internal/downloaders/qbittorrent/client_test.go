@@ -117,6 +117,10 @@ func TestClientCookieAuthenticationAddInspectAndLimits(t *testing.T) {
 	if err != nil || result.Observed == nil || result.Observed.Hash != hashes.V1SHA1 {
 		t.Fatalf("Add() result/error = %#v/%v", result, err)
 	}
+	torrents, err := client.List(ctx)
+	if err != nil || len(torrents) != 1 || torrents[0].Name != "test" {
+		t.Fatalf("List() torrents/error = %#v/%v", torrents, err)
+	}
 	if err := client.SetLimits(ctx, hashes.V1SHA1, 4096, 8192); err != nil {
 		t.Fatal(err)
 	}

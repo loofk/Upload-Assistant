@@ -78,6 +78,25 @@ func TestInspectBuildsRedactedMigrationPlan(t *testing.T) {
 	}
 }
 
+func TestInspectMigratesSelectedKeylessImageHostsWithoutInventingCredentials(t *testing.T) {
+	root := t.TempDir()
+	writeLegacyFixture(t, root, `config = {
+  "DEFAULT": {"img_host_1": "imgbox", "img_host_2": "pixhost"},
+}`)
+	plan, err := inspectLegacyFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.imageHosts) != 2 || plan.imageHosts[0].name != "imgbox" || plan.imageHosts[1].name != "pixhost" {
+		t.Fatalf("keyless image-host migration plan = %#v", plan.imageHosts)
+	}
+	for _, operation := range plan.imageHosts {
+		if len(operation.input.Credentials) != 0 || operation.input.Enabled == nil || !*operation.input.Enabled {
+			t.Fatalf("keyless image-host migration invented credentials: %#v", operation)
+		}
+	}
+}
+
 func TestInspectDisablesContainerLoopbackDownloader(t *testing.T) {
 	root := t.TempDir()
 	writeLegacyFixture(t, root, `config = {

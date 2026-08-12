@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/loofk/upload-assistant/v2/internal/buildinfo"
+	"github.com/loofk/upload-assistant/v2/internal/operations"
 	"github.com/loofk/upload-assistant/v2/internal/security"
 )
 
@@ -78,29 +80,46 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		"/api/v2/readiness/live",
 		"/api/v2/candidates/{candidate_id}/retorrent-job",
 		"/api/v2/jobs/{job_id}", "/api/v2/jobs/{job_id}/summary",
+		"/api/v2/jobs/{job_id}/attention", "/api/v2/jobs/{job_id}/actions",
+		"/api/v2/jobs/{job_id}/upload-preview", "/api/v2/jobs/{job_id}/upload-preview/revisions",
 		"/api/v2/jobs/{job_id}/attempts",
 		"/api/v2/jobs/{job_id}/artifacts/{artifact_id}/content",
 		"/api/v2/jobs/{job_id}/resume", "/api/v2/jobs/{job_id}/replay", "/api/v2/sites/{site_code}/rules/active",
-		"/api/v2/site-rules/{revision_id}/approve",
+		"/api/v2/sites/{site_code}", "/api/v2/site-rules/{revision_id}/approve",
+		"/api/v2/site-rules/{revision_id}/discard",
+		"/api/v2/sites/{site_code}/access-policy",
+		"/api/v2/sites/{site_code}/rule-sources", "/api/v2/sites/{site_code}/rule-collection-runs", "/api/v2/sites/{site_code}/rule-collection-runs/latest",
+		"/api/v2/site-rule-collection-runs/{run_id}", "/api/v2/site-rule-collection-runs/{run_id}/stream",
+		"/api/v2/site-rules/{revision_id}/review", "/api/v2/site-rules/{revision_id}/review/{section}",
+		"/api/v2/site-rules/{revision_id}/corrections/{section}",
 		"/api/v2/schedules/daily-candidates", "/api/v2/schedules/daily-candidates/{schedule_id}",
 		"/api/v2/schedules/daily-candidates/{schedule_id}/runs",
 		"/api/v2/notifications",
 		"/api/v2/audit-events",
 		"/api/v2/notification-channels", "/api/v2/notification-channels/{name}",
+		"/api/v2/notification-channels/{name}/probe",
 		"/api/v2/media-managers", "/api/v2/media-managers/{name}",
 		"/api/v2/media-managers/{name}/probe", "/api/v2/media-managers/{name}/lookup",
 		"/api/v2/metadata-providers", "/api/v2/metadata-providers/{name}",
-		"/api/v2/metadata-providers/{name}/resolve",
+		"/api/v2/metadata-providers/{name}/probe", "/api/v2/metadata-providers/{name}/resolve",
+		"/api/v2/image-hosts/{name}/probe",
 		"/api/v2/downloader-adapters",
 		"/api/v2/migrations/legacy/preview", "/api/v2/migrations/legacy",
 		"/api/v2/migrations/legacy/{import_id}",
+		"/api/v2/operational-logs", "/api/v2/operational-logs/{log_id}/context", "/api/v2/operational-logs/stream", "/api/v2/operational-logs/export",
+		"/api/v2/incidents", "/api/v2/incidents/{incident_id}", "/api/v2/incidents/{incident_id}/acknowledge", "/api/v2/incidents/{incident_id}/resolve",
+		"/api/v2/llm-providers", "/api/v2/llm-providers/{provider_id}", "/api/v2/llm-providers/{provider_id}/probe",
+		"/api/v2/site-rules/analyze", "/api/v2/site-rules/analyze/stream", "/api/v2/site-rules/analyze/result",
+		"/api/v2/diagnostics", "/api/v2/diagnostics/{diagnostic_id}", "/api/v2/diagnostics/{diagnostic_id}/messages",
+		"/api/v2/operations/overview", "/api/v2/operations/settings", "/api/v2/api-tokens", "/api/v2/api-tokens/{token_id}",
+		"/api/v2/backups/policy", "/api/v2/backups/runs", "/api/v2/backups", "/api/v2/backups/{backup_id}/verify",
 	}
 	for _, path := range requiredPaths {
 		if _, exists := document.Paths[path]; !exists {
 			t.Errorf("OpenAPI path %s is missing", path)
 		}
 	}
-	for _, schema := range []string{"RetorrentSummaryArtifact", "RetorrentSummary", "JobSummaryValue", "ReplayJobRequest", "StepAttempt", "StepAttemptListEnvelope", "LiveReadinessCheck", "LiveRuleConfirmation", "LiveReadinessReport"} {
+	for _, schema := range []string{"RetorrentSummaryArtifact", "RetorrentSummary", "JobSummaryValue", "ReplayJobRequest", "StepAttempt", "StepAttemptListEnvelope", "LiveReadinessCheck", "LiveRuleConfirmation", "LiveReadinessReport", "JobAttentionEnvelope", "UploadPreviewEnvelope", "SiteAccessPolicyEnvelope", "LLMProviderInput", "SiteRuleAnalysisInput", "RuleSourceSetInput", "RuleSourceSet", "RuleCollectionRun", "RuleCollectionEnvelope", "OperationsSettings", "BackupPolicyInput"} {
 		if len(document.Components.Schemas[schema]) == 0 {
 			t.Errorf("OpenAPI schema %s is missing", schema)
 		}
@@ -126,8 +145,8 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	}
 
 	tools := toolDefinitions()
-	if len(tools) != 45 {
-		t.Fatalf("tool count = %d, want 45", len(tools))
+	if len(tools) != 68 {
+		t.Fatalf("tool count = %d, want 68", len(tools))
 	}
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {
@@ -141,6 +160,11 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 		if _, exists := document.Paths[tool.Path]; !exists {
 			t.Errorf("tool %s references undocumented path %s", tool.Name, tool.Path)
 		}
+		if strings.HasPrefix(tool.Path, "/api/v2/api-tokens") || strings.HasPrefix(tool.Path, "/api/v2/llm-providers") ||
+			strings.HasPrefix(tool.Path, "/api/v2/backups") || strings.HasPrefix(tool.Path, "/api/v2/incidents/") &&
+			(strings.HasSuffix(tool.Path, "/acknowledge") || strings.HasSuffix(tool.Path, "/resolve")) {
+			t.Errorf("privileged operations tool must not be agent-exposed: %s", tool.Name)
+		}
 	}
 
 	handler := New(Dependencies{
@@ -151,6 +175,71 @@ func TestOpenAPIAndToolContracts(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.oai.openapi+json;version=3.1" {
 		t.Fatalf("OpenAPI HTTP response = %d/%s", response.Code, response.Header().Get("Content-Type"))
+	}
+}
+
+type capturedLogWriter struct{ entries chan operations.LogEntry }
+
+func (writer capturedLogWriter) InsertLog(_ context.Context, entry operations.LogEntry) (int64, error) {
+	writer.entries <- entry
+	return 1, nil
+}
+
+func TestRequestCorrelationAndHTTPLogFields(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	writer := capturedLogWriter{entries: make(chan operations.LogEntry, 4)}
+	sink := operations.NewAsyncLogSink(writer, slog.New(slog.NewTextHandler(io.Discard, nil)), 4)
+	go sink.Run(ctx)
+	t.Cleanup(func() { cancel(); sink.Wait() })
+	handler := New(Dependencies{Database: fakeDatabase{}, DataDir: t.TempDir(), LogSink: sink,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Build: buildinfo.Info{Version: "test"}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/version", nil)
+	request.Header.Set("X-Request-ID", "fixture.request-42")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Header().Get("X-Request-ID") != "fixture.request-42" || response.Header().Get("X-Trace-ID") == "" {
+		t.Fatalf("correlation headers = %#v", response.Header())
+	}
+	select {
+	case entry := <-writer.entries:
+		if entry.RequestID != "fixture.request-42" || entry.TraceID == "" || entry.Route != "GET /api/v2/version" || entry.StatusCode != 200 || entry.ResponseBytes == 0 {
+			t.Fatalf("operational HTTP log = %#v", entry)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("operational HTTP log was not persisted")
+	}
+	bad := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	bad.Header.Set("X-Request-ID", "contains whitespace")
+	health := httptest.NewRecorder()
+	handler.ServeHTTP(health, bad)
+	if health.Header().Get("X-Request-ID") == "contains whitespace" || health.Header().Get("X-Request-ID") == "" {
+		t.Fatalf("invalid request ID was not replaced: %q", health.Header().Get("X-Request-ID"))
+	}
+	select {
+	case entry := <-writer.entries:
+		t.Fatalf("successful health check was persisted: %#v", entry)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestHTTPErrorLogKeepsRedactedFailureReason(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	writer := capturedLogWriter{entries: make(chan operations.LogEntry, 2)}
+	sink := operations.NewAsyncLogSink(writer, slog.New(slog.NewTextHandler(io.Discard, nil)), 2)
+	go sink.Run(ctx)
+	t.Cleanup(func() { cancel(); sink.Wait() })
+	handler := requestCorrelation(requestLogger(slog.New(slog.NewTextHandler(io.Discard, nil)), sink, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeProblem(w, http.StatusGatewayTimeout, "provider_timeout", "provider request timed out after 60 seconds; api_key=fixture-secret")
+	})))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/site-rules/analyze", nil))
+	select {
+	case entry := <-writer.entries:
+		if entry.ErrorCode != "provider_timeout" || !strings.Contains(string(entry.Attributes), "provider request timed out after 60 seconds") || strings.Contains(string(entry.Attributes), "fixture-secret") {
+			t.Fatalf("error log = %#v", entry)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("error log was not persisted")
 	}
 }
 

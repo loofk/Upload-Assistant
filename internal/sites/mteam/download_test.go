@@ -44,7 +44,7 @@ func TestClientDownloadsUploadedMTeamTorrentWithoutLeakingSignedCredentials(t *t
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "mteam-secret")
-	result, err := NewClient(store, nil).DownloadUploadedTorrent(context.Background(), request, workflow.Actor{Type: "worker", ID: "fixture"})
+	result, err := NewClient(store, permissiveAccessGate{}, nil).DownloadUploadedTorrent(context.Background(), request, workflow.Actor{Type: "worker", ID: "fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestClientRejectsUntrustedDownloadURLBeforeGET(t *testing.T) {
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "key")
-	_, err := NewClient(store, nil).DownloadUploadedTorrent(
+	_, err := NewClient(store, permissiveAccessGate{}, nil).DownloadUploadedTorrent(
 		context.Background(), mteamTargetTorrentDownloadRequest(t, mteamUploadTorrent([]byte("abc"))), workflow.Actor{},
 	)
 	code, _, _ := sites.ErrorDetails(err)
@@ -89,7 +89,7 @@ func TestClientRejectsDownloadedTorrentPayloadMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 	store := runtimeSiteStore(server.URL, "key")
-	_, err := NewClient(store, nil).DownloadUploadedTorrent(
+	_, err := NewClient(store, permissiveAccessGate{}, nil).DownloadUploadedTorrent(
 		context.Background(), mteamTargetTorrentDownloadRequest(t, expected), workflow.Actor{},
 	)
 	code, _, _ := sites.ErrorDetails(err)

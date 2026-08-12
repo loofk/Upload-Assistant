@@ -21,10 +21,15 @@ import (
 )
 
 type fakeDownloaderService struct {
+	dashboard     downloaders.DashboardSnapshot
 	addEvidence   downloaders.AddEvidence
 	addErr        error
 	limitEvidence downloaders.TorrentEvidence
 	limitErr      error
+}
+
+func (service fakeDownloaderService) Dashboard(context.Context, string, downloaders.DashboardQuery) (downloaders.DashboardSnapshot, error) {
+	return service.dashboard, nil
 }
 
 func (fakeDownloaderService) Probe(context.Context, string, workflow.Actor) (qbittorrent.ProbeResult, error) {
@@ -33,6 +38,10 @@ func (fakeDownloaderService) Probe(context.Context, string, workflow.Actor) (qbi
 
 func (fakeDownloaderService) Inspect(context.Context, string, string, workflow.Actor) (downloaders.TorrentEvidence, error) {
 	return downloaders.TorrentEvidence{}, nil
+}
+
+func (fakeDownloaderService) Files(context.Context, string, string, workflow.Actor) (downloaders.TorrentFilesEvidence, error) {
+	return downloaders.TorrentFilesEvidence{}, nil
 }
 
 func (service fakeDownloaderService) Add(context.Context, string, []byte, qbittorrent.AddOptions, workflow.Actor) (downloaders.AddEvidence, error) {
@@ -129,5 +138,33 @@ func TestDownloaderProbeRouteAndInvalidTorrent(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"invalid_torrent"`)) {
 		t.Fatalf("invalid torrent response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDownloaderDashboardIsReadOnlyAndBounded(t *testing.T) {
+	service := fakeDownloaderService{dashboard: downloaders.DashboardSnapshot{
+		DownloaderName: "qbit", Adapter: "qbittorrent", Summary: downloaders.DashboardSummary{Total: 1, UploadSpeed: 2048},
+		Torrents:      []downloaders.DashboardTorrent{{Hash: strings.Repeat("a", 40), Name: "fixture", StateGroup: "seeding", Progress: 1}},
+		FilteredTotal: 1, Limit: 50,
+	}}
+	handler := New(Dependencies{
+		Database: fakeDatabase{}, DataDir: t.TempDir(), Downloaders: service,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Build: buildinfo.Info{Version: "test"},
+		Auth: fakeAuthenticator{principal: security.Principal{UserID: "user", Role: "admin", TokenScopes: []string{"downloader:manage"}}},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/downloaders/qbit/snapshot?filter=active&limit=50", nil)
+	request.Header.Set("Authorization", "Bearer ua_test-token-value-that-is-long-enough")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"upload_speed":2048`)) || !bytes.Contains(response.Body.Bytes(), []byte(`"name":"fixture"`)) {
+		t.Fatalf("dashboard response = %d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v2/downloaders/qbit/snapshot?offset=-1", nil)
+	request.Header.Set("Authorization", "Bearer ua_test-token-value-that-is-long-enough")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"invalid_request"`)) {
+		t.Fatalf("invalid dashboard query = %d %s", response.Code, response.Body.String())
 	}
 }

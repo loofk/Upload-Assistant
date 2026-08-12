@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 )
 
@@ -45,13 +46,66 @@ func TestPackageAdapterRequiresUncertainCategoryAndResolution(t *testing.T) {
 		t.Fatalf("requirements error = %#v", err)
 	}
 
-	material.Options = json.RawMessage(`{"category":419,"category_evidence":"current MTEAM movie HD category","standard":6,"anonymous":true}`)
+	material.Options = json.RawMessage(`{"category":419,"category_evidence":"current MTEAM movie HD category","naming_profile":"movie","standard":6,"anonymous":true}`)
 	result, err := NewPackageAdapter().PreparePackage(context.Background(), material)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.FormFields["category"] != 419 || result.FormFields["standard"] != 6 || result.FormFields["anonymous"] != true {
+	if result.FormFields["category"] != 419 || result.FormFields["namingProfile"] != "movie" || result.FormFields["standard"] != 6 || result.FormFields["anonymous"] != true {
 		t.Fatalf("explicit form fields = %#v", result.FormFields)
+	}
+}
+
+func TestPackageAdapterInfersNamingProfileOnlyFromVerifiedMetadata(t *testing.T) {
+	material := packageMaterial("CHD")
+	material.Source.TMDbType = "movie"
+	material.Naming.Profiles = []rules.NamingProfile{
+		{ID: "movie", Label: "电影", ReleaseTitle: rules.NamingConstraint{Required: true, Pattern: `^.+$`}},
+		{ID: "tv_episode", Label: "电视单集", ReleaseTitle: rules.NamingConstraint{Required: true, Pattern: `^.+$`}},
+	}
+	material.Options = json.RawMessage(`{"category":419,"standard":1}`)
+	result, err := NewPackageAdapter().PreparePackage(context.Background(), material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FormFields["namingProfile"] != "movie" {
+		t.Fatalf("naming profile = %#v", result.FormFields)
+	}
+	var found bool
+	for _, decision := range result.Decisions {
+		if decision.Field == "namingProfile" && decision.Derivation == "verified_metadata" && strings.Contains(decision.Evidence, "TMDb") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("naming decision = %#v", result.Decisions)
+	}
+}
+
+func TestPackageAdapterGeneratesReviewedMTEAMTitleByCategory(t *testing.T) {
+	material := packageMaterial("CHD")
+	material.Title = "Fixture Movie 2026 1080p WEB-DL-GROUP"
+	material.Source.Name = material.Title
+	material.Naming.Profiles = []rules.NamingProfile{{
+		ID: "movie", Label: "电影", CategoryIDs: []int{419},
+		TitleTokens: []rules.NamingToken{
+			{Kind: "field", Value: "title", Required: true},
+			{Kind: "field", Value: "year", Required: true},
+			{Kind: "field", Value: "resolution", Required: true},
+			{Kind: "field", Value: "source", Required: true},
+			{Kind: "field", Value: "group", Required: true, Separator: "-"},
+		},
+	}}
+	if err := rules.CompileNamingTemplates(&material.Naming); err != nil {
+		t.Fatal(err)
+	}
+	material.Options = json.RawMessage(`{"category":419,"category_evidence":"current movie category","standard":1}`)
+	result, err := NewPackageAdapter().PreparePackage(context.Background(), material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FormFields["name"] != "Fixture Movie 2026 1080p WEB-DL-GROUP" || result.FormFields["namingProfile"] != "movie" {
+		t.Fatalf("generated form fields = %#v", result.FormFields)
 	}
 }
 

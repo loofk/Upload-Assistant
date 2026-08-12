@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -15,10 +16,15 @@ type RuleService interface {
 	Import(context.Context, []byte, workflow.Actor) (rules.Revision, error)
 	Approve(context.Context, string, string, string, workflow.Actor) (rules.Revision, error)
 	Activate(context.Context, string, workflow.Actor) (rules.Revision, error)
+	DiscardDraft(context.Context, string, string, workflow.Actor) (rules.Revision, error)
 	Active(context.Context, string) (rules.Revision, error)
 	Get(context.Context, string) (rules.Revision, error)
 	List(context.Context, string) ([]rules.Revision, error)
 	ListSites(context.Context) ([]rules.SiteSummary, error)
+	UpsertSite(context.Context, string, rules.SiteInput, workflow.Actor) (rules.SiteSummary, error)
+	GetReview(context.Context, string) (rules.ReviewWorkspace, error)
+	SetReviewCheck(context.Context, string, string, string, string, string, workflow.Actor) (rules.ReviewWorkspace, error)
+	CorrectHardGate(context.Context, string, string, string, json.RawMessage, string, workflow.Actor) (rules.Revision, error)
 	ReadMarkdown(rules.Revision) ([]byte, error)
 }
 
@@ -35,16 +41,56 @@ type approveRuleRequest struct {
 	Comment     string `json:"comment,omitempty"`
 }
 
+type discardRuleDraftRequest struct {
+	Fingerprint string `json:"fingerprint"`
+	Confirm     bool   `json:"confirm"`
+}
+
+type reviewRuleSectionRequest struct {
+	Fingerprint string `json:"fingerprint"`
+	Decision    string `json:"decision"`
+	Comment     string `json:"comment,omitempty"`
+}
+
+type correctRuleHardGateRequest struct {
+	Fingerprint string          `json:"fingerprint"`
+	Data        json.RawMessage `json:"data"`
+	Comment     string          `json:"comment"`
+}
+
 func registerRuleRoutes(mux *http.ServeMux, service RuleService) {
 	api := rulesAPI{service: service}
 	mux.HandleFunc("GET /api/v2/sites", api.sites)
+	mux.HandleFunc("PUT /api/v2/sites/{site_code}", api.putSite)
 	mux.HandleFunc("GET /api/v2/sites/{site_code}/rules", api.list)
 	mux.HandleFunc("GET /api/v2/sites/{site_code}/rules/active", api.active)
 	mux.HandleFunc("POST /api/v2/site-rules/import", api.importRule)
 	mux.HandleFunc("GET /api/v2/site-rules/{revision_id}", api.get)
 	mux.HandleFunc("GET /api/v2/site-rules/{revision_id}/markdown", api.markdown)
+	mux.HandleFunc("GET /api/v2/site-rules/{revision_id}/review", api.review)
+	mux.HandleFunc("PUT /api/v2/site-rules/{revision_id}/review/{section}", api.putReviewSection)
+	mux.HandleFunc("POST /api/v2/site-rules/{revision_id}/corrections/{section}", api.correctHardGate)
 	mux.HandleFunc("POST /api/v2/site-rules/{revision_id}/approve", api.approve)
 	mux.HandleFunc("POST /api/v2/site-rules/{revision_id}/activate", api.activate)
+	mux.HandleFunc("POST /api/v2/site-rules/{revision_id}/discard", api.discardDraft)
+}
+
+func (a rulesAPI) putSite(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "config:manage")
+	if !ok {
+		return
+	}
+	var request rules.SiteInput
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	site, err := a.service.UpsertSite(r.Context(), r.PathValue("site_code"), request, workflow.Actor{Type: "user", ID: principal.UserID})
+	if err != nil {
+		writeRuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "ready", "site": site, "blockers": []any{}, "next_actions": []map[string]any{{"action": "import_site_rule_markdown", "site_code": site.Code}}})
 }
 
 func (a rulesAPI) sites(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +199,69 @@ func (a rulesAPI) markdown(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(markdown)
 }
 
+func (a rulesAPI) review(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireScope(w, r, "config:read"); !ok {
+		return
+	}
+	id, ok := ruleRevisionID(w, r)
+	if !ok {
+		return
+	}
+	workspace, err := a.service.GetReview(r.Context(), id)
+	if err != nil {
+		writeRuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "ready", "review": workspace, "blockers": workspace.Blockers, "next_actions": workspace.NextActions})
+}
+
+func (a rulesAPI) putReviewSection(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "config:manage")
+	if !ok {
+		return
+	}
+	id, ok := ruleRevisionID(w, r)
+	if !ok {
+		return
+	}
+	var request reviewRuleSectionRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	workspace, err := a.service.SetReviewCheck(r.Context(), id, r.PathValue("section"), request.Fingerprint, request.Decision, request.Comment, workflow.Actor{Type: "user", ID: principal.UserID})
+	if err != nil {
+		writeRuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "ready", "review": workspace, "blockers": workspace.Blockers, "next_actions": workspace.NextActions})
+}
+
+func (a rulesAPI) correctHardGate(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "config:manage")
+	if !ok {
+		return
+	}
+	id, ok := ruleRevisionID(w, r)
+	if !ok {
+		return
+	}
+	var request correctRuleHardGateRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	revision, err := a.service.CorrectHardGate(
+		r.Context(), id, request.Fingerprint, r.PathValue("section"), request.Data, request.Comment,
+		workflow.Actor{Type: "user", ID: principal.UserID},
+	)
+	if err != nil {
+		writeRuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, ruleEnvelope(revision))
+}
+
 func (a rulesAPI) approve(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireScope(w, r, "config:manage")
 	if !ok {
@@ -195,6 +304,32 @@ func (a rulesAPI) activate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ruleEnvelope(revision))
 }
 
+func (a rulesAPI) discardDraft(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireScope(w, r, "config:manage")
+	if !ok {
+		return
+	}
+	id, ok := ruleRevisionID(w, r)
+	if !ok {
+		return
+	}
+	var request discardRuleDraftRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if !request.Confirm {
+		writeProblem(w, http.StatusBadRequest, "confirmation_required", "confirm=true is required to discard a draft")
+		return
+	}
+	revision, err := a.service.DiscardDraft(r.Context(), id, request.Fingerprint, workflow.Actor{Type: "user", ID: principal.UserID})
+	if err != nil {
+		writeRuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ruleEnvelope(revision))
+}
+
 func ruleEnvelope(revision rules.Revision) map[string]any {
 	blockers := make([]map[string]string, 0)
 	nextActions := make([]map[string]string, 0)
@@ -224,6 +359,8 @@ func writeRuleError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusNotFound, "rule_not_found", err.Error())
 	case errors.Is(err, rules.ErrSourceIncomplete):
 		writeProblem(w, http.StatusConflict, "rule_source_incomplete", err.Error())
+	case errors.Is(err, rules.ErrReviewIncomplete):
+		writeProblem(w, http.StatusConflict, "rule_review_incomplete", err.Error())
 	case errors.Is(err, rules.ErrConflict):
 		writeProblem(w, http.StatusConflict, "rule_conflict", err.Error())
 	default:

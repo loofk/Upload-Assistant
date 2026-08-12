@@ -141,6 +141,7 @@ func targetTorrentExecution(t *testing.T, store *artifacts.LocalStore, sourceTor
 	prepared := sites.PreparedTargetPackage{
 		SchemaVersion: 1, Target: "MTEAM", Adapter: "mteam_api",
 		Content:     sites.TargetContentEvidence{LocalRoot: contentRoot, FileCount: 1, TotalSizeBytes: 3, ManifestSHA256: manifestFile.SHA256},
+		Evidence:    map[string]any{"target_rule": map[string]any{"revision_id": "rule-id", "fingerprint": strings.Repeat("f", 64)}},
 		GeneratedAt: time.Unix(1, 0).UTC(),
 	}
 	packageBody, _ := json.Marshal(prepared)
@@ -171,6 +172,7 @@ func targetTorrentExecution(t *testing.T, store *artifacts.LocalStore, sourceTor
 				},
 				"target_package": map[string]any{
 					"prepared": true, "target": "MTEAM", "package_artifact_id": "package-id",
+					"target_rule_revision_id": "rule-id", "target_rule_fingerprint": strings.Repeat("f", 64),
 					"package_sha256": packageFile.SHA256, "package_storage_path": packageFile.RelativePath,
 					"package_size_bytes": packageFile.SizeBytes,
 				},

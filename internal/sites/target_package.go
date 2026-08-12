@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 )
 
 type TargetArtifactEvidence struct {
@@ -54,6 +56,10 @@ type TargetPackageMaterial struct {
 	Content                    TargetContentEvidence      `json:"content"`
 	Media                      TargetMediaEvidence        `json:"media"`
 	Screenshots                []TargetScreenshotEvidence `json:"screenshots"`
+	TargetRuleRevisionID       string                     `json:"target_rule_revision_id"`
+	TargetRuleFingerprint      string                     `json:"target_rule_fingerprint"`
+	Naming                     rules.Naming               `json:"naming,omitempty"`
+	Advisories                 []rules.Advisory           `json:"advisories,omitempty"`
 	Evidence                   map[string]any             `json:"evidence"`
 	Options                    json.RawMessage            `json:"options"`
 }
@@ -78,6 +84,7 @@ type PreparedTargetPackage struct {
 	Evidence             map[string]any        `json:"evidence"`
 	Decisions            []TargetDecision      `json:"decisions"`
 	Warnings             []string              `json:"warnings"`
+	NamingProfiles       []rules.NamingProfile `json:"naming_profiles,omitempty"`
 	ManualReviewRequired bool                  `json:"manual_review_required"`
 	GeneratedAt          time.Time             `json:"generated_at"`
 }

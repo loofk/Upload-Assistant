@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +57,7 @@ func TestManagerProbeInspectAndPathMapping(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"hash": hash, "name": "release", "state": "uploading", "progress": 1,
 				"total_size": 1024, "completed": 1024, "amount_left": 0,
+				"upspeed": 2048, "ratio": 2.5, "category": "MTEAM", "added_on": 100,
 				"save_path": "/remote/downloads", "content_path": "/remote/downloads/release",
 			}})
 		case "/api/v2/torrents/files":
@@ -92,6 +94,10 @@ func TestManagerProbeInspectAndPathMapping(t *testing.T) {
 	files, err := manager.Files(context.Background(), "qbit", hash, actor)
 	if err != nil || files.FileCount != 1 || files.TotalSize != 1024 || files.Torrent.LocalContentPath != "/downloads/release" {
 		t.Fatalf("Files() evidence/error = %#v/%v", files, err)
+	}
+	dashboard, err := manager.Dashboard(context.Background(), "qbit", DashboardQuery{Filter: "active", Query: "release", Limit: 25})
+	if err != nil || dashboard.Summary.Total != 1 || dashboard.Summary.UploadSpeed != 2048 || dashboard.FilteredTotal != 1 || len(dashboard.Torrents) != 1 || dashboard.Torrents[0].Category != "MTEAM" {
+		t.Fatalf("Dashboard() snapshot/error = %#v/%v", dashboard, err)
 	}
 	if len(store.auditActions) != 2 || store.auditActions[0] != "torrent.inspect" || store.auditActions[1] != "torrent.files" {
 		t.Fatalf("audit actions = %#v", store.auditActions)
@@ -161,7 +167,7 @@ func TestManagerDispatchesRTorrentRuntime(t *testing.T) {
 
 func TestManagerDispatchesDelugeWebRuntime(t *testing.T) {
 	methods := []string{
-		"core.add_torrent_file", "core.get_torrent_status", "core.set_torrent_options",
+		"core.add_torrent_file", "core.get_torrent_status", "core.get_torrents_status", "core.set_torrent_options",
 		"daemon.get_version", "daemon.get_method_list", "core.get_libtorrent_version",
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +280,52 @@ func TestManagerReturnsEvidenceWhenAddResultAuditIsUnknown(t *testing.T) {
 	}
 	if addCalls != 1 || strings.Join(store.auditActions, ",") != "torrent.add_intent,torrent.add" {
 		t.Fatalf("remote add calls/audits = %d/%#v", addCalls, store.auditActions)
+	}
+}
+
+func TestManagerAppliesSeedboxUploadLimitOnlyToHumanMarkedSeedbox(t *testing.T) {
+	metainfo := validManagerMetainfo()
+	hashes, err := torrentmeta.Hashes(metainfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, networkClass string
+		wantLimit          int64
+	}{{"seedbox", "seedbox", 2 * 1024 * 1024}, {"home", "home", 0}, {"unknown", "unknown", 0}} {
+		t.Run(test.name, func(t *testing.T) {
+			var submitted string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v2/torrents/add":
+					if err := r.ParseMultipartForm(1 << 20); err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					submitted = r.FormValue("upLimit")
+					_, _ = io.WriteString(w, "Ok.")
+				case "/api/v2/torrents/info":
+					_ = json.NewEncoder(w).Encode([]map[string]any{{
+						"hash": hashes.V1SHA1, "name": "test", "state": "downloading", "progress": 0,
+						"total_size": 1, "save_path": "/downloads", "content_path": "/downloads/test", "up_limit": test.wantLimit,
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			store := qBittorrentAddStore(t, server.URL)
+			store.runtime.NetworkClass = test.networkClass
+			evidence, err := NewManager(store).Add(context.Background(), "qbit", metainfo, qbittorrent.AddOptions{
+				SavePath: "/downloads", SeedboxUploadLimit: 2 * 1024 * 1024,
+			}, workflow.Actor{Type: "test", ID: "manager"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if evidence.NetworkClass != test.networkClass || evidence.AppliedUploadLimit != test.wantLimit || submitted != fmt.Sprint(test.wantLimit) {
+				t.Fatalf("seedbox evidence/submission = %#v/%q", evidence, submitted)
+			}
+		})
 	}
 }
 

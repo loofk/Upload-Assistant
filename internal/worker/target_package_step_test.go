@@ -11,6 +11,7 @@ import (
 
 	"github.com/loofk/upload-assistant/v2/internal/artifacts"
 	"github.com/loofk/upload-assistant/v2/internal/imagehosts"
+	"github.com/loofk/upload-assistant/v2/internal/rules"
 	"github.com/loofk/upload-assistant/v2/internal/sites"
 	"github.com/loofk/upload-assistant/v2/internal/sites/mteam"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
@@ -19,7 +20,7 @@ import (
 func TestTargetPackageStepVerifiesMaterialsAndPersistsPackage(t *testing.T) {
 	store := mustArtifactStore(t)
 	recorder := &fakeArtifactRecorder{}
-	executor := targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: recorder}
+	executor := targetPackageExecutorForTest(t, store, recorder, rules.Naming{})
 	output, err := executor.Execute(context.Background(), targetPackageExecution(t, store, "U2", map[string]any{}))
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestTargetPackageStepVerifiesMaterialsAndPersistsPackage(t *testing.T) {
 
 func TestTargetPackageStepBlocksAndResumesUncertainCategory(t *testing.T) {
 	store := mustArtifactStore(t)
-	executor := targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: &fakeArtifactRecorder{}}
+	executor := targetPackageExecutorForTest(t, store, &fakeArtifactRecorder{}, rules.Naming{})
 	execution := targetPackageExecution(t, store, "CHD", map[string]any{})
 	_, err := executor.Execute(context.Background(), execution)
 	blocked := requireBlockError(t, err)
@@ -68,6 +69,59 @@ func TestTargetPackageStepBlocksAndResumesUncertainCategory(t *testing.T) {
 	}
 }
 
+func TestTargetPackageStepEnforcesActiveTargetNamingRule(t *testing.T) {
+	store := mustArtifactStore(t)
+	execution := targetPackageExecution(t, store, "U2", map[string]any{"name": "invalid title"})
+	naming := rules.Naming{
+		ReleaseTitle: rules.NamingConstraint{Required: true, Pattern: `^Fixture\.Release\.2026\.1080p-[A-Z]+$`, Template: "{title}-{group}"},
+		ContentName:  rules.NamingConstraint{Required: true, Pattern: `^release$`, Template: "release"},
+	}
+	executor := targetPackageExecutorForTest(t, store, &fakeArtifactRecorder{}, naming)
+	_, err := executor.Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if len(blocked.Blockers) != 1 || blocked.Blockers[0].Code != "target_release_title_mismatch" {
+		t.Fatalf("naming blocker = %#v", blocked)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	resume := snapshot["resume_state"].(map[string]any)
+	resume["target_package"] = map[string]any{"name": "Fixture.Release.2026.1080p-GROUP"}
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	if _, err := executor.Execute(context.Background(), execution); err != nil {
+		t.Fatalf("reviewed naming error = %v", err)
+	}
+}
+
+func TestTargetPackageStepRequiresAndEnforcesNamingProfile(t *testing.T) {
+	store := mustArtifactStore(t)
+	naming := rules.Naming{Profiles: []rules.NamingProfile{
+		{ID: "anime_encode", Label: "动画 Encode", ReleaseTitle: rules.NamingConstraint{Required: true, Pattern: `^Fixture\.Release\.2026\.1080p-[A-Z]+$`, Template: "英文名 年份 分辨率 参数-小组"}},
+		{ID: "anime_web_episode", Label: "动画 WEB 单集", ReleaseTitle: rules.NamingConstraint{Required: true, Pattern: `^Fixture\.Release\.S[0-9]{2}E[0-9]{2}\.1080p-[A-Z]+$`, Template: "英文名 季集 分辨率 参数-小组"}},
+	}}
+	executor := targetPackageExecutorForTest(t, store, &fakeArtifactRecorder{}, naming)
+	execution := targetPackageExecution(t, store, "U2", map[string]any{"name": "Fixture.Release.2026.1080p-GROUP"})
+	_, err := executor.Execute(context.Background(), execution)
+	blocked := requireBlockError(t, err)
+	if len(blocked.Blockers) != 1 || blocked.Blockers[0].Code != "target_naming_profile_required" {
+		t.Fatalf("naming profile blocker = %#v", blocked)
+	}
+
+	var snapshot map[string]any
+	if err := json.Unmarshal(execution.Step.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	resume := snapshot["resume_state"].(map[string]any)
+	resume["target_package"] = map[string]any{
+		"name": "Fixture.Release.2026.1080p-GROUP", "naming_profile": "anime_encode",
+	}
+	execution.Step.InputSnapshot = mustJSON(snapshot)
+	if _, err := executor.Execute(context.Background(), execution); err != nil {
+		t.Fatalf("profiled naming error = %v", err)
+	}
+}
+
 func TestTargetPackageStepRejectsTamperedMediaArtifact(t *testing.T) {
 	store := mustArtifactStore(t)
 	execution := targetPackageExecution(t, store, "U2", map[string]any{})
@@ -79,7 +133,7 @@ func TestTargetPackageStepRejectsTamperedMediaArtifact(t *testing.T) {
 	mediaOutput := previous["media_info"].(map[string]any)
 	mediaOutput["artifact_sha256"] = strings.Repeat("0", 64)
 	execution.Step.InputSnapshot = mustJSON(snapshot)
-	_, err := (targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: &fakeArtifactRecorder{}}).Execute(context.Background(), execution)
+	_, err := targetPackageExecutorForTest(t, store, &fakeArtifactRecorder{}, rules.Naming{}).Execute(context.Background(), execution)
 	var blocked *BlockError
 	if !errors.As(err, &blocked) || blocked.Code != "step_input_snapshot_invalid" {
 		t.Fatalf("tampered media blocker = %#v", blocked)
@@ -109,7 +163,7 @@ func TestTargetPackageStepAcceptsVerifiedBDInfoArtifact(t *testing.T) {
 	execution.Step.InputSnapshot = mustJSON(snapshot)
 
 	recorder := &fakeArtifactRecorder{}
-	if _, err := (targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: recorder}).Execute(context.Background(), execution); err != nil {
+	if _, err := targetPackageExecutorForTest(t, store, recorder, rules.Naming{}).Execute(context.Background(), execution); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := store.Open(recorder.recorded.StoragePath)
@@ -169,7 +223,7 @@ func TestTargetPackageStepVerifiesV2MetadataArtifacts(t *testing.T) {
 	}
 	execution.Step.InputSnapshot = mustJSON(snapshot)
 	recorder := &fakeArtifactRecorder{}
-	if _, err := (targetPackageExecutor{provider: targetPackageRegistry(t), artifacts: store, recorder: recorder}).Execute(context.Background(), execution); err != nil {
+	if _, err := targetPackageExecutorForTest(t, store, recorder, rules.Naming{}).Execute(context.Background(), execution); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := store.Open(recorder.recorded.StoragePath)
@@ -260,5 +314,37 @@ func targetPackageExecution(t *testing.T, store *artifacts.LocalStore, source st
 			},
 		})},
 		Attempt: workflow.Attempt{ID: "target-package-attempt"}, Actor: workflow.Actor{Type: "worker", ID: "test-worker"},
+	}
+}
+
+type targetPackageRuleProvider struct {
+	revision rules.Revision
+}
+
+func (provider targetPackageRuleProvider) Active(_ context.Context, siteCode string) (rules.Revision, error) {
+	if siteCode != provider.revision.SiteCode {
+		return rules.Revision{}, rules.ErrNotFound
+	}
+	return provider.revision, nil
+}
+
+func targetPackageExecutorForTest(t *testing.T, store *artifacts.LocalStore, recorder ArtifactRecorder, naming rules.Naming) targetPackageExecutor {
+	t.Helper()
+	policy, err := json.Marshal(rules.Policy{
+		SchemaVersion: 2,
+		Site:          rules.Site{Code: "MTEAM", DisplayName: "M-Team", Roles: []string{"target"}},
+		Source:        rules.Source{Complete: true},
+		Access:        rules.Access{ServiceAccess: "undetermined", SearchAccess: "undetermined"},
+		Naming:        naming,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return targetPackageExecutor{
+		provider: targetPackageRegistry(t), artifacts: store, recorder: recorder,
+		rules: targetPackageRuleProvider{revision: rules.Revision{
+			ID: "target-rule-id", SiteCode: "MTEAM", Status: "approved",
+			Fingerprint: strings.Repeat("c", 64), Policy: policy,
+		}},
 	}
 }

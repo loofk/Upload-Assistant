@@ -32,6 +32,14 @@ var (
 )
 
 func (client *Client) DownloadUploadedTorrent(ctx context.Context, request sites.TargetTorrentDownloadRequest, actor workflow.Actor) (sites.DownloadedTargetTorrent, error) {
+	return sites.WithAccess(ctx, client.accessGate, sites.AccessRequest{
+		SiteCode: "MTEAM", Operation: "target.torrent_download", Class: sites.AccessGeneral,
+	}, func(access *sites.AccessResult) (sites.DownloadedTargetTorrent, error) {
+		return client.downloadUploadedTorrent(ctx, request, actor, access)
+	})
+}
+
+func (client *Client) downloadUploadedTorrent(ctx context.Context, request sites.TargetTorrentDownloadRequest, actor workflow.Actor, access *sites.AccessResult) (sites.DownloadedTargetTorrent, error) {
 	if err := validateTargetTorrentDownloadRequest(request); err != nil {
 		return sites.DownloadedTargetTorrent{}, sites.NewAdapterError("target_torrent_download_request_invalid", err.Error(), false, err)
 	}
@@ -62,7 +70,8 @@ func (client *Client) DownloadUploadedTorrent(ctx context.Context, request sites
 		)
 	}
 
-	tokenResponse, tokenSHA, signedURL, err := client.generateDownloadURL(ctx, endpoint, config, apiKey, request.TorrentID)
+	tokenResponse, tokenSHA, signedURL, err := client.generateDownloadURL(ctx, endpoint, config, apiKey, request.TorrentID, access)
+	access.ResponseSHA256 = tokenSHA
 	if err != nil {
 		client.auditTargetTorrentDownloadOutcome(ctx, request, configurationSHA, "failed", errorCode(err), "", actor)
 		return sites.DownloadedTargetTorrent{}, err
@@ -74,7 +83,7 @@ func (client *Client) DownloadUploadedTorrent(ctx context.Context, request sites
 			"target_torrent_download_url_rejected", "MTEAM returned a download URL outside the configured trusted hosts", false, err,
 		)
 	}
-	downloaded, contentType, err := client.fetchSignedTorrent(ctx, signedURL, config.TimeoutSeconds)
+	downloaded, contentType, err := client.fetchSignedTorrent(ctx, signedURL, config.TimeoutSeconds, access)
 	if err != nil {
 		client.auditTargetTorrentDownloadOutcome(ctx, request, configurationSHA, "failed", errorCode(err), tokenSHA, actor)
 		return sites.DownloadedTargetTorrent{}, err
@@ -130,7 +139,7 @@ func validateTargetTorrentDownloadRequest(request sites.TargetTorrentDownloadReq
 	return nil
 }
 
-func (client *Client) generateDownloadURL(ctx context.Context, endpoint *url.URL, config apiConfig, apiKey, torrentID string) ([]byte, string, *url.URL, error) {
+func (client *Client) generateDownloadURL(ctx context.Context, endpoint *url.URL, config apiConfig, apiKey, torrentID string, access *sites.AccessResult) ([]byte, string, *url.URL, error) {
 	requestURL := resolveAPI(endpoint, "/api/torrent/genDlToken")
 	body := url.Values{"id": []string{torrentID}}.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), strings.NewReader(body))
@@ -148,6 +157,7 @@ func (client *Client) generateDownloadURL(ctx context.Context, endpoint *url.URL
 		return nil, "", nil, sites.NewAdapterError("target_torrent_download_failed", "MTEAM download-token request failed", true, nil)
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, maxAPIResponse+1))
 	if readErr != nil || len(responseBody) > maxAPIResponse {
 		return nil, "", nil, sites.NewAdapterError("target_torrent_download_response_invalid", "MTEAM download-token response is unreadable or too large", false, readErr)
@@ -169,7 +179,7 @@ func (client *Client) generateDownloadURL(ctx context.Context, endpoint *url.URL
 	return responseBody, responseSHA, signedURL, nil
 }
 
-func (client *Client) fetchSignedTorrent(ctx context.Context, signedURL *url.URL, timeoutSeconds int) ([]byte, string, error) {
+func (client *Client) fetchSignedTorrent(ctx context.Context, signedURL *url.URL, timeoutSeconds int, access *sites.AccessResult) ([]byte, string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL.String(), nil)
 	if err != nil {
 		return nil, "", sites.NewAdapterError("target_torrent_download_url_rejected", "could not build the signed MTEAM download request", false, err)
@@ -183,10 +193,13 @@ func (client *Client) fetchSignedTorrent(ctx context.Context, signedURL *url.URL
 		return nil, "", sites.NewAdapterError("target_torrent_download_failed", "MTEAM signed torrent download failed", true, nil)
 	}
 	defer response.Body.Close()
+	access.StatusCode = response.StatusCode
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxDownloadedTargetTorrentBytes+1))
 	if readErr != nil || len(body) > maxDownloadedTargetTorrentBytes {
 		return nil, "", sites.NewAdapterError("target_torrent_download_invalid", "MTEAM torrent response is unreadable or too large", false, readErr)
 	}
+	digest := sha256.Sum256(body)
+	access.ResponseSHA256 = hex.EncodeToString(digest[:])
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return nil, "", sites.NewAdapterError("site_authentication_failed", "MTEAM rejected the signed torrent download", false, nil)
 	}

@@ -2,6 +2,17 @@ import {afterEach, describe, expect, it, vi} from "vitest";
 import {ApiClient} from "./api";
 
 describe("ApiClient safety defaults", () => {
+	it("validates a Web token through the protected jobs boundary", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			ok: true, status: "ready", jobs: [], has_more: false, next_cursor: "",
+		}), {status: 200, headers: {"Content-Type": "application/json"}}));
+		vi.stubGlobal("fetch", fetchMock);
+		await new ApiClient("ua_test-token-value-that-is-long-enough").validateToken();
+		const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(path).toBe("/api/v2/jobs?limit=1");
+		expect(new Headers(init.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");
+	});
+
 	it("reads the local fingerprinted adapter catalog without external intent", async () => {
 		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
 			ok: true, status: "ready", catalog_version: "upload-assistant.adapter-catalog.v1",
@@ -15,7 +26,51 @@ describe("ApiClient safety defaults", () => {
 		expect(init.body).toBeUndefined();
 	});
 
-  afterEach(() => vi.unstubAllGlobals());
+	it("reads a bounded downloader snapshot without sending a write request", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			ok: true, status: "ready", snapshot: {downloader_name: "box", torrents: [], filtered_total: 0}, blockers: [], next_actions: [],
+		}), {status: 200, headers: {"Content-Type": "application/json"}}));
+		vi.stubGlobal("fetch", fetchMock);
+		await new ApiClient("ua_test-token-value-that-is-long-enough").getDownloaderSnapshot("box", {filter: "active", query: "MTEAM", offset: 100, limit: 100});
+		const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(path).toBe("/api/v2/downloaders/box/snapshot?filter=active&query=MTEAM&offset=100&limit=100");
+		expect(init.method).toBeUndefined();
+		expect(init.body).toBeUndefined();
+	});
+
+	it("configures keyless image hosts without sending an API key field", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ok: true, status: "configured"}), {
+			status: 200, headers: {"Content-Type": "application/json"},
+		}));
+		vi.stubGlobal("fetch", fetchMock);
+		const client = new ApiClient("ua_test-token-value-that-is-long-enough");
+		await client.putImageHost("pixhost-main", {
+			adapter: "pixhost", endpoint: "https://api.pixhost.to/images", apiKey: "must-not-be-sent", priority: 100, enabled: true,
+		});
+		const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(path).toBe("/api/v2/image-hosts/pixhost-main");
+		const body = JSON.parse(String(init.body));
+		expect(body).toMatchObject({adapter: "pixhost", config: {endpoint: "https://api.pixhost.to/images"}, credentials: {}});
+		expect(String(init.body)).not.toContain("must-not-be-sent");
+	});
+
+	it("sends explicit confirmation only for probes that create remote content", async () => {
+		const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ok: true, status: "ready"}), {
+			status: 200, headers: {"Content-Type": "application/json"},
+		})));
+		vi.stubGlobal("fetch", fetchMock);
+		const client = new ApiClient("ua_test-token-value-that-is-long-enough");
+		await client.probeImageHost("images/main");
+		await client.probeNotificationChannel("alerts/main");
+		await client.probeMetadataProvider("tmdb/main");
+		expect(fetchMock.mock.calls.map(([path, init]) => [path, JSON.parse(String((init as RequestInit).body ?? "{}"))])).toEqual([
+			["/api/v2/image-hosts/images%2Fmain/probe", {confirm_upload: true}],
+			["/api/v2/notification-channels/alerts%2Fmain/probe", {confirm_delivery: true}],
+			["/api/v2/metadata-providers/tmdb%2Fmain/probe", {}],
+		]);
+	});
+
+  afterEach(() => {vi.useRealTimers();vi.unstubAllGlobals();});
 
   it("authenticates requests but never infers rule acceptance or live upload confirmation", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ok: true, job_id: "job-id"}), {
@@ -180,4 +235,83 @@ describe("ApiClient safety defaults", () => {
     expect(init.method).toBeUndefined();
     expect(path).not.toContain("confirm_upload");
   });
+
+	it("queries lightweight operational logs with indexed filters and a cursor", async () => {
+		const envelope={ok:true,status:"ready",operational_logs:[],has_more:true,next_cursor:"opaque-log-cursor",blockers:[],next_actions:[]};
+		const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope),{status:200,headers:{"Content-Type":"application/json"}}));
+		vi.stubGlobal("fetch",fetchMock);
+		const result=await new ApiClient("ua_test-token-value-that-is-long-enough").listOperationalLogs({level:"error",component:"external.llm",query:"provider timeout",errorCode:"provider_timeout",statusCode:524,from:"2026-08-10T00:00:00Z",to:"2026-08-11T00:00:00Z",cursor:"opaque-log-cursor",limit:200});
+		expect(result.next_cursor).toBe("opaque-log-cursor");
+		const [path]=fetchMock.mock.calls[0] as [string,RequestInit];const query=new URLSearchParams(path.split("?")[1]);
+		expect(Object.fromEntries(query)).toEqual({limit:"200",level:"error",q:"provider timeout",component:"external.llm",error_code:"provider_timeout",status_code:"524",from:"2026-08-10T00:00:00Z",to:"2026-08-11T00:00:00Z",cursor:"opaque-log-cursor"});
+	});
+
+	it("parses authenticated resumable operational-log SSE", async () => {
+		const entry={id:43,occurred_at:"2026-08-10T07:15:00Z",level:"error",component:"external.llm",message:"failed",error_code:"provider_http_error"};
+		const fetchMock=vi.fn().mockResolvedValue(new Response(`id: 43\nevent: operational-log\ndata: ${JSON.stringify(entry)}\n\n`,{status:200,headers:{"Content-Type":"text/event-stream"}}));
+		vi.stubGlobal("fetch",fetchMock);const received:Array<typeof entry>=[];const controller=new AbortController();
+		await new ApiClient("ua_test-token-value-that-is-long-enough").streamOperationalLogs({level:"error",afterID:42},value=>received.push(value as typeof entry),controller.signal);
+		expect(received).toEqual([entry]);const [path,init]=fetchMock.mock.calls[0] as [string,RequestInit];
+		expect(path).toContain("level=error");expect(new Headers(init.headers).get("Authorization")).toBe("Bearer ua_test-token-value-that-is-long-enough");expect(new Headers(init.headers).get("Last-Event-ID")).toBe("42");
+	});
+
+	it("recovers a proxy-interrupted rule analysis stream by polling the same idempotent request", async () => {
+		vi.useFakeTimers();
+		const analysis={draft_markdown:"draft",source_sha256:"a".repeat(64),provider_id:"provider",provider_name:"Provider",model:"model",reasoning_effort:"high",source_complete:true,confidence:.8,warnings:[],prompt_version:"site-rule-analysis-v2",external_call_performed:true};
+		const interrupted=new ReadableStream<Uint8Array>({start(controller){controller.enqueue(new TextEncoder().encode('event: analysis-started\ndata: {"status":"analyzing"}\n\n'));controller.error(new TypeError("network error"))}});
+		const fetchMock=vi.fn()
+			.mockResolvedValueOnce(new Response(interrupted,{status:200,headers:{"Content-Type":"text/event-stream"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ok:true,status:"analyzing"}),{status:202,headers:{"Content-Type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ok:true,status:"draft_ready",analysis}),{status:200,headers:{"Content-Type":"application/json"}}));
+		vi.stubGlobal("fetch",fetchMock);vi.stubGlobal("crypto",{randomUUID:()=>"77777777-7777-4777-8777-777777777777"});
+		const resultPromise=new ApiClient("ua_test-token-value-that-is-long-enough").analyzeRuleText({providerID:"provider",sourceRevisionID:"revision"});
+		await vi.runAllTimersAsync();
+		expect(await resultPromise).toEqual(analysis);
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		const streamHeaders=new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);const pollHeaders=new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers);
+		expect(streamHeaders.get("Idempotency-Key")).toBe("77777777-7777-4777-8777-777777777777");expect(pollHeaders.get("Idempotency-Key")).toBe(streamHeaders.get("Idempotency-Key"));
+		expect(fetchMock.mock.calls[1][0]).toBe("/api/v2/site-rules/analyze/result");
+	});
+
+	it("saves exact rule sources and observes the asynchronous collection stream", async () => {
+		const fingerprint = "c".repeat(64);
+		const run = {id:"88888888-8888-4888-8888-888888888888",site_code:"MTEAM",source_set_fingerprint:fingerprint,provider_id:"22222222-2222-4222-8222-222222222222",status:"ready",not_before:"2026-08-10T12:00:00Z",rule_revision_id:"99999999-9999-4999-8999-999999999999",documents:[],created_at:"2026-08-10T12:00:00Z",updated_at:"2026-08-10T12:01:00Z"};
+		const sourceSet = {site_code:"MTEAM",sources:[{id:"titles",url:"https://wiki.m-team.cc/zh-tw/upload-title-rules",scope:"标题规范",auth_mode:"none" as const}],fingerprint,scope_confirmed:true,cookie_hosts_confirmed:false,cookie_configured:false,cookie_required:false};
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(new Response(JSON.stringify({source_set:sourceSet}),{status:200,headers:{"Content-Type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({run}),{status:202,headers:{"Content-Type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(`event: progress\ndata: ${JSON.stringify({run})}\n\n`,{status:200,headers:{"Content-Type":"text/event-stream"}}));
+		vi.stubGlobal("fetch",fetchMock);vi.stubGlobal("crypto",{randomUUID:()=>"77777777-7777-4777-8777-777777777777"});
+		const client = new ApiClient("ua_test-token-value-that-is-long-enough");
+		const saved = await client.putRuleSourceSet("MTEAM",{sources:sourceSet.sources,scope_confirmed:true,cookie_hosts_confirmed:false});
+		const created = await client.createRuleCollectionRun("MTEAM",saved.fingerprint,run.provider_id);
+		const observed: Array<typeof run> = [];
+		await client.streamRuleCollectionRun(created.id,(value)=>observed.push(value as typeof run),new AbortController().signal);
+		expect(observed).toEqual([run]);
+		expect(fetchMock.mock.calls[0][0]).toBe("/api/v2/sites/MTEAM/rule-sources");
+		expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({sources:sourceSet.sources,scope_confirmed:true,cookie_hosts_confirmed:false});
+		expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({source_set_fingerprint:fingerprint,provider_id:run.provider_id,confirm:true});
+		expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get("Idempotency-Key")).toBe("77777777-7777-4777-8777-777777777777");
+		expect(fetchMock.mock.calls[2][0]).toBe(`/api/v2/site-rule-collection-runs/${run.id}/stream`);
+	});
+
+	it("continues polling the same rule collection run when its SSE is interrupted", async () => {
+		vi.useFakeTimers();
+		const base = {id:"88888888-8888-4888-8888-888888888888",site_code:"CHD",source_set_fingerprint:"c".repeat(64),provider_id:"22222222-2222-4222-8222-222222222222",not_before:"2026-08-11T02:00:00Z",documents:[],created_at:"2026-08-11T02:00:00Z",updated_at:"2026-08-11T02:00:01Z"};
+		const analyzing = {...base,status:"analyzing"};
+		const ready = {...base,status:"ready",rule_revision_id:"99999999-9999-4999-8999-999999999999",completed_at:"2026-08-11T02:02:40Z"};
+		const interrupted = new ReadableStream<Uint8Array>({start(controller){controller.enqueue(new TextEncoder().encode(`event: progress\ndata: ${JSON.stringify({run:analyzing})}\n\n`));controller.error(new TypeError("network error"))}});
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(new Response(interrupted,{status:200,headers:{"Content-Type":"text/event-stream"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({run:analyzing}),{status:200,headers:{"Content-Type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({run:ready}),{status:200,headers:{"Content-Type":"application/json"}}));
+		vi.stubGlobal("fetch",fetchMock);
+		const observed:string[]=[];
+		const resultPromise=new ApiClient("ua_test-token-value-that-is-long-enough").streamRuleCollectionRun(base.id,run=>observed.push(run.status),new AbortController().signal);
+		await vi.runAllTimersAsync();
+		await resultPromise;
+		expect(observed).toEqual(["analyzing","ready"]);
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		expect(fetchMock.mock.calls.slice(1).every(([path])=>path===`/api/v2/site-rule-collection-runs/${base.id}`)).toBe(true);
+	});
 });

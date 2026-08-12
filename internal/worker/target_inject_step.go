@@ -53,6 +53,7 @@ type targetInjectBindings struct {
 	Control                 downloaderControl
 	AppliedDownloadLimit    int64
 	AppliedUploadLimit      int64
+	SeedboxUploadLimit      int64
 }
 
 type targetInjectReceipt struct {
@@ -77,15 +78,17 @@ type targetInjectRuleReceipt struct {
 }
 
 type targetInjectOptionsReceipt struct {
-	DownloaderName string   `json:"downloader_name"`
-	SavePath       string   `json:"save_path"`
-	Category       string   `json:"category"`
-	Tags           []string `json:"tags"`
-	ApplyLabels    bool     `json:"apply_labels"`
-	DownloadLimit  int64    `json:"download_limit_bytes_per_second"`
-	UploadLimit    int64    `json:"upload_limit_bytes_per_second"`
-	SkipChecking   bool     `json:"skip_checking"`
-	Paused         bool     `json:"paused"`
+	DownloaderName     string   `json:"downloader_name"`
+	SavePath           string   `json:"save_path"`
+	Category           string   `json:"category"`
+	Tags               []string `json:"tags"`
+	ApplyLabels        bool     `json:"apply_labels"`
+	DownloadLimit      int64    `json:"download_limit_bytes_per_second"`
+	UploadLimit        int64    `json:"upload_limit_bytes_per_second"`
+	NetworkClass       string   `json:"network_class"`
+	SeedboxUploadLimit int64    `json:"seedbox_upload_limit_bytes_per_second"`
+	SkipChecking       bool     `json:"skip_checking"`
+	Paused             bool     `json:"paused"`
 }
 
 func (executor targetInjectExecutor) Execute(ctx context.Context, execution Execution) (json.RawMessage, error) {
@@ -108,7 +111,8 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 	addOptions := qbittorrent.AddOptions{
 		SavePath: bindings.Control.SavePath, Category: bindings.Control.Category, Tags: append([]string(nil), bindings.Control.Tags...),
 		ApplyLabels:  bindings.Control.ApplyLabels,
-		SkipChecking: false, Paused: false, DownloadLimit: bindings.AppliedDownloadLimit, UploadLimit: bindings.AppliedUploadLimit,
+		SkipChecking: false, Paused: false, DownloadLimit: bindings.AppliedDownloadLimit,
+		UploadLimit: bindings.AppliedUploadLimit, SeedboxUploadLimit: bindings.SeedboxUploadLimit,
 	}
 	var snapshot struct {
 		ResumeState retorrentRuntimeControls `json:"resume_state"`
@@ -131,6 +135,9 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 			"target_torrent_sha256": bindings.TorrentArtifact.SHA256, "expected_hash": expectedHash,
 		})
 	}
+	if evidence.AppliedUploadLimit > 0 || bindings.AppliedUploadLimit == 0 || evidence.NetworkClass != "" {
+		bindings.AppliedUploadLimit = evidence.AppliedUploadLimit
+	}
 	if err := validateTargetInjectionEvidence(evidence, bindings); err != nil {
 		return nil, targetInjectionEvidenceBlock(err, bindings)
 	}
@@ -150,6 +157,7 @@ func (executor targetInjectExecutor) Execute(ctx context.Context, execution Exec
 			Category: bindings.Control.Category, Tags: append([]string(nil), bindings.Control.Tags...),
 			ApplyLabels:   labelsEnabled(bindings.Control),
 			DownloadLimit: bindings.AppliedDownloadLimit, UploadLimit: bindings.AppliedUploadLimit,
+			NetworkClass: evidence.NetworkClass, SeedboxUploadLimit: bindings.SeedboxUploadLimit,
 			SkipChecking: false, Paused: false,
 		},
 		Add: evidence, Recovered: recovered, InjectedAt: time.Now().UTC(),
@@ -330,16 +338,21 @@ func (executor targetInjectExecutor) inputs(snapshotBody json.RawMessage) (targe
 		control.Paused = &value
 	}
 	bindings.Control = control
-	policyDownload, err := rules.ParseByteRate(targetRule.Limits.Download)
-	if err != nil {
-		return targetInjectBindings{}, fmt.Errorf("parse target rule download limit: %w", err)
-	}
 	policyUpload, err := rules.ParseByteRate(targetRule.Limits.Upload)
 	if err != nil {
 		return targetInjectBindings{}, fmt.Errorf("parse target rule upload limit: %w", err)
 	}
+	seedboxUpload, err := rules.ParseByteRate(targetRule.Limits.SeedboxUpload)
+	if err != nil {
+		return targetInjectBindings{}, fmt.Errorf("parse target rule seedbox upload limit: %w", err)
+	}
+	policyDownload, err := rules.ParseByteRate(targetRule.Limits.Download)
+	if err != nil {
+		return targetInjectBindings{}, fmt.Errorf("parse target rule download limit: %w", err)
+	}
 	bindings.AppliedDownloadLimit = strictestLimit(control.DownloadLimit, policyDownload)
 	bindings.AppliedUploadLimit = strictestLimit(control.UploadLimit, policyUpload)
+	bindings.SeedboxUploadLimit = seedboxUpload
 	return bindings, nil
 }
 

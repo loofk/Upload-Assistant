@@ -142,16 +142,15 @@ export default function Candidates({client, onJobCreated, onError}: {
   const submittable = items.filter((item) => item.status === "candidate" && item.rank != null).length;
   const blocked = items.filter((item) => item.status === "blocked" || item.status === "expired").length;
   return <main className="candidate-pane">
-    <header className="candidate-header">
-      <div><p className="eyebrow">DAILY DISCOVERY</p><h1>每日候选</h1><p>每批候选都经过规则快照、可下载性、元数据和目标站查重；人工 obligation 作为风险保留到正式任务。</p></div>
-      <form onSubmit={(event) => void createScan(event)}>
+    <section className="candidate-header" aria-label="候选扫描">
+      <form className="candidate-toolbar" onSubmit={(event) => void createScan(event)}>
         <label>源站<input value={source} onChange={(event) => setSource(event.target.value.toUpperCase())} required /></label>
         <label>目标站<input value={target} onChange={(event) => setTarget(event.target.value.toUpperCase())} required /></label>
         <label>日期（可选）<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
         <button className="secondary" type="button" disabled={busy} onClick={() => void load()}>读取</button>
         <button className="primary" type="submit" disabled={busy}>创建 10 条候选任务</button>
       </form>
-    </header>
+    </section>
 
     <section className="candidate-metrics">
       <div><strong>{selected}</strong><span>Top-N 已选</span></div>
@@ -162,7 +161,7 @@ export default function Candidates({client, onJobCreated, onError}: {
 
     <section className="candidate-automation">
       <form onSubmit={(event) => void createSchedule(event)}>
-        <div><p className="eyebrow">DURABLE SCHEDULE</p><h2>每日自动扫描</h2><span>仅创建候选任务和已选通知，不会提交候选或上传种子。</span></div>
+        <div><h2>每日自动扫描</h2><span>只生成候选和通知，不会上传种子。</span></div>
         <label>名称<input value={scheduleName} maxLength={100} onChange={(event) => setScheduleName(event.target.value)} required /></label>
         <label>每天时间<input type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} required /></label>
         <label>时区<input value={timezone} onChange={(event) => setTimezone(event.target.value)} required /></label>

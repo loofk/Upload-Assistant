@@ -32,7 +32,7 @@ const (
 var hashPattern = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
 
 var requiredMethods = []string{
-	"core.add_torrent_file", "core.get_torrent_status", "core.set_torrent_options",
+	"core.add_torrent_file", "core.get_torrent_status", "core.get_torrents_status", "core.set_torrent_options",
 	"daemon.get_version", "daemon.get_method_list", "core.get_libtorrent_version",
 }
 
@@ -217,6 +217,28 @@ func (client *Client) Get(ctx context.Context, hash string) (qbittorrent.Torrent
 		return qbittorrent.Torrent{}, err
 	}
 	return normalizeTorrent(status)
+}
+
+func (client *Client) List(ctx context.Context) ([]qbittorrent.Torrent, error) {
+	var statuses map[string]torrentStatus
+	if err := client.call(ctx, "core.get_torrents_status", []any{map[string]any{}, statusFields}, &statuses); err != nil {
+		return nil, err
+	}
+	if len(statuses) > 100_000 {
+		return nil, fmt.Errorf("Deluge torrent count exceeds 100000")
+	}
+	result := make([]qbittorrent.Torrent, 0, len(statuses))
+	for hash, status := range statuses {
+		if status.Hash == "" {
+			status.Hash = hash
+		}
+		item, err := normalizeTorrent(status)
+		if err != nil {
+			return nil, fmt.Errorf("normalize Deluge torrent: %w", err)
+		}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func (client *Client) Files(ctx context.Context, hash string) ([]qbittorrent.TorrentFile, error) {

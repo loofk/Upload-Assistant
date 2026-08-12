@@ -22,6 +22,7 @@ var (
 	ErrNotFound         = errors.New("rule revision not found")
 	ErrConflict         = errors.New("rule revision conflict")
 	ErrSourceIncomplete = errors.New("rule source is incomplete")
+	ErrReviewIncomplete = errors.New("rule review is incomplete")
 )
 
 type Revision struct {
@@ -41,14 +42,17 @@ type Revision struct {
 }
 
 type SiteSummary struct {
-	ID                    string `json:"id"`
-	Code                  string `json:"code"`
-	Name                  string `json:"name"`
-	Adapter               string `json:"adapter"`
-	Enabled               bool   `json:"enabled"`
-	LiveValidationStatus  string `json:"live_validation_status"`
-	ActiveRuleRevisionID  string `json:"active_rule_revision_id,omitempty"`
-	ActiveRuleFingerprint string `json:"active_rule_fingerprint,omitempty"`
+	ID                    string   `json:"id"`
+	Code                  string   `json:"code"`
+	Name                  string   `json:"name"`
+	Adapter               string   `json:"adapter"`
+	Enabled               bool     `json:"enabled"`
+	LiveValidationStatus  string   `json:"live_validation_status"`
+	ActiveRuleRevisionID  string   `json:"active_rule_revision_id,omitempty"`
+	ActiveRuleFingerprint string   `json:"active_rule_fingerprint,omitempty"`
+	RuleRevisionCount     int      `json:"rule_revision_count"`
+	Aliases               []string `json:"aliases"`
+	Tags                  []string `json:"tags"`
 }
 
 type Store struct {
@@ -106,6 +110,28 @@ func (s *Store) Import(ctx context.Context, raw []byte, actor workflow.Actor) (R
 	}
 	existing, err := scanRevision(tx.QueryRow(ctx, revisionSelect+" WHERE sr.site_id = $1 AND sr.fingerprint = $2", siteID, fingerprint))
 	if err == nil {
+		if existing.Status == "retired" {
+			if _, err := tx.Exec(ctx, `
+				UPDATE site_rule_revisions revisions
+				SET status = 'retired'
+				WHERE revisions.site_id = $1
+				  AND revisions.status IN ('draft', 'approved')
+				  AND revisions.id <> $2
+				  AND revisions.id IS DISTINCT FROM (SELECT active_rule_revision_id FROM sites WHERE id = $1)`, siteID, existing.ID); err != nil {
+				return Revision{}, fmt.Errorf("retire superseded rule revisions: %w", err)
+			}
+			if _, err := tx.Exec(ctx, "UPDATE site_rule_revisions SET status = 'draft' WHERE id = $1", existing.ID); err != nil {
+				return Revision{}, fmt.Errorf("restore retired rule draft: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO audit_events(actor_type, actor_id, action, resource_type, resource_id, payload)
+				VALUES ($1, NULLIF($2, ''), 'site_rule.restore_draft', 'site_rule_revision', $3, $4)`,
+				actor.Type, actor.ID, existing.ID, mustJSON(map[string]any{"fingerprint": existing.Fingerprint}),
+			); err != nil {
+				return Revision{}, fmt.Errorf("audit restored rule draft: %w", err)
+			}
+			existing.Status = "draft"
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return Revision{}, fmt.Errorf("commit idempotent rule import: %w", err)
 		}
@@ -113,6 +139,14 @@ func (s *Store) Import(ctx context.Context, raw []byte, actor workflow.Actor) (R
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return Revision{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE site_rule_revisions revisions
+		SET status = 'retired'
+		WHERE revisions.site_id = $1
+		  AND revisions.status IN ('draft', 'approved')
+		  AND revisions.id IS DISTINCT FROM (SELECT active_rule_revision_id FROM sites WHERE id = $1)`, siteID); err != nil {
+		return Revision{}, fmt.Errorf("retire superseded rule revisions: %w", err)
 	}
 	var revisionNumber int
 	if err := tx.QueryRow(ctx, "SELECT COALESCE(max(revision), 0) + 1 FROM site_rule_revisions WHERE site_id = $1", siteID).Scan(&revisionNumber); err != nil {
@@ -188,6 +222,9 @@ func (s *Store) Approve(ctx context.Context, revisionID, expectedFingerprint, co
 	if !policy.Source.Complete {
 		return Revision{}, fmt.Errorf("%w: complete source text must be supplied before approval", ErrSourceIncomplete)
 	}
+	if err := ensureReviewComplete(ctx, tx, revision); err != nil {
+		return Revision{}, err
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO site_rule_approvals(rule_revision_id, reviewer_id, decision, comment, fingerprint)
 		VALUES ($1, $2, 'approved', NULLIF($3, ''), $4)`,
@@ -225,14 +262,26 @@ func (s *Store) Activate(ctx context.Context, revisionID string, actor workflow.
 	if revision.Status != "approved" {
 		return Revision{}, fmt.Errorf("%w: only approved rule revisions can be activated", ErrConflict)
 	}
+	var previousRevisionID, previousFingerprint string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(s.active_rule_revision_id::text, ''), COALESCE(active.fingerprint, '')
+		FROM sites s
+		LEFT JOIN site_rule_revisions active ON active.id = s.active_rule_revision_id
+		WHERE s.id = $1 FOR UPDATE OF s`, revision.SiteID).Scan(&previousRevisionID, &previousFingerprint); err != nil {
+		return Revision{}, fmt.Errorf("lock active rule baseline: %w", err)
+	}
 	if _, err := tx.Exec(ctx, "UPDATE sites SET active_rule_revision_id = $2, updated_at = now() WHERE id = $1", revision.SiteID, revision.ID); err != nil {
 		return Revision{}, fmt.Errorf("activate rule revision: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE site_rule_revisions SET status = 'retired' WHERE site_id = $1 AND status = 'approved' AND id <> $2", revision.SiteID, revision.ID); err != nil {
+		return Revision{}, fmt.Errorf("retire previous approved rule baselines: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events(actor_type, actor_id, action, resource_type, resource_id, payload)
 		VALUES ($1, NULLIF($2, ''), 'site_rule.activate', 'site', $3, $4)`,
 		actor.Type, actor.ID, revision.SiteID, mustJSON(map[string]any{
 			"rule_revision_id": revision.ID, "fingerprint": revision.Fingerprint,
+			"previous_rule_revision_id": previousRevisionID, "previous_fingerprint": previousFingerprint,
 		}),
 	); err != nil {
 		return Revision{}, fmt.Errorf("audit rule activation: %w", err)
@@ -240,6 +289,41 @@ func (s *Store) Activate(ctx context.Context, revisionID string, actor workflow.
 	if err := tx.Commit(ctx); err != nil {
 		return Revision{}, fmt.Errorf("commit rule activation: %w", err)
 	}
+	return revision, nil
+}
+
+// DiscardDraft removes a pending revision from the maintenance workspace while
+// retaining its immutable source, fingerprint, review evidence, and audit trail.
+func (s *Store) DiscardDraft(ctx context.Context, revisionID, expectedFingerprint string, actor workflow.Actor) (Revision, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Revision{}, fmt.Errorf("begin rule draft discard transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	revision, err := scanRevision(tx.QueryRow(ctx, revisionSelect+" WHERE sr.id = $1 FOR UPDATE", revisionID))
+	if err != nil {
+		return Revision{}, err
+	}
+	if revision.Status != "draft" {
+		return Revision{}, fmt.Errorf("%w: only a draft rule revision can be discarded", ErrConflict)
+	}
+	if revision.Fingerprint != expectedFingerprint {
+		return Revision{}, fmt.Errorf("%w: rule fingerprint does not match", ErrConflict)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE site_rule_revisions SET status = 'retired' WHERE id = $1", revision.ID); err != nil {
+		return Revision{}, fmt.Errorf("discard rule draft: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events(actor_type, actor_id, action, resource_type, resource_id, payload)
+		VALUES ($1, NULLIF($2, ''), 'site_rule.discard_draft', 'site_rule_revision', $3, $4)`,
+		actor.Type, actor.ID, revision.ID, mustJSON(map[string]any{"fingerprint": revision.Fingerprint, "retained_for_audit": true}),
+	); err != nil {
+		return Revision{}, fmt.Errorf("audit discarded rule draft: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Revision{}, fmt.Errorf("commit rule draft discard: %w", err)
+	}
+	revision.Status = "retired"
 	return revision, nil
 }
 
@@ -275,7 +359,10 @@ func (s *Store) List(ctx context.Context, siteCode string) ([]Revision, error) {
 func (s *Store) ListSites(ctx context.Context) ([]SiteSummary, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.id::text, s.code, s.name, s.adapter, s.enabled, s.live_validation_status,
-		       COALESCE(s.active_rule_revision_id::text, ''), COALESCE(sr.fingerprint, '')
+		       COALESCE(s.active_rule_revision_id::text, ''), COALESCE(sr.fingerprint, ''),
+		       (SELECT count(*)::int FROM site_rule_revisions revisions WHERE revisions.site_id = s.id AND revisions.status <> 'retired'),
+		       COALESCE((SELECT jsonb_agg(sa.alias ORDER BY sa.alias) FROM site_aliases sa WHERE sa.site_id = s.id), '[]'::jsonb),
+		       COALESCE((SELECT jsonb_agg(st.tag ORDER BY st.tag) FROM site_tags st WHERE st.site_id = s.id), '[]'::jsonb)
 		FROM sites s
 		LEFT JOIN site_rule_revisions sr ON sr.id = s.active_rule_revision_id
 		ORDER BY s.code`)
@@ -289,6 +376,8 @@ func (s *Store) ListSites(ctx context.Context) ([]SiteSummary, error) {
 		if err := rows.Scan(
 			&site.ID, &site.Code, &site.Name, &site.Adapter, &site.Enabled,
 			&site.LiveValidationStatus, &site.ActiveRuleRevisionID, &site.ActiveRuleFingerprint,
+			&site.RuleRevisionCount,
+			&site.Aliases, &site.Tags,
 		); err != nil {
 			return nil, fmt.Errorf("scan site: %w", err)
 		}

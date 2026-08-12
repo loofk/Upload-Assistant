@@ -14,6 +14,16 @@ import (
 
 type fakeSiteProvider struct{ runtime integrations.RuntimeSite }
 
+type permissiveAccessGate struct{}
+
+func (permissiveAccessGate) Acquire(_ context.Context, request sites.AccessRequest) (sites.AccessLease, error) {
+	return sites.AccessLease{ID: "test", SiteCode: request.SiteCode, Operation: request.Operation, Class: request.Class}, nil
+}
+
+func (permissiveAccessGate) Complete(context.Context, sites.AccessLease, sites.AccessResult) error {
+	return nil
+}
+
 func (provider fakeSiteProvider) GetRuntimeSite(_ context.Context, code string) (integrations.RuntimeSite, error) {
 	result := provider.runtime
 	result.Code = code
@@ -149,7 +159,7 @@ func newTestAdapter(t *testing.T, baseURL string, credentials map[string]string)
 	t.Helper()
 	adapter, err := New(Profile{SiteCode: "U2", BaseURL: baseURL}, fakeSiteProvider{
 		runtime: integrations.RuntimeSite{Adapter: "nexusphp", Credentials: credentials},
-	}, nil)
+	}, permissiveAccessGate{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -196,6 +196,9 @@ func (executor candidateScanExecutor) Execute(ctx context.Context, execution Exe
 	}
 	evidence, err := executor.dependencies.source.ListCandidates(ctx, input.Source, sites.CandidateScanRequest{Limit: input.ScanLimit, Page: input.Page})
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return nil, deferred
+		}
 		return nil, candidateProviderBlock(err, input.Source, "list_source_candidates")
 	}
 	artifact, err := persistCandidateArtifact(ctx, execution, executor.dependencies, "candidate_scan", "candidate-scan.json", evidence)
@@ -242,12 +245,36 @@ func (executor candidateEvaluateExecutor) Execute(ctx context.Context, execution
 	if err != nil {
 		return nil, invalidSnapshotBlock(err)
 	}
-	batch := candidateEvaluationBatch{Source: input.Source, Target: input.Target, Rules: rulesSnapshot, Evaluations: make([]candidateEvaluation, 0, len(scan.Items)), EvaluatedAt: candidateNow(executor.dependencies)}
-	for _, listed := range scan.Items {
+	batch, startIndex, err := loadCandidateCheckpoint(execution, executor.dependencies.artifacts, rulesSnapshot, input, len(scan.Items))
+	if err != nil {
+		return nil, invalidSnapshotBlock(err)
+	}
+	if batch.Evaluations == nil {
+		batch = candidateEvaluationBatch{Source: input.Source, Target: input.Target, Rules: rulesSnapshot, Evaluations: make([]candidateEvaluation, 0, len(scan.Items)), EvaluatedAt: candidateNow(executor.dependencies)}
+	}
+	for index := startIndex; index < len(scan.Items); index++ {
+		listed := scan.Items[index]
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		batch.Evaluations = append(batch.Evaluations, executor.evaluateOne(ctx, input, rulesSnapshot, listed, execution.Actor))
+		evaluation, err := executor.evaluateOne(ctx, input, rulesSnapshot, listed, execution.Actor)
+		if err != nil {
+			if deferred := deferredSiteAccess(err); deferred != nil {
+				checkpoint, persistErr := persistCandidateArtifact(ctx, execution, executor.dependencies, "candidate_evaluation_checkpoint", fmt.Sprintf("candidate-evaluation-checkpoint-%03d.json", index), batch)
+				if persistErr != nil {
+					return nil, fmt.Errorf("persist candidate evaluation checkpoint: %w", persistErr)
+				}
+				deferred.ResumeState = map[string]any{"candidate_evaluation": map[string]any{
+					"checkpoint": checkpoint, "next_index": index,
+					"source": input.Source, "target": input.Target,
+					"source_rule_fingerprint": rulesSnapshot.Source.Fingerprint,
+					"target_rule_fingerprint": rulesSnapshot.Target.Fingerprint,
+				}}
+				return nil, deferred
+			}
+			return nil, err
+		}
+		batch.Evaluations = append(batch.Evaluations, evaluation)
 	}
 	artifact, err := persistCandidateArtifact(ctx, execution, executor.dependencies, "candidate_evaluation", "candidate-evaluation.json", batch)
 	if err != nil {
@@ -265,13 +292,55 @@ func (executor candidateEvaluateExecutor) Execute(ctx context.Context, execution
 	}), nil
 }
 
+func loadCandidateCheckpoint(execution Execution, store ArtifactReader, rulesSnapshot candidateRuleSnapshot, input dailyCandidateInput, itemCount int) (candidateEvaluationBatch, int, error) {
+	var resume struct {
+		CandidateEvaluation struct {
+			Checkpoint            sites.TargetArtifactEvidence `json:"checkpoint"`
+			NextIndex             int                          `json:"next_index"`
+			Source                string                       `json:"source"`
+			Target                string                       `json:"target"`
+			SourceRuleFingerprint string                       `json:"source_rule_fingerprint"`
+			TargetRuleFingerprint string                       `json:"target_rule_fingerprint"`
+		} `json:"candidate_evaluation"`
+	}
+	if len(execution.Step.ResumeState) == 0 || string(execution.Step.ResumeState) == "{}" {
+		return candidateEvaluationBatch{}, 0, nil
+	}
+	if err := json.Unmarshal(execution.Step.ResumeState, &resume); err != nil {
+		return candidateEvaluationBatch{}, 0, fmt.Errorf("decode candidate evaluation resume state: %w", err)
+	}
+	checkpoint := resume.CandidateEvaluation
+	if checkpoint.Checkpoint.ArtifactID == "" {
+		return candidateEvaluationBatch{}, 0, nil
+	}
+	if checkpoint.Source != input.Source || checkpoint.Target != input.Target ||
+		checkpoint.SourceRuleFingerprint != rulesSnapshot.Source.Fingerprint || checkpoint.TargetRuleFingerprint != rulesSnapshot.Target.Fingerprint {
+		return candidateEvaluationBatch{}, 0, errors.New("candidate evaluation checkpoint bindings changed")
+	}
+	if checkpoint.NextIndex < 0 || checkpoint.NextIndex > itemCount {
+		return candidateEvaluationBatch{}, 0, errors.New("candidate evaluation checkpoint index is invalid")
+	}
+	body, err := readTargetArtifact(store, checkpoint.Checkpoint, maxCandidateArtifactBytes)
+	if err != nil {
+		return candidateEvaluationBatch{}, 0, fmt.Errorf("read candidate evaluation checkpoint: %w", err)
+	}
+	var batch candidateEvaluationBatch
+	if err := json.Unmarshal(body, &batch); err != nil {
+		return candidateEvaluationBatch{}, 0, fmt.Errorf("decode candidate evaluation checkpoint: %w", err)
+	}
+	if len(batch.Evaluations) != checkpoint.NextIndex || batch.Source != input.Source || batch.Target != input.Target {
+		return candidateEvaluationBatch{}, 0, errors.New("candidate evaluation checkpoint contents do not match resume state")
+	}
+	return batch, checkpoint.NextIndex, nil
+}
+
 func (executor candidateEvaluateExecutor) evaluateOne(
 	ctx context.Context,
 	input dailyCandidateInput,
 	ruleSnapshot candidateRuleSnapshot,
 	listed sites.SourceCandidate,
 	actor workflow.Actor,
-) candidateEvaluation {
+) (candidateEvaluation, error) {
 	result := candidateEvaluation{Source: listed, RecommendationReasons: []string{}, Risks: []Blocker{}, Blockers: []Blocker{}, NextActions: []NextAction{}}
 	if strings.TrimSpace(listed.DetailsURL) == "" {
 		result.Blockers = append(result.Blockers, Blocker{Code: "candidate_details_url_unavailable", SiteCode: input.Source, Message: "source candidate details URL is unavailable"})
@@ -304,11 +373,14 @@ func (executor candidateEvaluateExecutor) evaluateOne(
 
 	metadata, err := executor.dependencies.source.Inspect(ctx, sites.SourceReference{Tracker: input.Source, TorrentID: listed.TorrentID})
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return candidateEvaluation{}, deferred
+		}
 		code, message, _ := sites.ErrorDetails(err)
 		result.Blockers = append(result.Blockers, Blocker{Code: code, SiteCode: input.Source, Message: message})
 		result.NextActions = append(result.NextActions, NextAction{Action: "inspect_source_candidate", Parameters: map[string]any{"source_url": listed.DetailsURL}})
 		result.Score -= 30
-		return finalizeCandidateEvaluation(result)
+		return finalizeCandidateEvaluation(result), nil
 	}
 	result.Metadata = metadata
 	if strings.TrimSpace(result.Source.Title) == "" {
@@ -326,14 +398,17 @@ func (executor candidateEvaluateExecutor) evaluateOne(
 	if metadata.IMDbID == "" {
 		result.Blockers = append(result.Blockers, Blocker{Code: "target_duplicate_identity_required", SiteCode: input.Target, Message: "target duplicate check requires an IMDb id"})
 		result.NextActions = append(result.NextActions, NextAction{Action: "resolve_candidate_metadata", Parameters: map[string]any{"source_url": listed.DetailsURL}})
-		return finalizeCandidateEvaluation(result)
+		return finalizeCandidateEvaluation(result), nil
 	}
 	duplicate, err := executor.dependencies.duplicates.DuplicateCheck(ctx, input.Target, sites.TargetDuplicateQuery{IMDbID: metadata.IMDbID}, actor)
 	if err != nil {
+		if deferred := deferredSiteAccess(err); deferred != nil {
+			return candidateEvaluation{}, deferred
+		}
 		code, message, _ := sites.ErrorDetails(err)
 		result.Blockers = append(result.Blockers, Blocker{Code: code, SiteCode: input.Target, Message: message})
 		result.NextActions = append(result.NextActions, NextAction{Action: "retry_target_duplicate_check", Parameters: map[string]any{"site_code": input.Target, "imdb_id": metadata.IMDbID}})
-		return finalizeCandidateEvaluation(result)
+		return finalizeCandidateEvaluation(result), nil
 	}
 	if len(duplicate.Candidates) > 10 {
 		duplicate.Candidates = append([]sites.TargetDuplicateCandidate(nil), duplicate.Candidates[:10]...)
@@ -347,7 +422,7 @@ func (executor candidateEvaluateExecutor) evaluateOne(
 		result.Score += 25
 		result.RecommendationReasons = append(result.RecommendationReasons, "target_duplicate_clear")
 	}
-	return finalizeCandidateEvaluation(result)
+	return finalizeCandidateEvaluation(result), nil
 }
 
 func finalizeCandidateEvaluation(result candidateEvaluation) candidateEvaluation {

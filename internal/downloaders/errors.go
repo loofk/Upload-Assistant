@@ -14,6 +14,15 @@ type partialAddError interface {
 	PartialHash() string
 }
 
+type postAddVerificationError struct {
+	hash string
+	err  error
+}
+
+func (e *postAddVerificationError) Error() string       { return e.err.Error() }
+func (e *postAddVerificationError) Unwrap() error       { return e.err }
+func (e *postAddVerificationError) PartialHash() string { return e.hash }
+
 // PartialAddHash returns the exact remotely observed hash when a torrent was
 // added but still needs reconciliation. The boolean is false for ordinary
 // request failures where no remote mutation is known to have happened.

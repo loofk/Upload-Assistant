@@ -3,14 +3,23 @@ package metadataproviders
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/loofk/upload-assistant/v2/internal/integrations"
 	"github.com/loofk/upload-assistant/v2/internal/workflow"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
 
 type fakeStore struct {
 	runtime integrations.RuntimeMetadataProvider
@@ -121,5 +130,86 @@ func TestValidationRequiresTypedTMDbID(t *testing.T) {
 	_, err := NewManager(&fakeStore{}, nil).Resolve(context.Background(), "provider", ResolveRequest{TMDbID: "42"}, workflow.Actor{})
 	if err == nil || !strings.Contains(err.Error(), "tmdb_type") {
 		t.Fatalf("Resolve() error = %v", err)
+	}
+}
+
+func TestProbeUsesStableReferenceAndReturnsOnlyBoundedEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/3/movie/550/external_ids" {
+			t.Fatalf("probe path = %q", request.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"imdb_id":"tt0137523"}`))
+	}))
+	defer server.Close()
+	store := &fakeStore{runtime: integrations.RuntimeMetadataProvider{
+		MetadataProvider:    integrations.MetadataProvider{Name: "tmdb-main", Adapter: "tmdb", Enabled: true},
+		EndpointConfig:      integrations.EndpointConfig{Endpoint: server.URL, TimeoutSeconds: 2},
+		ConfigurationSHA256: strings.Repeat("c", 64), Credentials: map[string]string{"api_key": "fixture"},
+	}}
+	result, err := NewManager(store, server.Client()).Probe(context.Background(), "tmdb-main", workflow.Actor{Type: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ready" || !result.Matched || result.QuerySHA256 == "" || len(result.Calls) != 1 {
+		t.Fatalf("probe = %#v", result)
+	}
+}
+
+func TestPTGenWorkersDevTransportFailureIsActionableAndRedacted(t *testing.T) {
+	const secret = "ptgen-secret-never-returned"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, &url.Error{
+			Op:  "Post",
+			URL: request.URL.String(),
+			Err: &net.DNSError{Err: "fixture lookup failure", Name: request.URL.Hostname()},
+		}
+	})}
+	store := &fakeStore{runtime: integrations.RuntimeMetadataProvider{
+		MetadataProvider:    integrations.MetadataProvider{Name: "ptgen-main", Adapter: "ptgen", Enabled: true},
+		EndpointConfig:      integrations.EndpointConfig{Endpoint: "https://fixture.workers.dev/api", TimeoutSeconds: 2},
+		ConfigurationSHA256: strings.Repeat("d", 64), Credentials: map[string]string{"api_key": secret},
+	}}
+	_, err := NewManager(store, client).Resolve(context.Background(), "ptgen-main", ResolveRequest{IMDbID: "tt0111161"}, workflow.Actor{Type: "test"})
+	if ErrorCode(err) != "provider_workers_dev_unreachable" || strings.Contains(SafeErrorDetail(err), secret) || strings.Contains(SafeErrorDetail(err), "?key=") {
+		t.Fatalf("error classification/detail = %q / %q", ErrorCode(err), SafeErrorDetail(err))
+	}
+	if len(store.health) != 1 || store.health[0]["error_code"] != "provider_workers_dev_unreachable" || strings.Contains(store.health[0]["error_detail"].(string), secret) {
+		t.Fatalf("health evidence = %#v", store.health)
+	}
+}
+
+func TestPTGenHTTPAuthenticationFailureIsClassifiedWithoutSecret(t *testing.T) {
+	const secret = "ptgen-secret-never-returned"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("key") != secret {
+			t.Fatal("PTGen key was not sent to the provider")
+		}
+		http.Error(w, "denied", http.StatusForbidden)
+	}))
+	defer server.Close()
+	store := &fakeStore{runtime: integrations.RuntimeMetadataProvider{
+		MetadataProvider:    integrations.MetadataProvider{Name: "ptgen-main", Adapter: "ptgen", Enabled: true},
+		EndpointConfig:      integrations.EndpointConfig{Endpoint: server.URL + "/api", TimeoutSeconds: 2},
+		ConfigurationSHA256: strings.Repeat("e", 64), Credentials: map[string]string{"api_key": secret},
+	}}
+	_, err := NewManager(store, server.Client()).Resolve(context.Background(), "ptgen-main", ResolveRequest{IMDbID: "tt0111161"}, workflow.Actor{Type: "test"})
+	if ErrorCode(err) != "provider_authentication_failed" || strings.Contains(SafeErrorDetail(err), secret) {
+		t.Fatalf("error classification/detail = %q / %q", ErrorCode(err), SafeErrorDetail(err))
+	}
+}
+
+func TestPTGenSuccessWithoutDescriptionFailsProbeContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"format":""}`))
+	}))
+	defer server.Close()
+	store := &fakeStore{runtime: integrations.RuntimeMetadataProvider{
+		MetadataProvider:    integrations.MetadataProvider{Name: "ptgen-main", Adapter: "ptgen", Enabled: true},
+		EndpointConfig:      integrations.EndpointConfig{Endpoint: server.URL + "/api", TimeoutSeconds: 2},
+		ConfigurationSHA256: strings.Repeat("f", 64),
+	}}
+	_, err := NewManager(store, server.Client()).Probe(context.Background(), "ptgen-main", workflow.Actor{Type: "test"})
+	if !errors.As(err, new(*ProviderError)) || ErrorCode(err) != "provider_output_missing" {
+		t.Fatalf("probe error = %T %v (%s)", err, err, ErrorCode(err))
 	}
 }

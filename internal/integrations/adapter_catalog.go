@@ -59,25 +59,25 @@ func AdapterCapabilities() AdapterCatalog {
 var adapterCatalog = []AdapterCapability{
 	{
 		ID: "downloader/deluge", Kind: "downloader", Adapter: "deluge", DisplayName: "Deluge Web",
-		RuntimeSupported: true, Operations: []string{"add_torrent", "inspect", "list_files", "probe", "set_limits", "wait_complete"},
+		RuntimeSupported: true, Operations: []string{"add_torrent", "inspect", "list_files", "list_torrents", "probe", "set_limits", "wait_complete"},
 		CredentialFields: []string{"password"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"Web JSON-RPC only; the Web session must already be connected to a daemon", "category, tags, skip_checking, and v2-only torrents are unsupported", "workflows must explicitly set apply_labels=false"},
 	},
 	{
 		ID: "downloader/qbittorrent", Kind: "downloader", Adapter: "qbittorrent", DisplayName: "qBittorrent Web API",
-		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "probe", "set_limits", "skip_checking", "tags", "wait_complete"},
+		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "list_torrents", "probe", "set_limits", "skip_checking", "tags", "wait_complete"},
 		CredentialFields: []string{"api_key", "password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"username and password must be supplied together when password authentication is used"},
 	},
 	{
 		ID: "downloader/rtorrent", Kind: "downloader", Adapter: "rtorrent", DisplayName: "rTorrent XML-RPC",
-		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "probe", "set_limits", "tags", "wait_complete"},
+		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "list_torrents", "probe", "set_limits", "tags", "wait_complete"},
 		CredentialFields: []string{"password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"category and tags share the custom1 label", "named throttles are read back and must report an effective non-zero limit", "v2-only torrents and skip_checking are unsupported"},
 	},
 	{
 		ID: "downloader/transmission", Kind: "downloader", Adapter: "transmission", DisplayName: "Transmission RPC",
-		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "probe", "set_limits", "tags", "wait_complete"},
+		RuntimeSupported: true, Operations: []string{"add_torrent", "category", "inspect", "list_files", "list_torrents", "probe", "set_limits", "tags", "wait_complete"},
 		CredentialFields: []string{"password", "username"}, SafetyGates: []string{"adapter_capability", "add_intent_audit", "add_outcome_reconciliation", "limit_intent_audit", "limit_outcome_reconciliation", "path_mapping", "rule_speed_limits", "verified_remote_receipt"},
 		Constraints: []string{"skip_checking is unsupported", "category and tags are represented with Transmission labels"},
 	},
@@ -86,6 +86,18 @@ var adapterCatalog = []AdapterCapability{
 		RuntimeSupported: true, Operations: []string{"snapshot_configuration", "upload_image"}, CredentialFields: []string{"api_key"},
 		SafetyGates: []string{"bounded_image", "configuration_snapshot", "source_sha256", "upload_outcome_reconciliation", "verified_https_result"},
 		Constraints: []string{"PNG, JPEG, or WebP up to 32 MiB", "redirects are disabled and returned image hosts are allowlisted"},
+	},
+	{
+		ID: "image_host/imgbox", Kind: "image_host", Adapter: "imgbox", DisplayName: "Imgbox",
+		RuntimeSupported: true, Operations: []string{"snapshot_configuration", "upload_image"}, CredentialFields: []string{},
+		SafetyGates: []string{"bounded_image", "configuration_snapshot", "csrf_session", "ephemeral_upload_token", "source_sha256", "upload_outcome_reconciliation", "verified_https_result"},
+		Constraints: []string{"no API key required; uses Imgbox's CSRF and ephemeral-token web upload contract", "PNG or JPEG up to 10 MiB", "redirects are disabled and all returned URLs must use imgbox.com"},
+	},
+	{
+		ID: "image_host/pixhost", Kind: "image_host", Adapter: "pixhost", DisplayName: "Pixhost",
+		RuntimeSupported: true, Operations: []string{"snapshot_configuration", "upload_image"}, CredentialFields: []string{},
+		SafetyGates: []string{"bounded_image", "configuration_snapshot", "source_sha256", "upload_outcome_reconciliation", "verified_https_result"},
+		Constraints: []string{"API v2; no API key required", "PNG, JPEG, or WebP up to 10 MiB", "redirects are disabled and returned Pixhost URLs are structurally validated"},
 	},
 	{
 		ID: "image_host/ptpimg", Kind: "image_host", Adapter: "ptpimg", DisplayName: "PTPimg",
@@ -131,9 +143,27 @@ var adapterCatalog = []AdapterCapability{
 	},
 	{
 		ID: "notification_channel/discord_webhook", Kind: "notification_channel", Adapter: "discord_webhook", DisplayName: "Discord Incoming Webhook",
-		RuntimeSupported: true, Operations: []string{"deliver_candidate_summary", "reconcile_unknown_delivery", "retry_known_rejection"}, CredentialFields: []string{"webhook_url"},
-		SafetyGates: []string{"delivery_intent_audit", "explicit_schedule_opt_in", "mentions_disabled", "outcome_reconciliation", "payload_hash", "remote_receipt_hash"},
-		Constraints: []string{"candidate discovery notifications only; delivery never submits or uploads a torrent", "redirects are disabled and responses are bounded", "response loss and expired sending leases never auto-retry"},
+		RuntimeSupported: true, Operations: []string{"deliver_system_event", "deliver_candidate_summary", "reconcile_unknown_delivery", "retry_known_rejection"}, CredentialFields: []string{"webhook_url"},
+		SafetyGates: []string{"delivery_intent_audit", "event_subscription", "mentions_disabled", "outcome_reconciliation", "payload_hash", "remote_receipt_hash"},
+		Constraints: []string{"notifications never approve rules or upload torrents", "redirects are disabled and responses are bounded", "response loss and expired sending leases never auto-retry"},
+	},
+	{
+		ID: "notification_channel/telegram_bot", Kind: "notification_channel", Adapter: "telegram_bot", DisplayName: "Telegram Bot",
+		RuntimeSupported: true, Operations: []string{"deliver_system_event", "deliver_candidate_summary", "reconcile_unknown_delivery"}, CredentialFields: []string{"bot_token", "chat_id"},
+		SafetyGates: []string{"encrypted_credentials", "event_subscription", "outcome_reconciliation", "payload_hash", "remote_receipt_hash"},
+		Constraints: []string{"text messages only", "redirects are disabled and responses are bounded"},
+	},
+	{
+		ID: "notification_channel/wecom_bot", Kind: "notification_channel", Adapter: "wecom_bot", DisplayName: "企业微信群机器人",
+		RuntimeSupported: true, Operations: []string{"deliver_system_event", "deliver_candidate_summary", "reconcile_unknown_delivery"}, CredentialFields: []string{"webhook_url"},
+		SafetyGates: []string{"encrypted_credentials", "event_subscription", "outcome_reconciliation", "payload_hash", "remote_receipt_hash"},
+		Constraints: []string{"text messages only", "redirects are disabled and responses are bounded"},
+	},
+	{
+		ID: "notification_channel/feishu_bot", Kind: "notification_channel", Adapter: "feishu_bot", DisplayName: "飞书群机器人",
+		RuntimeSupported: true, Operations: []string{"deliver_system_event", "deliver_candidate_summary", "reconcile_unknown_delivery"}, CredentialFields: []string{"webhook_url"},
+		SafetyGates: []string{"encrypted_credentials", "event_subscription", "outcome_reconciliation", "payload_hash", "remote_receipt_hash"},
+		Constraints: []string{"text messages only", "redirects are disabled and responses are bounded"},
 	},
 	{
 		ID: "screenshot_engine/ffmpeg", Kind: "screenshot_engine", Adapter: "ffmpeg", DisplayName: "FFmpeg",
